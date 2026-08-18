@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AegisOS EDU - Smart Launcher & Academic Advisor</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #181825;
+      color: #cdd6f4;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+
+    .container {
+      width: 420px;
+      background: #1e1e2e;
+      padding: 22px;
+      border-radius: 14px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      border: 1px solid #313244;
+    }
+
+    /* Login Styles */
+    #login-screen h2 { color: #89b4fa; text-align: center; margin-bottom: 5px; }
+    #login-screen p.sub { text-align: center; color: #a6adc8; font-size: 12px; margin-bottom: 20px; }
+    input {
+      width: 100%; padding: 10px; margin: 6px 0; border: 1px solid #45475a;
+      border-radius: 8px; background: #11111b; color: #fff; box-sizing: border-box; outline: none;
+    }
+    button.btn-primary {
+      width: 100%; padding: 11px; margin-top: 12px; background: #89b4fa; border: none;
+      color: #11111b; font-weight: bold; border-radius: 8px; cursor: pointer; font-size: 14px;
+    }
+    button.btn-primary:hover { background: #b4befe; }
+
+    /* Dashboard Styles */
+    #dashboard-screen { display: none; }
+    .profile-card {
+      background: #313244; padding: 12px 15px; border-radius: 10px; margin-bottom: 12px;
+    }
+    .profile-card h3 { margin: 0 0 6px 0; color: #a6e3a1; font-size: 16px; }
+    .profile-info {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: #bac2de;
+    }
+    .profile-info span { font-weight: bold; color: #cdd6f4; }
+
+    .section-title {
+      font-size: 12px; font-weight: bold; color: #89b4fa; margin: 10px 0 6px 0;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+
+    .courses-list { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .course-badge {
+      background: #181825; padding: 6px 10px; border-radius: 6px;
+      border: 1px solid #45475a; font-size: 11px; color: #89b4fa;
+    }
+
+    /* AI Advisor Chat Box */
+    .chat-container {
+      background: #11111b; border: 1px solid #313244; border-radius: 10px; padding: 10px;
+    }
+    .chat-messages {
+      height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;
+    }
+    .msg { max-width: 85%; padding: 8px 11px; border-radius: 8px; font-size: 11px; line-height: 1.4; }
+    .msg.bot { background: #2b2b3d; color: #cdd6f4; align-self: flex-start; border-left: 3px solid #89b4fa; }
+    .msg.user { background: #89b4fa; color: #11111b; align-self: flex-end; font-weight: 500; }
+
+    .chat-input-row { display: flex; gap: 6px; }
+    .chat-input-row input { margin: 0; padding: 8px; font-size: 11px; }
+    .chat-input-row button {
+      padding: 8px 14px; background: #a6e3a1; border: none; color: #11111b;
+      font-weight: bold; border-radius: 6px; cursor: pointer; font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    
+    <!-- LOGIN SCREEN -->
+    <div id="login-screen">
+      <h2>AEGIS OS EDU</h2>
+      <p class="sub">Smart Student Portal</p>
+      
+      <label style="font-size: 11px; color: #a6adc8;">Student Username / ID</label>
+      <input type="text" id="username" value="Yasmin" placeholder="Enter ID (e.g. Yasmin or Student2)">
+      
+      <label style="font-size: 11px; color: #a6adc8;">Password</label>
+      <input type="password" id="password" value="******">
+      
+      <button class="btn-primary" onclick="handleLogin()">LOGIN TO AEGIS OS</button>
+    </div>
+
+    <!-- DASHBOARD & AI ADVISOR SCREEN -->
+    <div id="dashboard-screen">
+      
+      <!-- Student Dynamic Profile -->
+      <div class="profile-card">
+        <h3 id="student-name">Welcome Student</h3>
+        <div class="profile-info">
+          <div>Dept: <span id="student-dept">-</span></div>
+          <div>Year: <span id="student-year">-</span></div>
+          <div>GPA: <span id="student-gpa">-</span></div>
+          <div>Status: <span style="color:#a6e3a1">Active</span></div>
+        </div>
+      </div>
+
+      <!-- Enrolled Courses -->
+      <div class="section-title">Enrolled Courses</div>
+      <div class="courses-list" id="courses-badges"></div>
+
+      <!-- Academic AI Advisor Widget -->
+      <div class="section-title">Academic Advisor AI 🤖</div>
+      <div class="chat-container">
+        <div class="chat-messages" id="chat-box">
+          <div class="msg bot">Hello! I am your Aegis Academic Advisor. How can I assist you with your courses or study roadmap today?</div>
+        </div>
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" placeholder="Ask your advisor (e.g., How to improve GPA?)" onkeypress="if(event.key==='Enter') sendMessage()">
+          <button onclick="sendMessage()">Send</button>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    // 1. Database for Students
+    const studentsDB = {
+      "yasmin": {
+        name: "Yasmin Wael",
+        dept: "Computer Science",
+        year: "Year 3",
+        gpa: "3.85",
+        courses: ["Artificial Intelligence", "Operating Systems", "Numerical Analysis", "Software Eng."]
+      },
+      "student2": {
+        name: "Ziad Ahmed",
+        dept: "Computer Science",
+        year: "Year 2",
+        gpa: "3.40",
+        courses: ["Data Structures", "C++ OOP", "Discrete Math"]
+      }
+    };
+
+    let currentStudent = null;
+
+    function handleLogin() {
+      const userInput = document.getElementById('username').value.trim().toLowerCase();
+      
+      // Get student data or fallback to default
+      currentStudent = studentsDB[userInput] || {
+        name: document.getElementById('username').value,
+        dept: "Computer Science",
+        year: "Year 3",
+        gpa: "3.64",
+        courses: ["Artificial Intelligence", "Web Development", "Algorithms"]
+      };
+
+      // Populate UI with Student Data
+      document.getElementById('student-name').innerText = "Welcome, " + currentStudent.name;
+      document.getElementById('student-dept').innerText = currentStudent.dept;
+      document.getElementById('student-year').innerText = currentStudent.year;
+      document.getElementById('student-gpa').innerText = currentStudent.gpa;
+
+      // Render Courses Badges
+      const coursesDiv = document.getElementById('courses-badges');
+      coursesDiv.innerHTML = '';
+      currentStudent.courses.forEach(c => {
+        coursesDiv.innerHTML += `<div class="course-badge">📘 ${c}</div>`;
+      });
+
+      // Trigger Python Script in background
+      ipcRenderer.send('trigger-workspace', currentStudent.name);
+
+      // Switch Screen
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('dashboard-screen').style.display = 'block';
+    }
+
+    // 2. Academic AI Advisor Logic
+    function sendMessage() {
+      const input = document.getElementById('chat-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const chatBox = document.getElementById('chat-box');
+
+      // Add User Message
+      chatBox.innerHTML += `<div class="msg user">${text}</div>`;
+      input.value = '';
+      chatBox.scrollTop = chatBox.scrollHeight;
+
+      // Generate AI Response based on Student Data
+      setTimeout(() => {
+        let reply = generateAdvisorReply(text.toLowerCase());
+        chatBox.innerHTML += `<div class="msg bot">${reply}</div>`;
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }, 600);
+    }
+
+    function generateAdvisorReply(msg) {
+      if (msg.includes('gpa') || msg.includes('grade')) {
+        return `Your current GPA is ${currentStudent.gpa}. To boost it further, focus on getting high marks in practical labs for ${currentStudent.courses[0]}.`;
+      } else if (msg.includes('course') || msg.includes('subject') || msg.includes('مواد')) {
+        return `You are enrolled in ${currentStudent.courses.length} courses: ${currentStudent.courses.join(', ')}. All your course workspaces are initialized!`;
+      } else if (msg.includes('hi') || msg.includes('hello') || msg.includes('سلام')) {
+        return `Hi ${currentStudent.name}! Ready to tackle your ${currentStudent.year} coursework?`;
+      } else {
+        return `I have updated your Aegis Workspace for ${currentStudent.name}. I recommend starting with your assignment in ${currentStudent.courses[0]}!`;
+      }
+    }
+  </script>
+
+</body>
+</html>
