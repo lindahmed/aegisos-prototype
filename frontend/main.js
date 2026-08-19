@@ -1,46 +1,56 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
-const { exec } = require('child_process');
+const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
 
-let mainWindow;
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 450,
-    height: 650,
-    resizable: false,
-    title: "AegisOS EDU - Student Launcher",
+  const mainWindow = new BrowserWindow({
+    width: 1120,
+    height: 760,
+    minWidth: 900,
+    minHeight: 640,
+    backgroundColor: '#08111f',
+    title: 'AegisOS EDU',
+    icon: path.join(__dirname, '..', 'desktop', 'assets', 'aegisos-logo.svg'),
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
   });
 
+  Menu.setApplicationMenu(null);
   mainWindow.loadFile('index.html');
+
+  if (process.env.AEGIS_ELECTRON_SMOKE === '1') {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      try {
+        const isReady = await mainWindow.webContents.executeJavaScript(
+          "Boolean(document.querySelector('#login-form') && window.aegis?.apiBaseUrl)",
+        );
+        app.exit(isReady ? 0 : 1);
+      } catch (error) {
+        console.error('Electron smoke check failed:', error);
+        app.exit(1);
+      }
+    });
+  }
 }
 
-// الاستماع لضغط زرار الدخول من الـ HTML
-ipcMain.on('trigger-workspace', (event, studentId) => {
-  console.log(`[Aegis UI] Executing workspace for student: ${studentId}`);
 
-  // مسار ملف البايثون الخاص بـ Task 3
-  const pythonScriptPath = `C:\\Users\\DELL\\OneDrive\\Desktop\\aegis person 2\\workspace_manager.py`;
+app.whenReady().then(() => {
+  createWindow();
 
-  // تشغيل ملف البايثون تلقائياً
-  exec(`python "${pythonScriptPath}"`, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`Error: ${error}`);
-      event.reply('workspace-response', { success: false, message: 'Failed to run python script' });
-      return;
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
     }
-    
-    // إرسال النتيجة للشاشة
-    event.reply('workspace-response', { success: true, output: stdout });
   });
 });
 
-app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
 });

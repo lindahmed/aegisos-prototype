@@ -3,3 +3,9 @@ venv/
 .venv/
 __pycache__/
 .env
+.pytest_cache/
+*.py[cod]
+database/aegisos.db
+workspace/students/
+*.log
+.tmp/

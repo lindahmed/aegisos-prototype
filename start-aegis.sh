@@ -1,5 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-xfce4-terminal \
-    --title="AegisOS EDU" \
-    --command="bash -c 'echo AegisOS EDU; echo; echo Desktop launcher is working.; echo; exec bash'"
+set -Eeuo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$PROJECT_ROOT/desktop/start-aegis.sh" "$@"

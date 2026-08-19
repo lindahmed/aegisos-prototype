@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=AegisOS EDU
+Comment=Open the personalized AegisOS student workspace
+Exec=__START_SCRIPT__
+Icon=__ICON__
+Terminal=false
+Categories=Education;Development;
+StartupNotify=true
+X-GNOME-Autostart-enabled=true
