@@ -11,8 +11,20 @@ const courseList = document.querySelector('#course-list');
 const createWorkspaceButton = document.querySelector('#create-workspace-button');
 const openVsCodeButton = document.querySelector('#open-vscode-button');
 
+const workspaceTab = document.querySelector('#workspace-tab');
+const advisorTab = document.querySelector('#advisor-tab');
+const workspacePanel = document.querySelector('#workspace-panel');
+const advisorPanel = document.querySelector('#advisor-panel');
+const advisorForm = document.querySelector('#advisor-form');
+const advisorInput = document.querySelector('#advisor-input');
+const advisorSendButton = document.querySelector('#advisor-send-button');
+const advisorMessages = document.querySelector('#advisor-messages');
+const advisorStatus = document.querySelector('#advisor-status');
+const advisorIntent = document.querySelector('#advisor-intent');
+
 let currentStudent = null;
 let selectedCourse = null;
+let advisorHistory = [];
 
 
 async function apiRequest(path, options = {}) {
@@ -47,12 +59,63 @@ function setBusy(isBusy) {
 }
 
 
+function setAdvisorBusy(isBusy) {
+  advisorInput.disabled = isBusy;
+  advisorSendButton.disabled = isBusy;
+}
+
+
 function selectCourse(course) {
   selectedCourse = course;
   for (const button of courseList.querySelectorAll('.course-button')) {
     button.setAttribute('aria-pressed', String(button.dataset.course === course));
   }
   setMessage(actionStatus, `Selected: ${course}`);
+}
+
+
+function showDashboardSection(section) {
+  const showAdvisor = section === 'advisor';
+  workspacePanel.hidden = showAdvisor;
+  advisorPanel.hidden = !showAdvisor;
+  workspaceTab.setAttribute('aria-pressed', String(!showAdvisor));
+  advisorTab.setAttribute('aria-pressed', String(showAdvisor));
+
+  if (showAdvisor) {
+    advisorInput.focus();
+  }
+}
+
+
+function addAdvisorMessage(role, content) {
+  const message = document.createElement('div');
+  message.className = `chat-message ${role}`;
+
+  const label = document.createElement('span');
+  label.className = 'chat-role';
+  label.textContent = role === 'user' ? 'You' : 'Advisor AI';
+
+  const body = document.createElement('p');
+  body.textContent = content;
+
+  message.append(label, body);
+  advisorMessages.append(message);
+  advisorMessages.scrollTop = advisorMessages.scrollHeight;
+}
+
+
+function resetAdvisor() {
+  advisorHistory = [];
+  advisorMessages.replaceChildren();
+  advisorIntent.textContent = 'Ready';
+  setMessage(advisorStatus, '');
+
+  if (currentStudent) {
+    addAdvisorMessage(
+      'assistant',
+      `Hi ${currentStudent.name}. Ask me about academic progress, semester planning, career guidance, or a what-if scenario.`,
+    );
+  }
 }
 
 
@@ -78,7 +141,15 @@ function renderStudent(student) {
 
   loginView.hidden = true;
   dashboardView.hidden = false;
-  selectCourse(student.courses[0]);
+  showDashboardSection('workspace');
+  resetAdvisor();
+
+  if (student.courses.length > 0) {
+    selectCourse(student.courses[0]);
+  } else {
+    selectedCourse = null;
+    setMessage(actionStatus, 'No enrolled courses are available.');
+  }
 }
 
 
@@ -103,6 +174,7 @@ loginForm.addEventListener('submit', async (event) => {
 
 async function runWorkspaceAction(path, pendingText) {
   if (!currentStudent || !selectedCourse) return;
+
   setBusy(true);
   setMessage(actionStatus, pendingText);
   try {
@@ -129,15 +201,65 @@ createWorkspaceButton.addEventListener('click', () => {
   runWorkspaceAction('/workspace/create', 'Preparing the course workspace...');
 });
 
+
 openVsCodeButton.addEventListener('click', () => {
   runWorkspaceAction('/workspace/vscode', 'Opening the course in VS Code...');
 });
 
+
+workspaceTab.addEventListener('click', () => showDashboardSection('workspace'));
+advisorTab.addEventListener('click', () => showDashboardSection('advisor'));
+
+
+advisorForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!currentStudent) return;
+
+  const message = advisorInput.value.trim();
+  if (!message) return;
+
+  const priorHistory = advisorHistory.slice(-10);
+  advisorHistory.push({ role: 'user', content: message });
+  addAdvisorMessage('user', message);
+  advisorInput.value = '';
+  setAdvisorBusy(true);
+  advisorIntent.textContent = 'Thinking';
+  setMessage(advisorStatus, 'Advisor AI is processing your request...');
+
+  try {
+    const result = await apiRequest('/advisor', {
+      method: 'POST',
+      body: JSON.stringify({
+        student_id: currentStudent.student_id,
+        message,
+        history: priorHistory,
+      }),
+    });
+
+    advisorHistory.push({ role: 'assistant', content: result.response });
+    advisorHistory = advisorHistory.slice(-10);
+    addAdvisorMessage('assistant', result.response);
+    advisorIntent.textContent = result.intent.replaceAll('_', ' ');
+    setMessage(advisorStatus, '');
+  } catch (error) {
+    advisorHistory.pop();
+    advisorIntent.textContent = 'Unavailable';
+    setMessage(advisorStatus, error.message, true);
+  } finally {
+    setAdvisorBusy(false);
+    advisorInput.focus();
+  }
+});
+
+
 document.querySelector('#sign-out-button').addEventListener('click', () => {
   currentStudent = null;
   selectedCourse = null;
+  advisorHistory = [];
+  advisorMessages.replaceChildren();
   dashboardView.hidden = true;
   loginView.hidden = false;
   setMessage(actionStatus, '');
+  setMessage(advisorStatus, '');
   studentIdInput.focus();
 });

@@ -17,7 +17,7 @@
         <p class="eyebrow">Personal student environment</p>
         <h1>AegisOS <span>EDU</span></h1>
         <p class="brand-copy">
-          One focused place for your courses, local workspaces, and development tools.
+          One focused place for your courses, local workspaces, development tools, and AI advising.
         </p>
         <div class="runtime-status">
           <span class="status-dot" aria-hidden="true"></span>
@@ -30,7 +30,6 @@
           <p class="eyebrow">Student access</p>
           <h2 id="login-title">Open your workspace</h2>
           <p class="intro">Enter a prototype student ID to load the matching SQLite profile.</p>
-
           <form id="login-form">
             <label for="student-id">Student ID</label>
             <input
@@ -64,32 +63,69 @@
             <div><dt>GPA</dt><dd id="student-gpa">-</dd></div>
           </dl>
 
-          <section class="course-section" aria-labelledby="courses-title">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Enrolled courses</p>
-                <h3 id="courses-title">Choose a course workspace</h3>
+          <nav class="dashboard-tabs" aria-label="Dashboard sections">
+            <button id="workspace-tab" class="tab-button" type="button" aria-pressed="true">
+              Workspace
+            </button>
+            <button id="advisor-tab" class="tab-button" type="button" aria-pressed="false">
+              Advisor AI
+            </button>
+          </nav>
+
+          <section id="workspace-panel">
+            <section class="course-section" aria-labelledby="courses-title">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Enrolled courses</p>
+                  <h3 id="courses-title">Choose a course workspace</h3>
+                </div>
+                <span id="course-count" class="count-badge"></span>
               </div>
-              <span id="course-count" class="count-badge"></span>
+              <div id="course-list" class="course-list"></div>
+            </section>
+
+            <div class="action-grid">
+              <button id="create-workspace-button" class="secondary-button" type="button">
+                <span>Create / open folder</span>
+                <small>Prepare assignments and labs</small>
+              </button>
+              <button id="open-vscode-button" class="primary-button" type="button">
+                <span>Open in VS Code</span>
+                <small>Launch the selected course</small>
+              </button>
             </div>
-            <div id="course-list" class="course-list"></div>
+            <p id="action-status" class="message" role="status" aria-live="polite"></p>
           </section>
 
-          <div class="action-grid">
-            <button id="create-workspace-button" class="secondary-button" type="button">
-              <span>Create / open folder</span>
-              <small>Prepare assignments and labs</small>
-            </button>
-            <button id="open-vscode-button" class="primary-button" type="button">
-              <span>Open in VS Code</span>
-              <small>Launch the selected course</small>
-            </button>
-          </div>
-          <p id="action-status" class="message" role="status" aria-live="polite"></p>
+          <section id="advisor-panel" class="advisor-panel" hidden>
+            <div class="advisor-heading">
+              <div>
+                <p class="eyebrow">LangGraph + Gemini</p>
+                <h3>Advisor AI</h3>
+              </div>
+              <span id="advisor-intent" class="count-badge">Ready</span>
+            </div>
+
+            <div id="advisor-messages" class="advisor-messages" aria-live="polite"></div>
+
+            <form id="advisor-form" class="advisor-form">
+              <label for="advisor-input">Ask about your studies or career</label>
+              <div class="advisor-compose">
+                <textarea
+                  id="advisor-input"
+                  rows="2"
+                  maxlength="2000"
+                  placeholder="Example: What should I focus on next semester?"
+                  required
+                ></textarea>
+                <button id="advisor-send-button" class="primary-button" type="submit">Send</button>
+              </div>
+            </form>
+            <p id="advisor-status" class="message" role="status" aria-live="polite"></p>
+          </section>
         </section>
       </section>
     </main>
-
     <script src="renderer.js"></script>
   </body>
 </html>

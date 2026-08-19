@@ -16,12 +16,12 @@ body {
     #050914;
 }
 
-button, input { font: inherit; }
+button, input, textarea { font: inherit; }
 button { cursor: pointer; }
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(300px, 0.82fr) minmax(560px, 1.5fr);
+  grid-template-columns: minmax(300px, 0.72fr) minmax(620px, 1.55fr);
   min-height: 100vh;
 }
 
@@ -39,18 +39,17 @@ button { cursor: pointer; }
 .brand-panel h1 span { display: block; margin-top: 12px; color: #7dd3fc; font-size: 0.54em; letter-spacing: 0.24em; }
 .brand-copy { max-width: 430px; margin: 0; color: #a8b7cf; font-size: 18px; line-height: 1.7; }
 .eyebrow { margin: 0; color: #7dd3fc; font-size: 12px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; }
-
 .runtime-status { display: flex; align-items: center; gap: 10px; margin-top: 42px; color: #c6d4ea; font-size: 14px; }
 .status-dot { width: 9px; height: 9px; border-radius: 50%; background: #34d399; box-shadow: 0 0 16px rgba(52, 211, 153, 0.8); }
 
-.content-panel { display: flex; align-items: center; justify-content: center; padding: 54px; }
-.view { width: min(100%, 720px); }
+.content-panel { display: flex; align-items: center; justify-content: center; padding: 48px; }
+.view { width: min(100%, 860px); }
 .login-view { max-width: 520px; }
 .view h2 { margin: 10px 0 10px; font-size: 38px; letter-spacing: -0.035em; }
 .intro { margin: 0 0 34px; color: #94a3b8; line-height: 1.65; }
 
 label { display: block; margin-bottom: 9px; color: #d6e2f3; font-size: 14px; font-weight: 700; }
-input {
+input, textarea {
   width: 100%;
   padding: 15px 16px;
   border: 1px solid #2b3a54;
@@ -59,10 +58,11 @@ input {
   background: #0b1424;
   color: #f8fafc;
 }
-input:focus { border-color: #60a5fa; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15); }
+textarea { resize: vertical; min-height: 58px; max-height: 150px; }
+input:focus, textarea:focus { border-color: #60a5fa; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15); }
 .field-hint { margin: 9px 0 22px; color: #718198; font-size: 12px; }
 
-.primary-button, .secondary-button, .text-button, .course-button {
+.primary-button, .secondary-button, .text-button, .course-button, .tab-button {
   border: 0;
   border-radius: 12px;
   font-weight: 750;
@@ -72,29 +72,52 @@ input:focus { border-color: #60a5fa; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.
 .text-button { padding: 9px 12px; background: transparent; color: #8dbffa; }
 button:disabled { cursor: wait; opacity: 0.6; }
 
-.dashboard-header, .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.dashboard-header, .section-heading, .advisor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .dashboard-header { margin-bottom: 28px; }
 .dashboard-header h2 { margin-bottom: 0; }
-
-.student-stats { display: grid; grid-template-columns: 1.5fr 0.7fr 0.7fr; gap: 12px; margin: 0 0 30px; }
+.student-stats { display: grid; grid-template-columns: 1.5fr 0.7fr 0.7fr; gap: 12px; margin: 0 0 22px; }
 .student-stats div { padding: 17px; border: 1px solid #23324a; border-radius: 14px; background: rgba(12, 23, 40, 0.8); }
 .student-stats dt { margin-bottom: 8px; color: #718198; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
 .student-stats dd { margin: 0; color: #f8fafc; font-weight: 750; }
 
-.course-section { padding: 22px; border: 1px solid #23324a; border-radius: 18px; background: rgba(10, 19, 34, 0.72); }
-.section-heading h3 { margin: 6px 0 0; font-size: 20px; }
-.count-badge { padding: 7px 10px; border-radius: 999px; background: #142542; color: #93c5fd; font-size: 12px; }
+.dashboard-tabs { display: flex; gap: 8px; margin-bottom: 16px; padding: 5px; border: 1px solid #23324a; border-radius: 14px; background: rgba(10, 19, 34, 0.72); }
+.tab-button { flex: 1; padding: 10px 14px; background: transparent; color: #8fa1b9; }
+.tab-button[aria-pressed="true"] { background: #142542; color: #eaf3ff; box-shadow: inset 0 0 0 1px #2f4f79; }
+
+.course-section, .advisor-panel { padding: 22px; border: 1px solid #23324a; border-radius: 18px; background: rgba(10, 19, 34, 0.72); }
+.section-heading h3, .advisor-heading h3 { margin: 6px 0 0; font-size: 20px; }
+.count-badge { padding: 7px 10px; border-radius: 999px; background: #142542; color: #93c5fd; font-size: 12px; text-transform: capitalize; }
 .course-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
 .course-button { padding: 14px; border: 1px solid #2a3a53; background: #0b1424; color: #b9c7da; text-align: left; }
 .course-button:hover, .course-button[aria-pressed="true"] { border-color: #60a5fa; background: #10264a; color: #eff6ff; }
-
 .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
 .action-grid button { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; text-align: left; }
 .action-grid small { color: inherit; font-size: 11px; font-weight: 500; opacity: 0.72; }
+
+.advisor-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 320px;
+  margin: 18px 0;
+  padding: 16px;
+  overflow-y: auto;
+  border: 1px solid #22324a;
+  border-radius: 14px;
+  background: #07101d;
+}
+.chat-message { max-width: 82%; padding: 12px 14px; border-radius: 14px; }
+.chat-message.assistant { align-self: flex-start; border: 1px solid #283954; background: #0d192a; }
+.chat-message.user { align-self: flex-end; background: #15366a; }
+.chat-role { display: block; margin-bottom: 5px; color: #7dd3fc; font-size: 10px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+.chat-message p { margin: 0; color: #e7eefc; line-height: 1.55; white-space: pre-wrap; }
+.advisor-compose { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 10px; }
+.advisor-compose .primary-button { min-width: 92px; min-height: 58px; }
+
 .message { min-height: 22px; margin: 16px 0 0; color: #93c5fd; font-size: 13px; }
 .message.error { color: #fca5a5; }
 
 @media (max-width: 980px) {
   .brand-panel { padding: 44px; }
-  .content-panel { padding: 38px; }
+  .content-panel { padding: 34px; }
 }

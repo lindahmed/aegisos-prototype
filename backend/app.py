@@ -8,6 +8,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from backend.advisor.graph import advisor_graph
+from backend.advisor.llm import AdvisorConfigurationError
+from backend.advisor.models import AdvisorRequest, AdvisorResponse
 from database.repository import Student, StudentRepository
 from workspace.manager import ToolUnavailableError, WorkspaceManager
 
@@ -49,12 +52,11 @@ def create_app(
             "AEGIS_WORKSPACE_ROOT", PROJECT_ROOT / "workspace" / "students"
         )
     )
-
     repository = StudentRepository(database_path)
     repository.initialize()
     manager = WorkspaceManager(student_workspace_root, launcher=launcher)
 
-    api = FastAPI(title="AegisOS EDU API", version="1.0.0")
+    api = FastAPI(title="AegisOS EDU API", version="1.1.0")
     api.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -102,6 +104,35 @@ def create_app(
             course=course,
             path=str(path),
             opened=True,
+        )
+
+    @api.post("/advisor", response_model=AdvisorResponse)
+    def ask_advisor(request: AdvisorRequest) -> AdvisorResponse:
+        student = repository.get_student(request.student_id)
+        if student is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+
+        history = [message.model_dump() for message in request.history]
+
+        try:
+            result = advisor_graph.invoke(
+                {
+                    "message": request.message,
+                    "history": history,
+                    "student": student.as_dict(),
+                }
+            )
+        except AdvisorConfigurationError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        except Exception as error:
+            raise HTTPException(
+                status_code=502,
+                detail="Advisor AI could not complete the request.",
+            ) from error
+
+        return AdvisorResponse(
+            intent=result["intent"],
+            response=result["response"],
         )
 
     return api
