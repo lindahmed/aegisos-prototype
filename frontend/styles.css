@@ -84,7 +84,7 @@ button:disabled { cursor: wait; opacity: 0.6; }
 .tab-button { flex: 1; padding: 10px 14px; background: transparent; color: #8fa1b9; }
 .tab-button[aria-pressed="true"] { background: #142542; color: #eaf3ff; box-shadow: inset 0 0 0 1px #2f4f79; }
 
-.course-section, .advisor-panel { padding: 22px; border: 1px solid #23324a; border-radius: 18px; background: rgba(10, 19, 34, 0.72); }
+.course-section, .advisor-panel, .progress-panel { padding: 22px; border: 1px solid #23324a; border-radius: 18px; background: rgba(10, 19, 34, 0.72); }
 .section-heading h3, .advisor-heading h3 { margin: 6px 0 0; font-size: 20px; }
 .count-badge { padding: 7px 10px; border-radius: 999px; background: #142542; color: #93c5fd; font-size: 12px; text-transform: capitalize; }
 .course-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
@@ -113,6 +113,21 @@ button:disabled { cursor: wait; opacity: 0.6; }
 .chat-message p { margin: 0; color: #e7eefc; line-height: 1.55; white-space: pre-wrap; }
 .advisor-compose { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 10px; }
 .advisor-compose .primary-button { min-width: 92px; min-height: 58px; }
+
+.progress-summary { display: grid; grid-template-columns: 0.55fr 1.45fr; gap: 12px; margin: 18px 0; }
+.progress-summary > div, .progress-course-card { padding: 15px; border: 1px solid #22324a; border-radius: 14px; background: #07101d; }
+.progress-summary span, .progress-summary p, .progress-details { color: #8fa1b9; font-size: 12px; }
+.progress-summary strong { display: block; margin-top: 5px; color: #7dd3fc; font-size: 27px; }
+.progress-summary p { margin: 6px 0 0; line-height: 1.45; }
+.progress-course-list { display: grid; gap: 10px; }
+.progress-course-card { position: relative; }
+.progress-course-card h4 { margin: 0 0 8px; color: #edf5ff; }
+.progress-course-card p { margin: 0; color: #c8d5e8; font-size: 13px; line-height: 1.5; }
+.progress-course-card .progress-details { margin-top: 4px; }
+.risk-badge { position: absolute; top: 14px; right: 14px; padding: 4px 8px; border-radius: 999px; background: #173257; color: #9bc8ff; font-size: 11px; text-transform: capitalize; }
+.risk-badge.high { background: #5a1d2b; color: #fecaca; }
+.risk-badge.medium { background: #5a4215; color: #fde68a; }
+.risk-badge.low { background: #164e45; color: #a7f3d0; }
 
 .message { min-height: 22px; margin: 16px 0 0; color: #93c5fd; font-size: 13px; }
 .message.error { color: #fca5a5; }

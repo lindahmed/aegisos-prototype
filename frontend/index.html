@@ -70,6 +70,9 @@
             <button id="advisor-tab" class="tab-button" type="button" aria-pressed="false">
               Advisor AI
             </button>
+            <button id="progress-tab" class="tab-button" type="button" aria-pressed="false">
+              Progress
+            </button>
           </nav>
 
           <section id="workspace-panel">
@@ -122,6 +125,22 @@
               </div>
             </form>
             <p id="advisor-status" class="message" role="status" aria-live="polite"></p>
+          </section>
+
+          <section id="progress-panel" class="progress-panel" hidden>
+            <div class="advisor-heading">
+              <div>
+                <p class="eyebrow">Student Digital Twin</p>
+                <h3>Semester progress</h3>
+              </div>
+              <span id="progress-week" class="count-badge">Loading</span>
+            </div>
+            <div class="progress-summary">
+              <div><span>Academic health</span><strong id="overall-health">-</strong></div>
+              <div><span>Current recommendation</span><p id="current-intervention">No intervention recorded yet.</p></div>
+            </div>
+            <div id="progress-course-list" class="progress-course-list"></div>
+            <p id="progress-status" class="message" role="status" aria-live="polite"></p>
           </section>
         </section>
       </section>

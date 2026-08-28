@@ -5,7 +5,9 @@ milestone proves the complete non-AI path:
 
 `XFCE -> Electron launcher -> FastAPI -> SQLite -> student workspace -> VS Code`
 
-Gemini and LangGraph are intentionally gated until this path passes the VM acceptance checklist.
+The Advisor AI and the Semester Progress Agent use Gemini only after the deterministic
+SQLite-backed academic data has been calculated. Set `GEMINI_API_KEY` in `.env` to enable
+AI recommendations; grades and academic facts always remain database-derived.
 
 ## Repository layout
 
@@ -81,6 +83,19 @@ The mode must begin with `-rwsr-xr-x` and the owner/group must be `root root`. D
 - `GET /student/{student_id}`
 - `POST /workspace/create`
 - `POST /workspace/vscode`
+- `POST /advisor`
+- `GET /progress/{student_id}` - current Student Digital Twin.
+- `POST /progress/analyze/{student_id}` - runs the LangGraph progress workflow and saves
+  weekly snapshots/interventions when a grounded intervention is needed.
+- `GET /progress/{student_id}/weekly` - saved course metrics by week.
+- `GET /progress/{student_id}/interventions` - recommendation history.
+- `POST /progress/{student_id}/what-if` - read-only assessment-grade projection.
+
+The initial SQLite prototype contained profiles and enrollments only. The initializer now
+adds the related course, lecture, assessment, material, grade, snapshot, and intervention
+tables, plus clearly scoped prototype academic records for the registered demo students.
+Replace those seed records with Task 1/SIS or portal imports when that data source is ready;
+the progress agent reads only through `StudentRepository`.
 
 Workspace requests use this JSON shape:
 

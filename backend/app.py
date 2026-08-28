@@ -11,6 +11,13 @@ from pydantic import BaseModel, Field
 from backend.advisor.graph import advisor_graph
 from backend.advisor.llm import AdvisorConfigurationError
 from backend.advisor.models import AdvisorRequest, AdvisorResponse
+from backend.progress.models import StudentTwin, WhatIfRequest, WhatIfResponse
+from backend.progress.service import build_student_twin
+from backend.progress_agent.graph import (
+    StudentNotFoundError,
+    build_progress_graph,
+)
+from backend.simulation.what_if import run_assessment_grade_scenario
 from database.repository import Student, StudentRepository
 from workspace.manager import ToolUnavailableError, WorkspaceManager
 
@@ -54,6 +61,7 @@ def create_app(
     )
     repository = StudentRepository(database_path)
     repository.initialize()
+    progress_graph = build_progress_graph(repository)
     manager = WorkspaceManager(student_workspace_root, launcher=launcher)
 
     api = FastAPI(title="AegisOS EDU API", version="1.1.0")
@@ -134,6 +142,54 @@ def create_app(
             intent=result["intent"],
             response=result["response"],
         )
+
+    @api.get("/progress/{student_id}", response_model=StudentTwin)
+    def get_progress(student_id: str) -> StudentTwin:
+        twin = build_student_twin(repository, student_id)
+        if twin is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        return twin
+
+    @api.post("/progress/analyze/{student_id}")
+    def analyze_progress(student_id: str) -> dict[str, object]:
+        try:
+            result = progress_graph.invoke({"student_id": student_id})
+        except StudentNotFoundError as error:
+            raise HTTPException(status_code=404, detail="Student not found") from error
+        except AdvisorConfigurationError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        except Exception as error:
+            raise HTTPException(
+                status_code=502,
+                detail="Progress analysis could not complete.",
+            ) from error
+        interventions = [
+            {"course_id": course.course_id, "course_name": course.course_name, **intervention.model_dump()}
+            for course, intervention in result.get("validated_interventions", [])
+        ]
+        return {"twin": result["twin"].model_dump(), "interventions": interventions}
+
+    @api.get("/progress/{student_id}/weekly")
+    def get_weekly_progress(student_id: str) -> dict[str, object]:
+        if repository.get_student(student_id) is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        return {"student_id": student_id, "snapshots": repository.get_weekly_snapshots(student_id)}
+
+    @api.get("/progress/{student_id}/interventions")
+    def get_progress_interventions(student_id: str) -> dict[str, object]:
+        if repository.get_student(student_id) is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        return {"student_id": student_id, "interventions": repository.get_interventions(student_id)}
+
+    @api.post("/progress/{student_id}/what-if", response_model=WhatIfResponse)
+    def simulate_progress(student_id: str, scenario: WhatIfRequest) -> WhatIfResponse:
+        try:
+            result = run_assessment_grade_scenario(repository, student_id, scenario)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        if result is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        return result
 
     return api
 
