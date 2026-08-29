@@ -149,7 +149,41 @@ class StudentRepository:
                     message TEXT NOT NULL,
                     issue_fingerprint TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'active',
+                    course_health_at_creation REAL,
+                    resolved_week INTEGER,
+                    resolution_outcome TEXT CHECK(resolution_outcome IN ('improved', 'stable', 'worsened', 'no_data')),
+                    follow_up_week INTEGER,
                     created_at TEXT NOT NULL,
+                    FOREIGN KEY (student_id) REFERENCES students(student_id),
+                    FOREIGN KEY (course_id) REFERENCES course_offerings(course_id)
+                );
+                CREATE TABLE IF NOT EXISTS student_semester_grades (
+                    grade_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    student_id TEXT NOT NULL,
+                    course_id TEXT NOT NULL,
+                    semester TEXT NOT NULL,
+                    week_number INTEGER NOT NULL CHECK(week_number BETWEEN 1 AND 16),
+                    assignment_grade REAL CHECK(assignment_grade BETWEEN 0 AND 100),
+                    lab_grade REAL CHECK(lab_grade BETWEEN 0 AND 100),
+                    exam_grade REAL CHECK(exam_grade BETWEEN 0 AND 100),
+                    exam_weight REAL CHECK(exam_weight IN (30, 20, 40)),
+                    coursework_grade REAL CHECK(coursework_grade BETWEEN 0 AND 100),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(student_id, course_id, semester, week_number),
+                    FOREIGN KEY (student_id) REFERENCES students(student_id),
+                    FOREIGN KEY (course_id) REFERENCES course_offerings(course_id)
+                );
+                CREATE TABLE IF NOT EXISTS course_gradebook_entries (
+                    student_id TEXT NOT NULL,
+                    course_id TEXT NOT NULL,
+                    semester TEXT NOT NULL,
+                    assignment_score REAL NOT NULL DEFAULT 0 CHECK(assignment_score BETWEEN 0 AND 100),
+                    midterm_score REAL NOT NULL DEFAULT 0 CHECK(midterm_score BETWEEN 0 AND 100),
+                    final_score REAL NOT NULL DEFAULT 0 CHECK(final_score BETWEEN 0 AND 100),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (student_id, course_id, semester),
                     FOREIGN KEY (student_id) REFERENCES students(student_id),
                     FOREIGN KEY (course_id) REFERENCES course_offerings(course_id)
                 );
@@ -189,6 +223,7 @@ class StudentRepository:
                         ((student_id, course) for course in courses),
                     )
             self._seed_prototype_academic_data(connection)
+            self._seed_portal_gradebook(connection)
 
     @staticmethod
     def _seed_prototype_academic_data(connection: sqlite3.Connection) -> None:
@@ -308,6 +343,190 @@ class StudentRepository:
             student_ids = [row["student_id"] for row in connection.execute("SELECT student_id FROM students ORDER BY student_id")]
         return [student for student_id in student_ids if (student := self.get_student(student_id)) is not None]
 
+    @staticmethod
+    def _seed_portal_gradebook(connection: sqlite3.Connection) -> None:
+        if connection.execute("SELECT 1 FROM course_gradebook_entries LIMIT 1").fetchone():
+            return
+
+        enrollments = connection.execute(
+            """SELECT enrollment.student_id, offering.course_id, offering.semester
+               FROM courses enrollment
+               JOIN course_offerings offering ON offering.course_name = enrollment.course_name
+               ORDER BY enrollment.student_id, offering.course_name"""
+        ).fetchall()
+        now = datetime.now(UTC).isoformat()
+        rows: list[tuple[str, str, str, float, float, float, str, str]] = []
+        for enrollment in enrollments:
+            assessment_rows = connection.execute(
+                """SELECT assessment.assessment_type, grade.percentage
+                   FROM assessments assessment
+                   LEFT JOIN student_assessment_grades grade
+                     ON grade.assessment_id = assessment.assessment_id
+                    AND grade.student_id = ?
+                   WHERE assessment.course_id = ?""",
+                (enrollment["student_id"], enrollment["course_id"]),
+            ).fetchall()
+            assignment_scores = [
+                float(row["percentage"])
+                for row in assessment_rows
+                if row["assessment_type"] in {"assignment", "lab"} and row["percentage"] is not None
+            ]
+            assignment_score = round(sum(assignment_scores) / len(assignment_scores), 2) if assignment_scores else 0.0
+            midterm_score = next(
+                (float(row["percentage"]) for row in assessment_rows if row["assessment_type"] in {"midterm", "exam"} and row["percentage"] is not None),
+                0.0,
+            )
+            final_score = next(
+                (float(row["percentage"]) for row in assessment_rows if row["assessment_type"] == "final" and row["percentage"] is not None),
+                0.0,
+            )
+            rows.append(
+                (
+                    enrollment["student_id"],
+                    enrollment["course_id"],
+                    enrollment["semester"],
+                    assignment_score,
+                    midterm_score,
+                    final_score,
+                    now,
+                    now,
+                )
+            )
+        connection.executemany(
+            """INSERT INTO course_gradebook_entries
+               (student_id, course_id, semester, assignment_score, midterm_score, final_score, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(student_id, course_id, semester) DO NOTHING""",
+            rows,
+        )
+
+    def list_portal_courses(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT offering.course_id, offering.course_name, offering.semester,
+                          COUNT(enrollment.student_id) AS student_count
+                   FROM course_offerings offering
+                   LEFT JOIN courses enrollment ON enrollment.course_name = offering.course_name
+                   GROUP BY offering.course_id, offering.course_name, offering.semester
+                   ORDER BY offering.semester DESC, offering.course_name"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_portal_course_gradebook(
+        self, course_id: str, semester: str | None = None
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            if semester is None:
+                course = connection.execute(
+                    """SELECT course_id, course_name, semester
+                       FROM course_offerings
+                       WHERE course_id = ?
+                       ORDER BY semester DESC
+                       LIMIT 1""",
+                    (course_id,),
+                ).fetchone()
+            else:
+                course = connection.execute(
+                    """SELECT course_id, course_name, semester
+                       FROM course_offerings
+                       WHERE course_id = ? AND semester = ?""",
+                    (course_id, semester),
+                ).fetchone()
+            if course is None:
+                return None
+
+            rows = connection.execute(
+                """SELECT student.student_id, student.name AS student_name,
+                          COALESCE(grade.assignment_score, 0) AS assignment_score,
+                          COALESCE(grade.midterm_score, 0) AS midterm_score,
+                          COALESCE(grade.final_score, 0) AS final_score
+                   FROM courses enrollment
+                   JOIN students student ON student.student_id = enrollment.student_id
+                   JOIN course_offerings offering ON offering.course_name = enrollment.course_name
+                   LEFT JOIN course_gradebook_entries grade
+                     ON grade.student_id = student.student_id
+                    AND grade.course_id = offering.course_id
+                    AND grade.semester = offering.semester
+                   WHERE offering.course_id = ? AND offering.semester = ?
+                   ORDER BY student.name""",
+                (course["course_id"], course["semester"]),
+            ).fetchall()
+        return {**dict(course), "rows": [dict(row) for row in rows]}
+
+    def save_portal_course_gradebook(
+        self, course_id: str, semester: str, rows: list[dict[str, Any]]
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        values = [
+            (
+                row["student_id"],
+                course_id,
+                semester,
+                row["assignment_score"],
+                row["midterm_score"],
+                row["final_score"],
+                now,
+                now,
+            )
+            for row in rows
+        ]
+        grade_values = []
+        for row in rows:
+            assignment_score = row["assignment_score"]
+            midterm_score = row["midterm_score"]
+            final_score = row["final_score"]
+            grade_values.extend(
+                [
+                    (row["student_id"], f"{course_id}-a1", assignment_score, now),
+                    (row["student_id"], f"{course_id}-a2", assignment_score, now),
+                    (row["student_id"], f"{course_id}-lab1", assignment_score, now),
+                    (row["student_id"], f"{course_id}-mid", midterm_score, now),
+                    (row["student_id"], f"{course_id}-final", final_score, now),
+                ]
+            )
+        with self._connect() as connection:
+            connection.executemany(
+                """INSERT INTO course_gradebook_entries
+                   (student_id, course_id, semester, assignment_score, midterm_score, final_score, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(student_id, course_id, semester) DO UPDATE SET
+                     assignment_score=excluded.assignment_score,
+                     midterm_score=excluded.midterm_score,
+                     final_score=excluded.final_score,
+                     updated_at=excluded.updated_at""",
+                values,
+            )
+            connection.executemany(
+                """INSERT INTO student_assessment_grades (student_id, assessment_id, percentage, graded_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(student_id, assessment_id) DO UPDATE SET
+                     percentage=excluded.percentage,
+                     graded_at=excluded.graded_at""",
+                grade_values,
+            )
+
+    def get_student_portal_grade_report(self, student_id: str) -> dict[str, Any] | None:
+        student = self.get_student(student_id)
+        if student is None:
+            return None
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT offering.course_id, offering.course_name, offering.semester,
+                          COALESCE(grade.assignment_score, 0) AS assignment_score,
+                          COALESCE(grade.midterm_score, 0) AS midterm_score,
+                          COALESCE(grade.final_score, 0) AS final_score
+                   FROM courses enrollment
+                   JOIN course_offerings offering ON offering.course_name = enrollment.course_name
+                   LEFT JOIN course_gradebook_entries grade
+                     ON grade.student_id = enrollment.student_id
+                    AND grade.course_id = offering.course_id
+                    AND grade.semester = offering.semester
+                   WHERE enrollment.student_id = ?
+                   ORDER BY offering.semester DESC, offering.course_name""",
+                (student_id,),
+            ).fetchall()
+        return {"student": student.as_dict(), "records": [dict(row) for row in rows]}
+
     def get_student_progress(self, student_id: str) -> dict[str, Any] | None:
         """Return authoritative academic records for one registered student."""
         student = self.get_student(student_id)
@@ -404,19 +623,55 @@ class StudentRepository:
                 (student_id, course_id, fingerprint),
             ).fetchone() is not None
 
-    def save_intervention(self, student_id: str, course_id: str, week_number: int, intervention: dict[str, Any], fingerprint: str) -> int:
+    def save_intervention(
+        self, student_id: str, course_id: str, week_number: int,
+        intervention: dict[str, Any], fingerprint: str,
+        course_health_at_creation: float | None = None,
+    ) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 """INSERT INTO progress_interventions
                    (student_id, course_id, week_number, severity, reason, weak_topics_json, lecture_ids_json,
-                    recommended_actions_json, message, issue_fingerprint, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    recommended_actions_json, message, issue_fingerprint, status, course_health_at_creation,
+                    created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (student_id, course_id, week_number, intervention["severity"], intervention["reason"],
                  json.dumps(intervention.get("weak_topics", [])), json.dumps(intervention.get("lectures_to_review", [])),
                  json.dumps(intervention.get("recommended_actions", [])), intervention["message"], fingerprint,
+                 intervention.get("status", "active"), course_health_at_creation,
                  datetime.now(UTC).isoformat()),
             )
         return int(cursor.lastrowid)
+
+    def get_active_interventions(
+        self, student_id: str, course_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        query = """SELECT intervention.*, offering.course_name FROM progress_interventions intervention
+                   JOIN course_offerings offering ON offering.course_id = intervention.course_id
+                   WHERE intervention.student_id = ? AND intervention.status = 'active'"""
+        parameters: list[Any] = [student_id]
+        if course_id is not None:
+            query += " AND intervention.course_id = ?"
+            parameters.append(course_id)
+        query += " ORDER BY intervention.created_at DESC"
+        with self._connect() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return self._decode_intervention_rows(rows)
+
+    def update_intervention_status(
+        self,
+        intervention_id: int,
+        status: str,
+        resolved_week: int | None = None,
+        resolution_outcome: str | None = None,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """UPDATE progress_interventions
+                   SET status = ?, resolved_week = ?, resolution_outcome = ?
+                   WHERE intervention_id = ?""",
+                (status, resolved_week, resolution_outcome, intervention_id),
+            )
 
     def get_interventions(self, student_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -426,6 +681,10 @@ class StudentRepository:
                    WHERE intervention.student_id = ? ORDER BY intervention.created_at DESC""",
                 (student_id,),
             ).fetchall()
+        return self._decode_intervention_rows(rows)
+
+    @staticmethod
+    def _decode_intervention_rows(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
         results = []
         for row in rows:
             record = dict(row)
@@ -434,3 +693,81 @@ class StudentRepository:
             record["recommended_actions"] = json.loads(record.pop("recommended_actions_json"))
             results.append(record)
         return results
+
+    def save_semester_grade(
+        self,
+        student_id: str,
+        course_id: str,
+        semester: str,
+        week_number: int,
+        assignment_grade: float | None = None,
+        lab_grade: float | None = None,
+        exam_grade: float | None = None,
+        exam_weight: float | None = None,
+        coursework_grade: float | None = None,
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO student_semester_grades
+                   (student_id, course_id, semester, week_number, assignment_grade,
+                    lab_grade, exam_grade, exam_weight, coursework_grade, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(student_id, course_id, semester, week_number) DO UPDATE SET
+                     assignment_grade=excluded.assignment_grade,
+                     lab_grade=excluded.lab_grade,
+                     exam_grade=excluded.exam_grade,
+                     exam_weight=excluded.exam_weight,
+                     coursework_grade=excluded.coursework_grade,
+                     updated_at=excluded.updated_at""",
+                (
+                    student_id, course_id, semester, week_number,
+                    assignment_grade, lab_grade, exam_grade, exam_weight, coursework_grade,
+                    now, now,
+                ),
+            )
+
+    def get_semester_grades(
+        self, student_id: str, course_id: str, semester: str
+    ) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT * FROM student_semester_grades
+                   WHERE student_id = ? AND course_id = ? AND semester = ?
+                   ORDER BY week_number""",
+                (student_id, course_id, semester),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_semester_grade_summary(
+        self, student_id: str, course_id: str, semester: str
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT week_number, exam_grade, exam_weight, coursework_grade
+                   FROM student_semester_grades
+                   WHERE student_id = ? AND course_id = ? AND semester = ?
+                     AND (exam_grade IS NOT NULL OR coursework_grade IS NOT NULL)""",
+                (student_id, course_id, semester),
+            ).fetchall()
+        if not rows:
+            return None
+
+        exam_total = 0.0
+        coursework = 0.0
+        for row in rows:
+            if row["exam_grade"] is not None and row["exam_weight"] is not None:
+                exam_total += row["exam_grade"] * (row["exam_weight"] / 100.0)
+            if row["coursework_grade"] is not None:
+                coursework = max(coursework, row["coursework_grade"] * 0.1)
+
+        current_total = exam_total + coursework
+        return {
+            "student_id": student_id,
+            "course_id": course_id,
+            "semester": semester,
+            "exam_contribution": round(exam_total, 2),
+            "coursework_contribution": round(coursework, 2),
+            "current_total": round(current_total, 2),
+            "remaining": round(100.0 - current_total, 2),
+        }

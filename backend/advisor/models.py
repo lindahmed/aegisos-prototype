@@ -15,6 +15,10 @@ class AdvisorRequest(BaseModel):
         max_length=2000,
         description="The student's latest message",
     )
+    language: Literal["english", "arabic"] = Field(
+        default="english",
+        description="The language the advisor should use for the response",
+    )
     history: list[ChatMessage] = Field(
         default_factory=list,
         max_length=10,
@@ -25,3 +29,13 @@ class AdvisorRequest(BaseModel):
 class AdvisorResponse(BaseModel):
     intent: str
     response: str
+    language: str = "english"
+
+
+class AdvisorVoiceResponse(BaseModel):
+    student_id: str
+    transcript: str
+    response: str
+    intent: str
+    language: str
+    audio_base64: str

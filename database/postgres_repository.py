@@ -87,7 +87,46 @@ class PostgresStudentRepository:
                         message TEXT NOT NULL,
                         issue_fingerprint TEXT NOT NULL,
                         status TEXT NOT NULL DEFAULT 'active',
+                        course_health_at_creation DOUBLE PRECISION,
+                        resolved_week INTEGER,
+                        resolution_outcome TEXT CHECK(resolution_outcome IN ('improved', 'stable', 'worsened', 'no_data')),
+                        follow_up_week INTEGER,
                         created_at TIMESTAMPTZ NOT NULL
+                    );
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'progress_interventions' AND column_name = 'course_health_at_creation'
+                        ) THEN
+                            ALTER TABLE progress_interventions ADD COLUMN course_health_at_creation DOUBLE PRECISION;
+                        END IF;
+                    END $$;
+                    CREATE TABLE IF NOT EXISTS student_semester_grades (
+                        grade_id BIGSERIAL PRIMARY KEY,
+                        student_id TEXT NOT NULL,
+                        course_id TEXT NOT NULL,
+                        semester TEXT NOT NULL,
+                        week_number INTEGER NOT NULL CHECK(week_number BETWEEN 1 AND 16),
+                        assignment_grade DOUBLE PRECISION CHECK(assignment_grade BETWEEN 0 AND 100),
+                        lab_grade DOUBLE PRECISION CHECK(lab_grade BETWEEN 0 AND 100),
+                        exam_grade DOUBLE PRECISION CHECK(exam_grade BETWEEN 0 AND 100),
+                        exam_weight DOUBLE PRECISION CHECK(exam_weight IN (30, 20, 40)),
+                        coursework_grade DOUBLE PRECISION CHECK(coursework_grade BETWEEN 0 AND 100),
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        UNIQUE(student_id, course_id, semester, week_number)
+                    );
+                    CREATE TABLE IF NOT EXISTS course_gradebook_entries (
+                        student_id TEXT NOT NULL,
+                        course_id TEXT NOT NULL,
+                        semester TEXT NOT NULL,
+                        assignment_score DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK(assignment_score BETWEEN 0 AND 100),
+                        midterm_score DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK(midterm_score BETWEEN 0 AND 100),
+                        final_score DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK(final_score BETWEEN 0 AND 100),
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY (student_id, course_id, semester)
                     );
                     """
                 )
@@ -146,12 +185,103 @@ class PostgresStudentRepository:
                 ids = [row["student_id"] for row in cursor.fetchall()]
         return [student for student_id in ids if (student := self.get_student(student_id))]
 
-    def get_student_progress(self, student_id: str) -> dict[str, Any] | None:
-        """Return only verified source records from the normalized schema.
+    def list_portal_courses(self) -> list[dict[str, Any]]:
+        return self._fetch_all(
+            """SELECT c.course_id::text AS course_id, c.course_title AS course_name,
+                      %s AS semester, COUNT(sc.student_id) AS student_count
+               FROM courses c
+               JOIN student_courses sc ON sc.course_id = c.course_id
+               WHERE sc.status = 'Current'
+               GROUP BY c.course_id, c.course_title
+               ORDER BY c.course_title""",
+            (self.semester,),
+        )
 
-        The current database branch does not expose progress-specific tables,
-        so its courses deliberately have empty assessment/lecture/material lists.
-        The Digital Twin reports unavailable health instead of using SQLite seeds.
+    def get_portal_course_gradebook(
+        self, course_id: str, semester: str | None = None
+    ) -> dict[str, Any] | None:
+        selected_semester = semester or self.semester
+        course = self._fetch_one(
+            """SELECT c.course_id::text AS course_id, c.course_title AS course_name, %s AS semester
+               FROM courses c
+               WHERE c.course_id::text = %s""",
+            (selected_semester, course_id),
+        )
+        if course is None:
+            return None
+        rows = self._fetch_all(
+            """SELECT s.student_id::text AS student_id, s.full_name AS student_name,
+                      COALESCE(g.assignment_score, 0) AS assignment_score,
+                      COALESCE(g.midterm_score, 0) AS midterm_score,
+                      COALESCE(g.final_score, 0) AS final_score
+               FROM student_courses sc
+               JOIN students s ON s.student_id = sc.student_id
+               LEFT JOIN course_gradebook_entries g
+                 ON g.student_id = s.student_id::text
+                AND g.course_id = sc.course_id::text
+                AND g.semester = %s
+               WHERE sc.course_id::text = %s AND sc.status = 'Current'
+               ORDER BY s.full_name""",
+            (selected_semester, course_id),
+        )
+        return {**course, "rows": rows}
+
+    def save_portal_course_gradebook(
+        self, course_id: str, semester: str, rows: list[dict[str, Any]]
+    ) -> None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                psycopg2.extras.execute_batch(
+                    cursor,
+                    """INSERT INTO course_gradebook_entries
+                       (student_id, course_id, semester, assignment_score, midterm_score, final_score, created_at, updated_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                       ON CONFLICT (student_id, course_id, semester)
+                       DO UPDATE SET
+                         assignment_score=EXCLUDED.assignment_score,
+                         midterm_score=EXCLUDED.midterm_score,
+                         final_score=EXCLUDED.final_score,
+                         updated_at=NOW()""",
+                    [
+                        (
+                            row["student_id"],
+                            course_id,
+                            semester,
+                            row["assignment_score"],
+                            row["midterm_score"],
+                            row["final_score"],
+                        )
+                        for row in rows
+                    ],
+                )
+
+    def get_student_portal_grade_report(self, student_id: str) -> dict[str, Any] | None:
+        student = self.get_student(student_id)
+        if student is None:
+            return None
+        records = self._fetch_all(
+            """SELECT c.course_id::text AS course_id, c.course_title AS course_name, %s AS semester,
+                      COALESCE(g.assignment_score, 0) AS assignment_score,
+                      COALESCE(g.midterm_score, 0) AS midterm_score,
+                      COALESCE(g.final_score, 0) AS final_score
+               FROM student_courses sc
+               JOIN courses c ON c.course_id = sc.course_id
+               LEFT JOIN course_gradebook_entries g
+                 ON g.student_id = sc.student_id::text
+                AND g.course_id = c.course_id::text
+                AND g.semester = %s
+               WHERE sc.student_id::text = %s AND sc.status = 'Current'
+               ORDER BY c.course_title""",
+            (self.semester, self.semester, student_id),
+        )
+        return {"student": student.as_dict(), "records": records}
+
+    def get_student_progress(self, student_id: str) -> dict[str, Any] | None:
+        """Return verified source records from the normalized schema.
+
+        Where the portal has saved grades in course_gradebook_entries, those
+        assessments are synthesised so the Progress Agent can detect risks even
+        when the external SIS does not yet supply detailed assessment rows.
         """
         student = self.get_student(student_id)
         if student is None:
@@ -169,21 +299,39 @@ class PostgresStudentRepository:
                     (student.student_id,),
                 )
                 course_rows = cursor.fetchall()
-        return {
-            "student": student.as_dict(),
-            "courses": [
-                {
-                    "course_id": row["course_id"],
-                    "course_name": row["course_name"],
-                    "semester": self.semester,
-                    "current_week": self.current_week,
-                    "assessments": [],
-                    "lectures": [],
-                    "materials": [],
-                }
-                for row in course_rows
-            ],
-        }
+                cursor.execute(
+                    """
+                    SELECT g.course_id::text AS course_id,
+                           COALESCE(g.assignment_score, 0) AS assignment_score,
+                           COALESCE(g.midterm_score, 0) AS midterm_score,
+                           COALESCE(g.final_score, 0) AS final_score
+                    FROM course_gradebook_entries g
+                    WHERE g.student_id = %s AND g.semester = %s
+                    """,
+                    (student.student_id, self.semester),
+                )
+                gradebook_rows = {row["course_id"]: row for row in cursor.fetchall()}
+        courses = []
+        for row in course_rows:
+            course_id = row["course_id"]
+            grades = gradebook_rows.get(course_id)
+            assessments: list[dict[str, Any]] = []
+            if grades is not None:
+                assessments = [
+                    {"assessment_id": f"{course_id}-coursework", "name": "Coursework", "assessment_type": "assignment", "weight": 30.0, "due_week": 5, "covered_lecture_ids": "[]", "percentage": grades["assignment_score"]},
+                    {"assessment_id": f"{course_id}-midterm", "name": "Midterm", "assessment_type": "midterm", "weight": 30.0, "due_week": 7, "covered_lecture_ids": "[]", "percentage": grades["midterm_score"]},
+                    {"assessment_id": f"{course_id}-final", "name": "Final", "assessment_type": "final", "weight": 40.0, "due_week": 16, "covered_lecture_ids": "[]", "percentage": grades["final_score"]},
+                ]
+            courses.append({
+                "course_id": course_id,
+                "course_name": row["course_name"],
+                "semester": self.semester,
+                "current_week": self.current_week,
+                "assessments": assessments,
+                "lectures": [],
+                "materials": [],
+            })
+        return {"student": student.as_dict(), "courses": courses}
 
     def get_previous_course_snapshot(self, student_id: str, course_id: str, week_number: int) -> dict[str, Any] | None:
         return self._fetch_one(
@@ -229,33 +377,74 @@ class PostgresStudentRepository:
             (student_id, course_id, fingerprint),
         ) is not None
 
-    def save_intervention(self, student_id: str, course_id: str, week_number: int, intervention: dict[str, Any], fingerprint: str) -> int:
+    def save_intervention(
+        self, student_id: str, course_id: str, week_number: int,
+        intervention: dict[str, Any], fingerprint: str,
+        course_health_at_creation: float | None = None,
+    ) -> int:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """INSERT INTO progress_interventions
                        (student_id, course_id, week_number, severity, reason, weak_topics_json, lecture_ids_json,
-                        recommended_actions_json, message, issue_fingerprint, created_at)
-                       VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s)
+                        recommended_actions_json, message, issue_fingerprint, status, course_health_at_creation, created_at)
+                       VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s)
                        RETURNING intervention_id""",
                     (
                         student_id, course_id, week_number, intervention["severity"], intervention["reason"],
                         json.dumps(intervention.get("weak_topics", [])), json.dumps(intervention.get("lectures_to_review", [])),
                         json.dumps(intervention.get("recommended_actions", [])), intervention["message"], fingerprint,
+                        intervention.get("status", "active"), course_health_at_creation,
                         datetime.now(UTC),
                     ),
                 )
                 return int(cursor.fetchone()["intervention_id"])
+
+    def get_active_interventions(
+        self, student_id: str, course_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        query = """SELECT intervention.*, course.course_title AS course_name
+                   FROM progress_interventions intervention
+                   LEFT JOIN courses course ON course.course_id::text = intervention.course_id
+                   WHERE intervention.student_id = %s AND intervention.status = 'active'"""
+        parameters: list[Any] = [student_id]
+        if course_id is not None:
+            query += " AND intervention.course_id = %s"
+            parameters.append(course_id)
+        query += " ORDER BY intervention.created_at DESC"
+        return self._decode_intervention_rows(self._fetch_all(query, tuple(parameters)))
+
+    def update_intervention_status(
+        self,
+        intervention_id: int,
+        status: str,
+        resolved_week: int | None = None,
+        resolution_outcome: str | None = None,
+    ) -> None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """UPDATE progress_interventions
+                       SET status = %s, resolved_week = %s, resolution_outcome = %s
+                       WHERE intervention_id = %s""",
+                    (status, resolved_week, resolution_outcome, intervention_id),
+                )
 
     def get_interventions(self, student_id: str) -> list[dict[str, Any]]:
         records = self._fetch_all(
             "SELECT * FROM progress_interventions WHERE student_id = %s ORDER BY created_at DESC",
             (student_id,),
         )
-        for record in records:
+        return self._decode_intervention_rows(records)
+
+    def _decode_intervention_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        records = []
+        for record in rows:
+            record = dict(record)
             record["weak_topics"] = self._json_value(record.pop("weak_topics_json"))
             record["lectures_to_review"] = self._json_value(record.pop("lecture_ids_json"))
             record["recommended_actions"] = self._json_value(record.pop("recommended_actions_json"))
+            records.append(record)
         return records
 
     def _fetch_one(self, query: str, parameters: tuple[Any, ...]) -> dict[str, Any] | None:
@@ -285,3 +474,78 @@ class PostgresStudentRepository:
     @staticmethod
     def _json_value(value: Any) -> list[Any]:
         return json.loads(value) if isinstance(value, str) else value
+
+    def save_semester_grade(
+        self,
+        student_id: str,
+        course_id: str,
+        semester: str,
+        week_number: int,
+        assignment_grade: float | None = None,
+        lab_grade: float | None = None,
+        exam_grade: float | None = None,
+        exam_weight: float | None = None,
+        coursework_grade: float | None = None,
+    ) -> None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO student_semester_grades
+                       (student_id, course_id, semester, week_number, assignment_grade,
+                        lab_grade, exam_grade, exam_weight, coursework_grade, created_at, updated_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                       ON CONFLICT (student_id, course_id, semester, week_number)
+                       DO UPDATE SET
+                         assignment_grade=EXCLUDED.assignment_grade,
+                         lab_grade=EXCLUDED.lab_grade,
+                         exam_grade=EXCLUDED.exam_grade,
+                         exam_weight=EXCLUDED.exam_weight,
+                         coursework_grade=EXCLUDED.coursework_grade,
+                         updated_at=NOW()""",
+                    (
+                        student_id, course_id, semester, week_number,
+                        assignment_grade, lab_grade, exam_grade, exam_weight, coursework_grade,
+                    ),
+                )
+
+    def get_semester_grades(
+        self, student_id: str, course_id: str, semester: str
+    ) -> list[dict[str, Any]]:
+        return self._fetch_all(
+            """SELECT * FROM student_semester_grades
+               WHERE student_id = %s AND course_id = %s AND semester = %s
+               ORDER BY week_number""",
+            (student_id, course_id, semester),
+        )
+
+    def get_semester_grade_summary(
+        self, student_id: str, course_id: str, semester: str
+    ) -> dict[str, Any] | None:
+        rows = self._fetch_all(
+            """SELECT week_number, exam_grade, exam_weight, coursework_grade
+               FROM student_semester_grades
+               WHERE student_id = %s AND course_id = %s AND semester = %s
+                 AND (exam_grade IS NOT NULL OR coursework_grade IS NOT NULL)""",
+            (student_id, course_id, semester),
+        )
+        if not rows:
+            return None
+
+        exam_total = 0.0
+        coursework = 0.0
+        for row in rows:
+            if row["exam_grade"] is not None and row["exam_weight"] is not None:
+                exam_total += row["exam_grade"] * (row["exam_weight"] / 100.0)
+            if row["coursework_grade"] is not None:
+                coursework = max(coursework, row["coursework_grade"] * 0.1)
+
+        current_total = exam_total + coursework
+        return {
+            "student_id": student_id,
+            "course_id": course_id,
+            "semester": semester,
+            "exam_contribution": round(exam_total, 2),
+            "coursework_contribution": round(coursework, 2),
+            "current_total": round(current_total, 2),
+            "remaining": round(100.0 - current_total, 2),
+        }

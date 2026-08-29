@@ -11,8 +11,16 @@ class ProgressThresholds:
     lecture_backlog_percentage: float = 70.0
     significant_weekly_change: float = 8.0
     assessment_performance_drop: float = 15.0
-    upcoming_assessment_weeks: int = 1
+    upcoming_assessment_weeks: int = 2
+    coursework_warning_weeks: int = 1
     repeated_poor_count: int = 2
+    steady_decline_weeks: int = 2
+    steady_decline_threshold: float = 5.0
+    lecture_pace_slowdown_threshold: float = 10.0
+    re_alert_interval_weeks: int = 2
+    intervention_improvement_threshold: float = 5.0
+    intervention_decline_threshold: float = 5.0
+    intervention_max_active_weeks: int = 3
 
 
 THRESHOLDS = ProgressThresholds()

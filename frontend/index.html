@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; connect-src http://127.0.0.1:8000; img-src 'self' data:; style-src 'self'; script-src 'self'"
+      content="default-src 'self'; connect-src http://127.0.0.1:8000; img-src 'self' data:; media-src 'self' data: blob:; style-src 'self'; script-src 'self'"
     >
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AegisOS EDU</title>
@@ -106,7 +106,14 @@
                 <p class="eyebrow">LangGraph + Gemini</p>
                 <h3>Advisor AI</h3>
               </div>
-              <span id="advisor-intent" class="count-badge">Ready</span>
+              <div class="advisor-controls">
+                <label for="advisor-language" class="sr-only">Language</label>
+                <select id="advisor-language" class="language-select" aria-label="Advisor language">
+                  <option value="english" selected>English</option>
+                  <option value="arabic">العربية</option>
+                </select>
+                <span id="advisor-intent" class="count-badge">Ready</span>
+              </div>
             </div>
 
             <div id="advisor-messages" class="advisor-messages" aria-live="polite"></div>
@@ -121,6 +128,10 @@
                   placeholder="Example: What should I focus on next semester?"
                   required
                 ></textarea>
+                <button id="advisor-voice-button" class="secondary-button voice-button" type="button" aria-label="Record voice message" title="Record voice message">
+                  <span class="mic-icon">Mic</span>
+                  <span class="recording-indicator" hidden>REC</span>
+                </button>
                 <button id="advisor-send-button" class="primary-button" type="submit">Send</button>
               </div>
             </form>

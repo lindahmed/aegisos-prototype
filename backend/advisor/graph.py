@@ -13,6 +13,11 @@ ALLOWED_INTENTS = {
     "general",
 }
 
+LANGUAGE_NAMES = {
+    "english": "English",
+    "arabic": "Arabic",
+}
+
 
 class AdvisorState(TypedDict, total=False):
     message: str
@@ -20,6 +25,12 @@ class AdvisorState(TypedDict, total=False):
     response: str
     history: list[dict[str, str]]
     student: dict[str, object]
+    context: dict[str, object]
+    language: str
+
+
+def _language_name(state: AdvisorState) -> str:
+    return LANGUAGE_NAMES.get(state.get("language", "english"), "English")
 
 
 def format_history(state: AdvisorState) -> str:
@@ -49,6 +60,84 @@ def format_student(state: AdvisorState) -> str:
         f"GPA: {student.get('gpa', 'Unknown')}\n"
         f"Currently enrolled courses: {course_text}"
     )
+
+
+def format_context(state: AdvisorState) -> str:
+    context = state.get("context", {})
+    if not context or context.get("twin") is None:
+        return "No detailed academic progress context is available for this student."
+
+    lines: list[str] = [
+        f"Semester: {context.get('semester', 'Unknown')}",
+        f"Current week: {context.get('current_week', 'Unknown')}",
+        f"Overall academic health: {context.get('overall_academic_health', 'Unknown')}/100",
+    ]
+
+    for course in context.get("courses", []):
+        metrics = course.get("metrics", {})
+        lines.append(
+            f"\nCourse: {course.get('course_name')} (risk: {course.get('risk_level', 'none')})"
+        )
+        lines.append(f"  - Health: {metrics.get('course_health', 'n/a')}/100, trend: {metrics.get('trend', 'n/a')}")
+        lines.append(f"  - Weighted grade posted: {metrics.get('weighted_grade', 'n/a')}")
+        lines.append(f"  - Assignment avg: {metrics.get('assignment_average', 'n/a')}, Lab avg: {metrics.get('lab_average', 'n/a')}, Exam: {metrics.get('exam_percentage', 'n/a')}")
+        lines.append(f"  - Lecture completion: {metrics.get('lecture_completion', 'n/a')}%")
+        if course.get("risks"):
+            lines.append(f"  - Active risks: {'; '.join(risk.get('message', '') for risk in course['risks'])}")
+        if course.get("unstudied_lectures"):
+            lines.append(f"  - Unstudied lectures: {', '.join(str(n) for n in course['unstudied_lectures'])}")
+
+    interventions = context.get("recent_interventions", [])
+    if interventions:
+        lines.append("\nRecent interventions:")
+        for intervention in interventions[:5]:
+            lines.append(
+                f"  - Week {intervention.get('week_number')}: {intervention.get('message')} "
+                f"(status: {intervention.get('status')})"
+            )
+
+    return "\n".join(lines)
+
+
+def format_knowledge(state: AdvisorState) -> str:
+    context = state.get("context", {})
+    lines: list[str] = []
+
+    programme = context.get("programme_progress")
+    if programme:
+        lines.append(
+            f"Programme: {programme.get('programme_name')} "
+            f"({programme.get('completed_credits')}/{programme.get('total_credits_required')} credits)."
+        )
+        lines.append(f"Completed courses: {', '.join(programme.get('completed_courses', [])) or 'None recorded'}.")
+        lines.append(f"Registered this semester: {', '.join(programme.get('registered_courses', [])) or 'None recorded'}.")
+        lines.append(f"Remaining required courses: {', '.join(programme.get('remaining_required_courses', [])) or 'None'}.")
+    else:
+        lines.append("No programme progress data is available.")
+
+    eligibility = context.get("course_eligibility")
+    if eligibility:
+        lines.append(
+            f"\nEligibility for {eligibility.get('course_code')} "
+            f"({eligibility.get('course_title')}): {'Eligible' if eligibility.get('eligible') else 'Not eligible'}. "
+            f"{eligibility.get('reason')}"
+        )
+        if eligibility.get("satisfied_prerequisites"):
+            codes = ', '.join(p['course_code'] for p in eligibility['satisfied_prerequisites'])
+            lines.append(f"  Satisfied prerequisites: {codes}.")
+        if eligibility.get("in_progress_prerequisites"):
+            codes = ', '.join(p['course_code'] for p in eligibility['in_progress_prerequisites'])
+            lines.append(f"  In-progress prerequisites: {codes}.")
+        if eligibility.get("missing_prerequisites"):
+            codes = ', '.join(p['course_code'] for p in eligibility['missing_prerequisites'])
+            lines.append(f"  Missing prerequisites: {codes}.")
+
+    recommended = context.get("recommended_next_courses")
+    if recommended:
+        codes = ', '.join(r['course_code'] for r in recommended)
+        lines.append(f"\nRecommended next courses (all prerequisites satisfied): {codes}.")
+
+    return "\n".join(lines)
 
 
 def classify_request(state: AdvisorState) -> AdvisorState:
@@ -81,6 +170,7 @@ Previous conversation:
 Latest student message:
 {state['message']}
 
+Respond in {_language_name(state)}.
 Return only the intent name. Do not include an explanation.
 """
 
@@ -95,12 +185,63 @@ def route_request(state: AdvisorState) -> str:
     return state["intent"]
 
 
-def academic_audit(state: AdvisorState) -> AdvisorState:
+def _system_persona(intent: str) -> str:
+    personas = {
+        "academic_audit": "You are the Academic Audit specialist inside AegisOS Advisor AI.",
+        "semester_planning": "You are the Semester Planning specialist inside AegisOS Advisor AI.",
+        "career_guidance": "You are the Career Guidance specialist inside AegisOS Advisor AI.",
+        "what_if_simulation": "You are the What-if Simulation specialist inside AegisOS Advisor AI.",
+        "general": "You are Advisor AI inside AegisOS, an academic advising assistant.",
+    }
+    return personas.get(intent, personas["general"])
+
+
+def _answer_guidelines(intent: str) -> str:
+    guidelines = {
+        "academic_audit": """
+Use the detailed academic context and knowledge graph below to answer as fully as possible.
+The knowledge graph contains programme requirements, completed courses, registered courses, and prerequisites.
+You MUST answer directly from these facts. Do NOT tell the student to ask a human advisor, check a portal, read a catalog, or visit an office.
+If a specific fact is missing, say exactly what is missing and still answer with what you know.
+Do not invent completed courses, earned credits, prerequisites, curriculum rules, or graduation requirements.
+""",
+        "semester_planning": """
+Use the student's actual programme rules, prerequisites, current courses, grades, and risks from the context below to recommend a plan.
+You MUST answer directly from these facts. Do NOT tell the student to ask a human advisor, check a portal, read a catalog, or visit an office.
+If prerequisites, credit limits, or registration rules are unknown, say so and still give a practical plan based on the known data.
+Do not invent prerequisites or university rules.
+""",
+        "career_guidance": """
+Give practical career guidance appropriate for this university student using their major, year, GPA, and current courses from the context.
+You may suggest concrete next steps such as skills to build, project ideas, or internship timing, but do not invent specific job openings or guaranteed outcomes.
+Do not redirect the student to a third party unless the question explicitly requires one.
+""",
+        "what_if_simulation": """
+Explain the likely effect of the scenario using the student's actual current grades, weights, and programme rules from the context.
+Do not invent university rules or guarantee an outcome.
+Clearly separate what follows from the known profile from what depends on missing prerequisites, regulations, grades, or curriculum data.
+""",
+        "general": """
+Respond briefly and helpfully. You can help with academic audits, semester planning, career guidance, and what-if simulations.
+Use the academic context below when relevant.
+Do not invent university rules or student information.
+""",
+    }
+    return guidelines.get(intent, guidelines["general"])
+
+
+def _generate_response(state: AdvisorState, intent: str) -> AdvisorState:
     prompt = f"""
-You are the Academic Audit specialist inside AegisOS Advisor AI.
+{_system_persona(intent)}
 
 Known student profile:
 {format_student(state)}
+
+Programme rules, prerequisites, and eligibility (authoritative knowledge graph):
+{format_knowledge(state)}
+
+Detailed semester progress context (courses, grades, risks, interventions):
+{format_context(state)}
 
 Recent conversation:
 {format_history(state)}
@@ -108,93 +249,32 @@ Recent conversation:
 Student question:
 {state['message']}
 
-Use the known profile when relevant. The listed courses are current enrollments, not proof of completed courses.
-Do not invent completed courses, earned credits, prerequisites, curriculum rules, or graduation requirements.
-If the answer needs information that is not present, say exactly what information is missing.
-Keep the answer concise and practical.
+{_answer_guidelines(intent)}
+
+Respond in {_language_name(state)}.
+Keep the answer concise, practical, and self-contained.
 """
     return {"response": ask_gemini(prompt)}
+
+
+def academic_audit(state: AdvisorState) -> AdvisorState:
+    return _generate_response(state, "academic_audit")
 
 
 def semester_planning(state: AdvisorState) -> AdvisorState:
-    prompt = f"""
-You are the Semester Planning specialist inside AegisOS Advisor AI.
-
-Known student profile:
-{format_student(state)}
-
-Recent conversation:
-{format_history(state)}
-
-Student question:
-{state['message']}
-
-Use the student's actual current courses and profile when relevant.
-Do not invent prerequisites, completed courses, credit limits, or university rules.
-If important curriculum information is missing, make that limitation explicit before recommending a plan.
-Keep the recommendation simple and practical.
-"""
-    return {"response": ask_gemini(prompt)}
+    return _generate_response(state, "semester_planning")
 
 
 def career_guidance(state: AdvisorState) -> AdvisorState:
-    prompt = f"""
-You are the Career Guidance specialist inside AegisOS Advisor AI.
-
-Known student profile:
-{format_student(state)}
-
-Recent conversation:
-{format_history(state)}
-
-Student question:
-{state['message']}
-
-Give practical career guidance appropriate for this university student.
-You may use the major, year, GPA, and current courses as context, but do not invent experience or skills that are not shown.
-Keep the answer concise and actionable.
-"""
-    return {"response": ask_gemini(prompt)}
+    return _generate_response(state, "career_guidance")
 
 
 def what_if_simulation(state: AdvisorState) -> AdvisorState:
-    prompt = f"""
-You are the What-if Simulation specialist inside AegisOS Advisor AI.
-
-Known student profile:
-{format_student(state)}
-
-Recent conversation:
-{format_history(state)}
-
-Student scenario:
-{state['message']}
-
-Explain the likely effect of the scenario.
-Do not invent university rules or guarantee an outcome.
-Clearly separate what follows from the known profile from what depends on missing prerequisites, regulations, grades, or curriculum data.
-Keep the answer concise and practical.
-"""
-    return {"response": ask_gemini(prompt)}
+    return _generate_response(state, "what_if_simulation")
 
 
 def general_response(state: AdvisorState) -> AdvisorState:
-    prompt = f"""
-You are Advisor AI inside AegisOS, an academic advising assistant.
-
-Known student profile:
-{format_student(state)}
-
-Recent conversation:
-{format_history(state)}
-
-Student message:
-{state['message']}
-
-Respond briefly. You can help with academic audits, semester planning, career guidance, and what-if simulations.
-Do not invent university rules or student information.
-"""
-    return {"response": ask_gemini(prompt)}
+    return _generate_response(state, "general")
 
 
 graph_builder = StateGraph(AdvisorState)

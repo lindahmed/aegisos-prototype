@@ -20,6 +20,8 @@ const progressPanel = document.querySelector('#progress-panel');
 const advisorForm = document.querySelector('#advisor-form');
 const advisorInput = document.querySelector('#advisor-input');
 const advisorSendButton = document.querySelector('#advisor-send-button');
+const advisorVoiceButton = document.querySelector('#advisor-voice-button');
+const advisorLanguage = document.querySelector('#advisor-language');
 const advisorMessages = document.querySelector('#advisor-messages');
 const advisorStatus = document.querySelector('#advisor-status');
 const advisorIntent = document.querySelector('#advisor-intent');
@@ -27,6 +29,7 @@ const advisorIntent = document.querySelector('#advisor-intent');
 let currentStudent = null;
 let selectedCourse = null;
 let advisorHistory = [];
+let activeRecording = null;
 
 
 async function apiRequest(path, options = {}) {
@@ -64,6 +67,7 @@ function setBusy(isBusy) {
 function setAdvisorBusy(isBusy) {
   advisorInput.disabled = isBusy;
   advisorSendButton.disabled = isBusy;
+  advisorVoiceButton.disabled = isBusy;
 }
 
 
@@ -135,7 +139,7 @@ async function loadProgress(studentId) {
 }
 
 
-function addAdvisorMessage(role, content) {
+function addAdvisorMessage(role, content, audioUrl = null) {
   const message = document.createElement('div');
   message.className = `chat-message ${role}`;
 
@@ -147,6 +151,15 @@ function addAdvisorMessage(role, content) {
   body.textContent = content;
 
   message.append(label, body);
+
+  if (audioUrl) {
+    const audio = document.createElement('audio');
+    audio.className = 'advisor-audio';
+    audio.controls = true;
+    audio.src = audioUrl;
+    message.append(audio);
+  }
+
   advisorMessages.append(message);
   advisorMessages.scrollTop = advisorMessages.scrollHeight;
 }
@@ -277,11 +290,13 @@ advisorForm.addEventListener('submit', async (event) => {
   setMessage(advisorStatus, 'Advisor AI is processing your request...');
 
   try {
+    const language = advisorLanguage.value;
     const result = await apiRequest('/advisor', {
       method: 'POST',
       body: JSON.stringify({
         student_id: currentStudent.student_id,
         message,
+        language,
         history: priorHistory,
       }),
     });
@@ -298,6 +313,159 @@ advisorForm.addEventListener('submit', async (event) => {
   } finally {
     setAdvisorBusy(false);
     advisorInput.focus();
+  }
+});
+
+
+function encodeWAV(samples, sampleRate = 16000) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  const writeString = (offset, string) => {
+    for (let i = 0; i < string.length; i += 1) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i += 1) {
+    let sample = Math.max(-1, Math.min(1, samples[i]));
+    sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+    view.setInt16(offset, sample, true);
+    offset += 2;
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+
+async function startRecording() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const audioContext = new AudioContext({ sampleRate: 16000 });
+  const source = audioContext.createMediaStreamSource(stream);
+  const processor = audioContext.createScriptProcessor(4096, 1, 1);
+  const chunks = [];
+
+  source.connect(processor);
+  processor.connect(audioContext.destination);
+
+  processor.onaudioprocess = (event) => {
+    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+  };
+
+  return {
+    stream,
+    audioContext,
+    source,
+    processor,
+    stop: async () => {
+      processor.disconnect();
+      source.disconnect();
+      stream.getTracks().forEach((track) => track.stop());
+      await audioContext.close();
+
+      const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      const samples = new Float32Array(totalLength);
+      let position = 0;
+      for (const chunk of chunks) {
+        samples.set(chunk, position);
+        position += chunk.length;
+      }
+      return encodeWAV(samples, 16000);
+    },
+  };
+}
+
+
+function setRecordingState(isRecording) {
+  advisorVoiceButton.classList.toggle('recording', isRecording);
+  advisorVoiceButton.querySelector('.mic-icon').hidden = isRecording;
+  advisorVoiceButton.querySelector('.recording-indicator').hidden = !isRecording;
+  advisorVoiceButton.setAttribute(
+    'aria-label',
+    isRecording ? 'Stop recording' : 'Record voice message',
+  );
+}
+
+
+async function sendVoiceMessage(blob) {
+  if (!currentStudent) return;
+
+  const language = advisorLanguage.value;
+  const formData = new FormData();
+  formData.append('student_id', currentStudent.student_id);
+  formData.append('language', language);
+  formData.append('audio', blob, 'message.wav');
+
+  setAdvisorBusy(true);
+  advisorIntent.textContent = 'Listening';
+  setMessage(advisorStatus, 'Transcribing and thinking...');
+
+  try {
+    const response = await fetch(`${apiBaseUrl}/advisor/voice`, {
+      method: 'POST',
+      body: formData,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || `Voice request failed (${response.status})`);
+    }
+
+    advisorHistory.push({ role: 'user', content: payload.transcript });
+    advisorHistory.push({ role: 'assistant', content: payload.response });
+    advisorHistory = advisorHistory.slice(-10);
+
+    addAdvisorMessage('user', payload.transcript);
+    const audioUrl = `data:audio/mp3;base64,${payload.audio_base64}`;
+    addAdvisorMessage('assistant', payload.response, audioUrl);
+    advisorIntent.textContent = payload.intent.replaceAll('_', ' ');
+    setMessage(advisorStatus, '');
+  } catch (error) {
+    setMessage(advisorStatus, error.message, true);
+    advisorIntent.textContent = 'Unavailable';
+  } finally {
+    setAdvisorBusy(false);
+  }
+}
+
+
+advisorVoiceButton.addEventListener('click', async () => {
+  if (!currentStudent) return;
+
+  if (activeRecording) {
+    try {
+      const blob = await activeRecording.stop();
+      activeRecording = null;
+      setRecordingState(false);
+      await sendVoiceMessage(blob);
+    } catch (error) {
+      activeRecording = null;
+      setRecordingState(false);
+      setMessage(advisorStatus, error.message, true);
+    }
+    return;
+  }
+
+  try {
+    activeRecording = await startRecording();
+    setRecordingState(true);
+    setMessage(advisorStatus, 'Recording... click Mic again to stop.');
+  } catch (error) {
+    setMessage(advisorStatus, `Microphone access failed: ${error.message}`, true);
   }
 });
 

@@ -1,0 +1,158 @@
+import type { LucideIcon } from 'lucide-react'
+
+export interface Staff {
+  id: string
+  staffId: string
+  fullName: string
+  firstName: string
+  position: string
+  academicRole: string
+  department: string
+  college: string
+  email: string
+  phone: string
+  office: string
+  avatarInitials: string
+}
+
+export type SectionStatus = 'Active' | 'Completed' | 'Upcoming'
+
+export interface CourseSection {
+  id: string
+  code: string
+  title: string
+  section: string
+  credits: number
+  semester: string
+  studentsCount: number
+  schedule: { day: string; start: string; end: string }[]
+  room: string
+  status: SectionStatus
+  materials: { name: string; type: 'PDF' | 'Slides' | 'Link' }[]
+  assignments: { name: string; due: string; submitted: number; total: number }[]
+  announcements: { title: string; date: string; body: string }[]
+}
+
+export type AttendanceStatus = 'Present' | 'Absent' | 'Excused' | 'Late'
+
+export interface Student {
+  id: string
+  studentId: string
+  fullName: string
+  college: string
+  department: string
+  level: string
+  section: string
+  email: string
+  attendancePct: number
+  gradeStatus: 'On Track' | 'At Risk' | 'Failing' | 'Excellent'
+  courses: string[]
+}
+
+export interface AttendanceRecord {
+  studentId: string
+  studentName: string
+  status: AttendanceStatus
+}
+
+export interface GradeRow {
+  studentId: string
+  studentName: string
+  assignments: number
+  midterm: number
+  final: number
+  total: number
+  grade: string
+  gpaPoints: number
+}
+
+export interface ScheduleSlot {
+  day: string
+  start: string
+  end: string
+  courseCode: string
+  courseTitle: string
+  room: string
+  section: string
+  type: 'Lecture' | 'Lab' | 'Tutorial'
+}
+
+export interface ExamRecord {
+  id: string
+  courseCode: string
+  courseTitle: string
+  section: string
+  date: string
+  start: string
+  end: string
+  room: string
+  type: 'Midterm' | 'Final' | 'Quiz'
+  status: 'Upcoming' | 'Completed'
+}
+
+export interface ExamCommittee {
+  id: string
+  examCourse: string
+  role: 'Chief Invigilator' | 'Invigilator' | 'Committee Member'
+  date: string
+  room: string
+}
+
+export type RequestStatus = 'Pending' | 'In Progress' | 'Approved' | 'Rejected' | 'Completed'
+export type RequestPriority = 'Low' | 'Normal' | 'High' | 'Urgent'
+
+export interface RequestRecord {
+  id: string
+  type: string
+  origin: 'staff' | 'student'
+  originName?: string
+  date: string
+  status: RequestStatus
+  priority: RequestPriority
+  details: string
+}
+
+export interface Notification {
+  id: string
+  title: string
+  category: 'University' | 'Academic' | 'Department' | 'Requests' | 'System'
+  timestamp: string
+  read: boolean
+  body: string
+}
+
+export interface Announcement {
+  id: string
+  title: string
+  category: 'University' | 'Academic' | 'Department' | 'Events'
+  date: string
+  body: string
+  read: boolean
+}
+
+export type ServiceKind = 'redirect' | 'form' | 'viewer' | 'info'
+
+export interface ServiceFormField {
+  label: string
+  type: 'text' | 'textarea' | 'select' | 'date'
+  options?: string[]
+  placeholder?: string
+}
+
+export interface ServiceRecord {
+  label: string
+  value: string
+}
+
+export interface StaffService {
+  id: string
+  slug: string
+  name: string
+  description: string
+  icon: LucideIcon
+  kind: ServiceKind
+  destinationLabel?: string
+  redirectNote?: string
+  fields?: ServiceFormField[]
+  records?: ServiceRecord[]
+}

@@ -5,6 +5,7 @@ from typing import Any
 
 from database.repository import StudentRepository
 
+from .config import THRESHOLDS
 from .metrics import build_metrics
 from .models import Assessment, CourseMaterial, CourseTwin, Lecture, Risk, StudentProfile, StudentTwin
 from .risks import detect_risks, highest_risk_level
@@ -14,6 +15,7 @@ def build_student_twin(repository: StudentRepository, student_id: str) -> Studen
     raw = repository.get_student_progress(student_id)
     if raw is None:
         return None
+    all_snapshots = repository.get_weekly_snapshots(student_id)
     course_twins: list[CourseTwin] = []
     for raw_course in raw["courses"]:
         assessments = [
@@ -32,7 +34,11 @@ def build_student_twin(repository: StudentRepository, student_id: str) -> Studen
         )
         previous_health = previous["course_health"] if previous else None
         metrics = build_metrics(assessments, lectures, raw_course["current_week"], previous_health)
-        risks = detect_risks(assessments, lectures, metrics, raw_course["current_week"])
+        course_snapshots = [
+            snapshot for snapshot in all_snapshots
+            if snapshot["course_id"] == raw_course["course_id"]
+        ]
+        risks = detect_risks(assessments, lectures, metrics, raw_course["current_week"], course_snapshots)
         course_twins.append(CourseTwin(
             course_id=raw_course["course_id"],
             course_name=raw_course["course_name"],
@@ -66,12 +72,25 @@ def build_student_twin(repository: StudentRepository, student_id: str) -> Studen
 
 
 def course_fingerprint(course: CourseTwin) -> str:
+    """Stable but specific signature for an intervention issue.
+
+    Includes severity so a worsening issue triggers a fresh intervention, and a
+    week bucket so a long-standing issue can be re-alerted after a configurable
+    interval without opening duplicates every run.
+    """
+    seen_assessment_ids: set[str] = set()
+    primary_assessment_ids: list[str] = []
+    for risk in course.risks:
+        for assessment_id in risk.related_assessment_ids:
+            if assessment_id not in seen_assessment_ids:
+                primary_assessment_ids.append(assessment_id)
+                seen_assessment_ids.add(assessment_id)
+                break
+
     payload: dict[str, Any] = {
-        "risk_codes": sorted(risk.code for risk in course.risks),
+        "risk_signatures": sorted(f"{risk.code}:{risk.severity}" for risk in course.risks),
+        "primary_assessment_ids": sorted(primary_assessment_ids),
         "unstudied_lecture_ids": sorted(lecture.lecture_id for lecture in course.unstudied_lectures),
-        "low_assessment_ids": sorted(
-            assessment.assessment_id for assessment in course.assessments
-            if assessment.percentage is not None and assessment.percentage < 60
-        ),
+        "week_bucket": course.current_week // THRESHOLDS.re_alert_interval_weeks,
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
