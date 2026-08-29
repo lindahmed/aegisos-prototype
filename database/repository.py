@@ -18,7 +18,7 @@ class Student:
     name: str
     major: str
     year: int
-    gpa: float
+    gpa: float | None
     courses: tuple[str, ...]
 
     def as_dict(self) -> dict[str, object]:

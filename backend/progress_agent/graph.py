@@ -120,6 +120,8 @@ def build_progress_graph(
     def save_snapshot(state: ProgressState) -> ProgressState:
         twin = state["twin"]
         for course in twin.courses:
+            if course.metrics.course_health is None:
+                continue
             repository.save_weekly_snapshot(
                 twin.student.student_id, course.course_id, twin.current_week,
                 metrics_as_snapshot(course.metrics, course.risk_level or "none"),
@@ -145,4 +147,3 @@ def build_progress_graph(
     graph.add_edge("save_interventions", "save_snapshot")
     graph.add_edge("save_snapshot", END)
     return graph.compile()
-

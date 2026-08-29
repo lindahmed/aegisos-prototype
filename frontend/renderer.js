@@ -99,7 +99,7 @@ function displayPercentage(value) {
 
 function renderProgress(twin) {
   document.querySelector('#progress-week').textContent = `${twin.semester} · Week ${twin.current_week}`;
-  document.querySelector('#overall-health').textContent = `${Number(twin.overall_academic_health).toFixed(0)}%`;
+  document.querySelector('#overall-health').textContent = displayPercentage(twin.overall_academic_health);
   const latest = twin.recent_interventions[0];
   document.querySelector('#current-intervention').textContent = latest ? latest.message : 'No intervention recorded yet.';
   const list = document.querySelector('#progress-course-list');

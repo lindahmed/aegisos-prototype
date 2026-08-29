@@ -14,7 +14,7 @@ class StudentProfile(BaseModel):
     name: str
     major: str
     year: int
-    gpa: float
+    gpa: float | None = None
 
 
 class Assessment(BaseModel):
@@ -59,7 +59,7 @@ class CourseMetrics(BaseModel):
     weighted_grade: float | None = None
     lecture_completion: float = Field(ge=0, le=100)
     assessment_completion: float = Field(ge=0, le=100)
-    course_health: float = Field(ge=0, le=100)
+    course_health: float | None = Field(default=None, ge=0, le=100)
     trend: Trend
     previous_course_health: float | None = Field(default=None, ge=0, le=100)
 
@@ -84,7 +84,7 @@ class StudentTwin(BaseModel):
     semester: str
     current_week: int
     courses: list[CourseTwin]
-    overall_academic_health: float = Field(ge=0, le=100)
+    overall_academic_health: float | None = Field(default=None, ge=0, le=100)
     active_risks: list[Risk] = Field(default_factory=list)
     weekly_history: list[dict[str, object]] = Field(default_factory=list)
     recent_interventions: list[dict[str, object]] = Field(default_factory=list)
@@ -111,4 +111,3 @@ class WhatIfResponse(BaseModel):
     after: dict[str, object]
     difference: dict[str, float | None]
     explanation: str
-

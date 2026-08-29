@@ -35,9 +35,9 @@ def run_assessment_grade_scenario(repository: StudentRepository, student_id: str
     }
     deterministic_explanation = (
         f"If {assessment.name} is recorded as {scenario.hypothetical_grade:.0f}%, "
-        f"the calculated current weighted grade changes from {_format(course.metrics.weighted_grade)} "
-        f"to {_format(after_metrics.weighted_grade)} and course health changes from "
-        f"{course.metrics.course_health:.1f} to {after_metrics.course_health:.1f}. "
+            f"the calculated current weighted grade changes from {_format(course.metrics.weighted_grade)} "
+            f"to {_format(after_metrics.weighted_grade)} and course health changes from "
+            f"{_format(course.metrics.course_health)} to {_format(after_metrics.course_health)}. "
         "This is a read-only projection, not an official grade update."
     )
     return WhatIfResponse(

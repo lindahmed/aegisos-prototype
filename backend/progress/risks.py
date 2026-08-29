@@ -56,7 +56,7 @@ def detect_risks(
     poor = [assessment for assessment in assessments if assessment.percentage is not None and assessment.percentage < THRESHOLDS.passing_percentage]
     if len(poor) >= THRESHOLDS.repeated_poor_count:
         risks.append(Risk(code="repeated_poor_assessments", severity="medium", message=f"{len(poor)} recorded assessments are below {THRESHOLDS.passing_percentage:.0f}%.", related_assessment_ids=[assessment.assessment_id for assessment in poor]))
-    if metrics.previous_course_health is not None and metrics.previous_course_health - metrics.course_health >= THRESHOLDS.significant_weekly_change:
+    if metrics.course_health is not None and metrics.previous_course_health is not None and metrics.previous_course_health - metrics.course_health >= THRESHOLDS.significant_weekly_change:
         risks.append(Risk(code="significant_decline", severity="high", message=f"Course health decreased from {metrics.previous_course_health:.0f} to {metrics.course_health:.0f} since the previous snapshot."))
     upcoming_exams = [assessment for assessment in assessments if assessment.assessment_type in {"midterm", "final", "exam"} and assessment.percentage is None and 0 <= assessment.due_week - current_week <= THRESHOLDS.upcoming_assessment_weeks]
     for exam in upcoming_exams:

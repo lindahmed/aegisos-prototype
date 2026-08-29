@@ -91,6 +91,12 @@ The mode must begin with `-rwsr-xr-x` and the owner/group must be `root root`. D
 - `GET /progress/{student_id}/interventions` - recommendation history.
 - `POST /progress/{student_id}/what-if` - read-only assessment-grade projection.
 
+When `DATABASE_URL` is configured, FastAPI uses the normalized PostgreSQL/Supabase database
+from the Database branch for student profiles and current course enrollments. SQLite remains
+the local fallback and explicit test database. The current PostgreSQL schema does not yet
+contain assessments, lectures, materials, or completion records, so progress health is returned
+as unavailable rather than fabricated until those portal records are added.
+
 The initial SQLite prototype contained profiles and enrollments only. The initializer now
 adds the related course, lecture, assessment, material, grade, snapshot, and intervention
 tables, plus clearly scoped prototype academic records for the registered demo students.

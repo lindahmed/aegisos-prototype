@@ -54,7 +54,11 @@ def build_student_twin(repository: StudentRepository, student_id: str) -> Studen
         semester=semester,
         current_week=current_week,
         courses=course_twins,
-        overall_academic_health=round(sum(course.metrics.course_health for course in course_twins) / len(course_twins), 2) if course_twins else 0.0,
+        overall_academic_health=(
+            round(sum(health_scores) / len(health_scores), 2)
+            if (health_scores := [course.metrics.course_health for course in course_twins if course.metrics.course_health is not None])
+            else None
+        ),
         active_risks=[risk for course in course_twins for risk in course.risks],
         weekly_history=repository.get_weekly_snapshots(student_id),
         recent_interventions=repository.get_interventions(student_id),
@@ -71,4 +75,3 @@ def course_fingerprint(course: CourseTwin) -> str:
         ),
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
-

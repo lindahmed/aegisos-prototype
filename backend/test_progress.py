@@ -123,3 +123,23 @@ def test_progress_fastapi_endpoints_and_read_only_what_if(tmp_path: Path, monkey
     assert projection.json()["difference"]["weighted_grade"] > 0
     after = client.get("/progress/231027905").json()
     assert before == after
+
+
+def test_database_url_selects_the_postgres_repository(tmp_path: Path, monkeypatch) -> None:
+    class FakePostgresRepository:
+        initialized = False
+
+        def __init__(self, dsn: str) -> None:
+            assert dsn == "postgresql://real-database"
+
+        def initialize(self) -> None:
+            self.initialized = True
+
+        def get_student(self, student_id: str):
+            return None
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://real-database")
+    monkeypatch.setattr(app_module, "PostgresStudentRepository", FakePostgresRepository)
+    client = TestClient(create_app(workspace_root=tmp_path / "students"))
+    response = client.get("/student/real-student")
+    assert response.status_code == 404

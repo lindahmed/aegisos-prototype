@@ -19,6 +19,7 @@ from backend.progress_agent.graph import (
 )
 from backend.simulation.what_if import run_assessment_grade_scenario
 from database.repository import Student, StudentRepository
+from database.postgres_repository import PostgresStudentRepository
 from workspace.manager import ToolUnavailableError, WorkspaceManager
 
 
@@ -51,15 +52,21 @@ def create_app(
     workspace_root: Path | None = None,
     launcher: Callable[[Path], None] | None = None,
 ) -> FastAPI:
-    database_path = db_path or Path(
-        os.environ.get("AEGIS_DB_PATH", PROJECT_ROOT / "database" / "aegisos.db")
-    )
     student_workspace_root = workspace_root or Path(
         os.environ.get(
             "AEGIS_WORKSPACE_ROOT", PROJECT_ROOT / "workspace" / "students"
         )
     )
-    repository = StudentRepository(database_path)
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url and db_path is None:
+        # The Database branch's normalized PostgreSQL/Supabase schema is the
+        # production source. db_path remains an explicit SQLite test override.
+        repository = PostgresStudentRepository(database_url)
+    else:
+        database_path = db_path or Path(
+            os.environ.get("AEGIS_DB_PATH", PROJECT_ROOT / "database" / "aegisos.db")
+        )
+        repository = StudentRepository(database_path)
     repository.initialize()
     progress_graph = build_progress_graph(repository)
     manager = WorkspaceManager(student_workspace_root, launcher=launcher)

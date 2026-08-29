@@ -44,13 +44,17 @@ def build_metrics(
 
     # Health is a transparent readiness indicator, not an official grade.  Each
     # available component is reweighted so missing future grades do not look like zeros.
-    health_components: list[tuple[float, float]] = [(lecture_completion, 0.25), (assessment_completion, 0.20)]
+    health_components: list[tuple[float, float]] = []
+    if expected_lectures:
+        health_components.append((lecture_completion, 0.25))
+    if expected_assessments:
+        health_components.append((assessment_completion, 0.20))
     if weighted_grade is not None:
         health_components.append((weighted_grade, 0.55))
     weight_sum = sum(weight for _, weight in health_components)
-    course_health = round(sum(value * weight for value, weight in health_components) / weight_sum, 2)
+    course_health = round(sum(value * weight for value, weight in health_components) / weight_sum, 2) if weight_sum else None
 
-    if previous_course_health is None:
+    if course_health is None or previous_course_health is None:
         trend = "new"
     elif course_health - previous_course_health >= 5:
         trend = "improving"
@@ -74,4 +78,3 @@ def build_metrics(
 
 def metrics_as_snapshot(metrics: CourseMetrics, risk_level: str) -> dict[str, Any]:
     return {**metrics.model_dump(), "risk_level": risk_level, "trend": metrics.trend}
-
