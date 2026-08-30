@@ -12,6 +12,7 @@ AI recommendations; grades and academic facts always remain database-derived.
 ## Repository layout
 
 - `frontend/` - secure Electron login/dashboard UI.
+- `mobile/` - Flutter student app connected to the same FastAPI/PostgreSQL data source.
 - `backend/` - FastAPI integration endpoints.
 - `database/` - CSV seed data, SQLite repository, and database initializer.
 - `workspace/` - controlled folder and VS Code actions.
@@ -102,6 +103,31 @@ adds the related course, lecture, assessment, material, grade, snapshot, and int
 tables, plus clearly scoped prototype academic records for the registered demo students.
 Replace those seed records with Task 1/SIS or portal imports when that data source is ready;
 the progress agent reads only through `StudentRepository`.
+
+## Flutter mobile app
+
+The app in `mobile/` talks to FastAPI; FastAPI is the only component that receives
+`DATABASE_URL`. This keeps the PostgreSQL password out of APK, IPA, and web bundles while
+still using the same Supabase data as the desktop and portal clients.
+
+Start the API so other devices can reach it:
+
+```bash
+python -m uvicorn backend.app:app --host 0.0.0.0 --port 8000
+```
+
+Then run Flutter. The default URL is `http://10.0.2.2:8000`, which is correct for an Android
+emulator. For a physical phone, iOS simulator, web, or a deployed API, pass the reachable URL:
+
+```bash
+cd mobile
+flutter pub get
+flutter run --dart-define=API_BASE_URL=http://YOUR_COMPUTER_LAN_IP:8000
+```
+
+Use HTTPS for production deployments. Student sign-in currently matches the portal prototype:
+it validates a student registration number through `GET /student/{student_id}` and then shows
+that student's PostgreSQL-backed profile and current courses.
 
 Workspace requests use this JSON shape:
 
