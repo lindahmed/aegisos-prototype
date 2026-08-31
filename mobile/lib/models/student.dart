@@ -6,7 +6,7 @@ class Student {
   final double? gpa;
   final List<String> courses;
 
-  Student({
+  const Student({
     required this.studentId,
     required this.name,
     required this.major,

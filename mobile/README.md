@@ -2,7 +2,8 @@
 
 Flutter client for the AegisOS student experience. It validates a student ID with the
 AegisOS FastAPI backend and displays the student's profile and current courses from the
-same PostgreSQL/Supabase database used by the rest of the project.
+same PostgreSQL/Supabase database used by the rest of the project. Its Advisor AI chat
+supports career guidance, semester planning, course questions, and academic progress.
 
 ## Architecture
 
@@ -10,6 +11,10 @@ The app intentionally does not connect directly to PostgreSQL. Mobile binaries c
 inspected, so embedding `DATABASE_URL` would expose the database password. The connection is:
 
 `Flutter app -> FastAPI /student/{student_id} -> PostgreSQL/Supabase`
+
+Advisor questions use the existing grounded backend flow:
+
+`Flutter chat -> FastAPI /advisor -> student context + Advisor AI`
 
 The root `.env` remains the single place where the backend reads `DATABASE_URL`.
 

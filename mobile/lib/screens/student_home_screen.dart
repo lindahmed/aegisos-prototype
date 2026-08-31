@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/student.dart';
+import 'advisor_screen.dart';
 import 'login_screen.dart';
 
 class StudentHomeScreen extends StatelessWidget {
@@ -99,6 +100,22 @@ class StudentHomeScreen extends StatelessWidget {
                 ),
               ),
             ),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            key: const Key('open-advisor'),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => AdvisorScreen(student: student),
+                ),
+              );
+            },
+            icon: const Icon(Icons.auto_awesome),
+            label: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 14),
+              child: Text('Ask Advisor AI'),
+            ),
+          ),
         ],
       ),
     );

@@ -127,7 +127,9 @@ flutter run --dart-define=API_BASE_URL=http://YOUR_COMPUTER_LAN_IP:8000
 
 Use HTTPS for production deployments. Student sign-in currently matches the portal prototype:
 it validates a student registration number through `GET /student/{student_id}` and then shows
-that student's PostgreSQL-backed profile and current courses.
+that student's PostgreSQL-backed profile and current courses. From the profile, **Ask Advisor
+AI** opens a chat for career guidance, semester planning, course questions, and academic
+progress using the existing `POST /advisor` backend contract.
 
 Workspace requests use this JSON shape:
 
