@@ -9,3 +9,8 @@ database/aegisos.db
 workspace/students/
 *.log
 .tmp/
+.DS_Store
+Advisor_db.zip
+
+.Rhistory
+test_flutter_app/

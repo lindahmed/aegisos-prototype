@@ -15,8 +15,7 @@ class ApiService {
   /// --dart-define=API_BASE_URL=https://api.example.com
   static const String defaultBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:8000',
-  );
+defaultValue: 'https://backend-production-6069.up.railway.app',  );
 
   final http.Client _client;
   final String baseUrl;
@@ -97,7 +96,7 @@ class ApiService {
               'history': recentHistory.map((item) => item.toJson()).toList(),
             }),
           )
-          .timeout(const Duration(seconds: 45));
+          .timeout(const Duration(seconds: 120));
     } on Exception {
       throw const ApiException(
         'Could not reach Advisor AI. Check that the backend is running and try again.',
