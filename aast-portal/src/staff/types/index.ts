@@ -58,9 +58,10 @@ export interface AttendanceRecord {
 export interface GradeRow {
   studentId: string
   studentName: string
-  assignments: number
-  midterm: number
-  final: number
+  coursework: number
+  week7Exam: number
+  week12Exam: number
+  finalExam: number
   total: number
   grade: string
   gpaPoints: number

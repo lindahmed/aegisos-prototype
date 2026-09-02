@@ -125,9 +125,9 @@ export default function StudentDetail() {
                       {grades.map((g) => (
                         <tr key={g.studentId} className="border-b border-border last:border-0">
                           <td className="px-4 py-3 font-mono text-xs font-semibold text-teal-700">{g.studentName}</td>
-                          <td className="px-4 py-3 font-mono text-text-secondary">{g.assignments}</td>
-                          <td className="px-4 py-3 font-mono text-text-secondary">{g.midterm}</td>
-                          <td className="px-4 py-3 font-mono text-text-secondary">{g.final}</td>
+                          <td className="px-4 py-3 font-mono text-text-secondary">{g.coursework}</td>
+                          <td className="px-4 py-3 font-mono text-text-secondary">{g.week7Exam}</td>
+                          <td className="px-4 py-3 font-mono text-text-secondary">{g.finalExam}</td>
                           <td className="px-4 py-3 font-mono font-semibold text-text-primary">{g.total}</td>
                           <td className="px-4 py-3 font-mono text-base font-bold text-text-primary">{g.grade}</td>
                           <td className="px-4 py-3 font-mono text-text-secondary">{g.gpaPoints.toFixed(1)}</td>

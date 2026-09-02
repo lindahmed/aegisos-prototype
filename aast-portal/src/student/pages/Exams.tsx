@@ -16,7 +16,8 @@ interface ExamRecord {
   courseTitle: string
   name: string
   dueWeek: number
-  percentage: number | null
+  mark: number | null
+  maxMarks: number
   status: 'Upcoming' | 'Completed'
 }
 
@@ -35,8 +36,9 @@ export default function Exams() {
             courseTitle: course.course_name,
             name: assessment.name,
             dueWeek: assessment.due_week,
-            percentage: assessment.percentage,
-            status: assessment.percentage !== null ? 'Completed' : 'Upcoming',
+            mark: assessment.mark,
+            maxMarks: assessment.max_marks,
+            status: assessment.mark !== null ? 'Completed' : 'Upcoming',
           })
         }
       }
@@ -86,8 +88,8 @@ export default function Exams() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                {e.percentage !== null && (
-                  <span className="font-mono text-sm font-semibold text-success">{e.percentage.toFixed(0)}%</span>
+                {e.mark !== null && (
+                  <span className="font-mono text-sm font-semibold text-success">{e.mark.toFixed(1)}/{e.maxMarks.toFixed(0)} marks</span>
                 )}
                 <StatusBadge label={e.status} tone={e.status === 'Upcoming' ? 'warning' : e.status === 'Completed' ? 'success' : 'error'} />
               </div>

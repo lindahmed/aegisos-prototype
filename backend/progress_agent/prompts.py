@@ -64,17 +64,64 @@ def risk_action_templates(risk_codes: set[str]) -> list[str]:
     return templates or ["Review the verified course material and complete the next study step."]
 
 
+
+def build_grounded_actions(course: CourseTwin) -> list[str]:
+    """Choose concrete actions from the current course facts, never generic filler."""
+    actions: list[str] = []
+    assessment_ids = {item for risk in course.risks for item in risk.related_assessment_ids}
+    related = [item for item in course.assessments if item.assessment_id in assessment_ids]
+    posted = [item for item in related if item.mark is not None]
+    if posted:
+        weakest = min(posted, key=lambda item: (item.mark or 0) / item.max_marks if item.max_marks else 1)
+        actions.append(
+            f"Review the marked feedback for {weakest.name} ({weakest.mark:.1f}/{weakest.max_marks:.0f}) "
+            "and redo the questions where marks were lost."
+        )
+
+    relevant_lecture_ids = {item for risk in course.risks for item in risk.related_lecture_ids}
+    lectures = [item for item in course.unstudied_lectures if item.lecture_id in relevant_lecture_ids]
+    if not lectures:
+        lectures = course.unstudied_lectures
+    if lectures:
+        selected = lectures[0]
+        actions.append(f"Complete Lecture {selected.lecture_number}, {selected.title}, as the next study step.")
+
+    upcoming = sorted(
+        [item for item in course.assessments if item.mark is None and item.due_week > course.current_week],
+        key=lambda item: (item.due_week, -item.max_marks),
+    )
+    if upcoming:
+        item = upcoming[0]
+        weeks = item.due_week - course.current_week
+        actions.append(
+            f"Prepare for {item.name}, worth {item.max_marks:.0f} marks and due in week {item.due_week}; "
+            f"there are {weeks} week{'s' if weeks != 1 else ''} remaining."
+        )
+
+    if course.metrics.trend == "declining" and course.metrics.previous_course_health is not None:
+        actions.append(
+            f"Use this week to reverse the academic-health decline from "
+            f"{course.metrics.previous_course_health:.0f}% to {course.metrics.course_health:.0f}%."
+        )
+    elif course.metrics.trend == "improving":
+        actions.append("Keep the study routine that produced the latest improvement and apply it to the next assessment.")
+
+    if not actions:
+        actions = risk_action_templates({risk.code for risk in course.risks})
+    return actions[:5]
+
+
 def intervention_prompt(course: CourseTwin, risks: list[Risk], lectures_to_review: list[str]) -> str:
     assessment_facts = "\n".join(
         f"- {assessment.name} ({assessment.assessment_type}): "
-        f"{assessment.percentage:.0f}%" if assessment.percentage is not None else
+        f"{assessment.mark:.1f}/{assessment.max_marks:.0f} marks" if assessment.mark is not None else
         f"- {assessment.name} ({assessment.assessment_type}): no recorded grade"
         for assessment in course.assessments
     )
     risk_facts = "\n".join(f"- {risk.message}" for risk in risks)
     lecture_facts = "\n".join(f"- {lecture}" for lecture in lectures_to_review) or "- None"
     suggested_actions = "\n".join(
-        f"- {action}" for action in risk_action_templates({risk.code for risk in risks})
+        f"- {action}" for action in build_grounded_actions(course)
     )
     return f"""
 You write a concise academic intervention for AegisOS. Return JSON only with this shape:
@@ -89,11 +136,11 @@ in the student's context rather than inventing unrelated tasks.
 
 Course: {course.course_name}
 Current week: {course.current_week}
-Assignment average: {course.metrics.assignment_average}
+Coursework performance (internal normalized value): {course.metrics.assignment_average}
 Lab average: {course.metrics.lab_average}
 Quiz average: {course.metrics.quiz_average}
-Exam percentage: {course.metrics.exam_percentage}
-Current weighted grade from posted assessments: {course.metrics.weighted_grade}
+Exam performance (internal normalized value): {course.metrics.exam_percentage}
+Current grade performance (internal normalized value): {course.metrics.weighted_grade}
 Previous course health: {course.metrics.previous_course_health}
 Current course health: {course.metrics.course_health}
 Trend: {course.metrics.trend}

@@ -133,6 +133,26 @@ defaultValue: 'https://backend-production-6069.up.railway.app',  );
     }
   }
 
+
+  Future<Map<String, dynamic>> getStudentAcademics(String studentId) async {
+    final normalizedId = Uri.encodeComponent(studentId.trim());
+    final uri = Uri.parse("$baseUrl/portal/students/$normalizedId/academics");
+    late http.Response response;
+    try {
+      response = await _client.get(uri).timeout(const Duration(seconds: 15));
+    } on Exception {
+      throw const ApiException('Could not load academic progress. Check your connection and try again.');
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(_errorDetail(response, 'Could not load academic progress (${response.statusCode}).'));
+    }
+    try {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } on Exception {
+      throw const ApiException('The server returned invalid academic progress data.');
+    }
+  }
+
   void close() => _client.close();
 }
 

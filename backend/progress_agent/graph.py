@@ -13,7 +13,7 @@ from backend.progress.service import build_student_twin, course_fingerprint
 from database.postgres_repository import PostgresStudentRepository
 from database.repository import StudentRepository
 
-from .prompts import intervention_prompt, risk_action_templates
+from .prompts import build_grounded_actions, intervention_prompt
 
 
 class StudentNotFoundError(LookupError):
@@ -57,7 +57,7 @@ def _validate_intervention(
     lecture_candidates = lecture_candidates[:4]
     actions = [action.strip() for action in generated.recommended_actions if action.strip()][:5]
     if not actions:
-        actions = risk_action_templates({risk.code for risk in course.risks})[:5]
+        actions = build_grounded_actions(course)
     message = generated.message.strip()
     if not message:
         message = f"{course.course_name} needs attention this week. {reason}"

@@ -59,14 +59,20 @@ class WorkspaceResponse(BaseModel):
 
 class PortalGradebookRowRequest(BaseModel):
     student_id: str = Field(min_length=1, max_length=64)
-    assignment_score: float = Field(ge=0, le=100)
-    midterm_score: float = Field(ge=0, le=100)
-    final_score: float = Field(ge=0, le=100)
+    coursework_mark: float = Field(ge=0, le=10)
+    week7_exam_mark: float = Field(ge=0, le=30)
+    week12_exam_mark: float = Field(ge=0, le=20)
+    final_exam_mark: float = Field(ge=0, le=40)
 
 
 class PortalGradebookUpdateRequest(BaseModel):
     semester: str = Field(min_length=1, max_length=64)
     rows: list[PortalGradebookRowRequest] = Field(min_length=1)
+
+
+class PortalNotificationReadRequest(BaseModel):
+    notification_ids: list[str] = Field(max_length=200)
+    read: bool = True
 
 
 GRADE_SCALE = [
@@ -83,10 +89,8 @@ GRADE_SCALE = [
 
 
 def _weighted_total(record: dict[str, object]) -> float:
-    assignment = float(record.get("assignment_score", 0) or 0)
-    midterm = float(record.get("midterm_score", 0) or 0)
-    final = float(record.get("final_score", 0) or 0)
-    return round((assignment * 0.3) + (midterm * 0.3) + (final * 0.4), 2)
+    fields = ("coursework_mark", "week7_exam_mark", "week12_exam_mark", "final_exam_mark")
+    return round(sum(float(record.get(field, 0) or 0) for field in fields), 2)
 
 
 def _score_to_grade(total: float) -> tuple[str, float]:
@@ -97,22 +101,13 @@ def _score_to_grade(total: float) -> tuple[str, float]:
 
 
 def _enrich_grade_record(record: dict[str, object]) -> dict[str, object]:
-    assignment_score = round(float(record.get("assignment_score", 0) or 0), 2)
-    midterm_score = round(float(record.get("midterm_score", 0) or 0), 2)
-    final_score = round(float(record.get("final_score", 0) or 0), 2)
-    total_score = _weighted_total(
-        {
-            "assignment_score": assignment_score,
-            "midterm_score": midterm_score,
-            "final_score": final_score,
-        }
-    )
+    fields = ("coursework_mark", "week7_exam_mark", "week12_exam_mark", "final_exam_mark")
+    marks = {field: round(float(record.get(field, 0) or 0), 2) for field in fields}
+    total_score = _weighted_total(marks)
     letter_grade, gpa_points = _score_to_grade(total_score)
     return {
         **record,
-        "assignment_score": assignment_score,
-        "midterm_score": midterm_score,
-        "final_score": final_score,
+        **marks,
         "total_score": total_score,
         "letter_grade": letter_grade,
         "gpa_points": gpa_points,
@@ -142,7 +137,7 @@ def _semester_summaries(records: list[dict[str, object]]) -> list[dict[str, obje
         )
         standing = (
             "In Progress"
-            if any(float(record["final_score"]) == 0 for record in semester_records)
+            if any(float(record["final_exam_mark"]) == 0 for record in semester_records)
             else _standing_for_gpa(gpa)
         )
         summaries.append(
@@ -154,6 +149,67 @@ def _semester_summaries(records: list[dict[str, object]]) -> list[dict[str, obje
             }
         )
     return sorted(summaries, key=lambda summary: str(summary["semester"]), reverse=True)
+
+
+def _portal_notifications(
+    repository: StudentRepository | PostgresStudentRepository, student_id: str
+) -> list[dict[str, object]]:
+    report = repository.get_student_portal_grade_report(student_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    read_ids = repository.get_read_notification_ids(student_id)
+    items: list[dict[str, object]] = []
+    for raw_record in report["records"]:
+        record = _enrich_grade_record(raw_record)
+        total = float(record["total_score"])
+        notification_id = (
+            f"grade:{record['course_id']}:{record['semester']}:{total:.2f}"
+        )
+        items.append(
+            {
+                "id": notification_id,
+                "type": "grade",
+                "category": "Grades",
+                "title": f"Grade posted: {record['course_name']}",
+                "body": f"{record['letter_grade']} · {total:.1f}% overall",
+                "timestamp": str(record["semester"]),
+                "read": notification_id in read_ids,
+            }
+        )
+
+    twin = build_student_twin(repository, student_id)
+    if twin is not None:
+        exam_types = {"midterm", "final", "exam"}
+        for course in twin.courses:
+            for assessment in course.assessments:
+                if assessment.assessment_type not in exam_types:
+                    continue
+                if assessment.mark is not None:
+                    continue
+                if not twin.current_week <= assessment.due_week <= twin.current_week + 2:
+                    continue
+                weeks_left = assessment.due_week - twin.current_week
+                when = (
+                    "this week"
+                    if weeks_left == 0
+                    else "next week"
+                    if weeks_left == 1
+                    else f"in {weeks_left} weeks"
+                )
+                notification_id = f"exam:{assessment.assessment_id}"
+                items.append(
+                    {
+                        "id": notification_id,
+                        "type": "exam",
+                        "category": "Registration",
+                        "title": f"Upcoming {assessment.assessment_type}: {assessment.name}",
+                        "body": f"{course.course_name} · week {assessment.due_week} ({when})",
+                        "timestamp": f"Week {assessment.due_week}",
+                        "read": notification_id in read_ids,
+                    }
+                )
+    return items
 
 
 def _enrolled_course(student: Student, requested_course: str) -> str:
@@ -294,6 +350,21 @@ def create_app(
                 "records": records,
             },
         }
+
+    @api.get("/portal/students/{student_id}/notifications")
+    def get_portal_student_notifications(student_id: str) -> dict[str, object]:
+        return {"notifications": _portal_notifications(repository, student_id)}
+
+    @api.put("/portal/students/{student_id}/notifications/read")
+    def set_portal_student_notifications_read(
+        student_id: str, request: PortalNotificationReadRequest
+    ) -> dict[str, object]:
+        if repository.get_student(student_id) is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        repository.set_notifications_read(
+            student_id, request.notification_ids, request.read
+        )
+        return {"notifications": _portal_notifications(repository, student_id)}
 
     @api.get("/portal/staff/{staff_id}")
     def validate_portal_staff(staff_id: str) -> dict[str, object]:

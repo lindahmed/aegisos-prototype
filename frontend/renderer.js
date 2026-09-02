@@ -100,12 +100,81 @@ function displayPercentage(value) {
   return value === null || value === undefined ? '—' : `${Number(value).toFixed(1)}%`;
 }
 
+function healthTone(value) {
+  if (value === null || value === undefined) return 'health-unknown';
+  return value >= 70 ? 'health-green' : value >= 60 ? 'health-yellow' : 'health-red';
+}
+
+function gradeMarks(course) {
+  const posted = course.assessments.filter((item) => item.mark !== null && item.mark !== undefined);
+  return posted.length ? posted.map((item) => `${item.name} ${Number(item.mark).toFixed(1)}/${Number(item.max_marks).toFixed(0)}`).join(' · ') : 'No marks posted yet';
+}
+
+
+function healthHistoryPoints(twin, course) {
+  const points = (twin.weekly_history || [])
+    .filter((row) => row.course_id === course.course_id)
+    .map((row) => ({
+      week: Number(row.week_number),
+      value: row.course_health === null || row.course_health === undefined ? null : Number(row.course_health),
+    }))
+    .filter((point) => point.value !== null && !Number.isNaN(point.value))
+    .sort((a, b) => a.week - b.week);
+
+  const current = course.metrics.course_health;
+  if (current !== null && current !== undefined && !points.some((point) => point.week === twin.current_week)) {
+    points.push({ week: twin.current_week, value: Number(current) });
+    points.sort((a, b) => a.week - b.week);
+  }
+  return points;
+}
+
+
+function buildHealthChart(points) {
+  const chart = document.createElement('div');
+  chart.className = 'health-chart';
+  if (points.length === 0) {
+    chart.classList.add('empty');
+    chart.textContent = 'No weekly history yet';
+    return chart;
+  }
+
+  const width = 210;
+  const height = 60;
+  const padX = 10;
+  const padY = 10;
+  const weeks = points.map((point) => point.week);
+  const minWeek = Math.min(...weeks);
+  const maxWeek = Math.max(...weeks);
+  const span = Math.max(1, maxWeek - minWeek);
+  const x = (week) => padX + ((week - minWeek) / span) * (width - padX * 2);
+  const y = (value) => padY + (1 - Math.max(0, Math.min(100, value)) / 100) * (height - padY * 2);
+
+  const latest = points[points.length - 1].value;
+  const tone = latest >= 70 ? 'var(--green)' : latest >= 60 ? 'var(--amber)' : 'var(--red)';
+  const linePoints = points.map((point) => `${x(point.week).toFixed(1)},${y(point.value).toFixed(1)}`).join(' ');
+  const dots = points
+    .map((point) => `<circle cx="${x(point.week).toFixed(1)}" cy="${y(point.value).toFixed(1)}" r="2.6" fill="${tone}"><title>Week ${point.week}: ${point.value.toFixed(1)}%</title></circle>`)
+    .join('');
+
+  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Weekly course health trend">
+    <line x1="${padX}" y1="${y(60)}" x2="${width - padX}" y2="${y(60)}" stroke="var(--border)" stroke-dasharray="3 3" stroke-width="1"></line>
+    <polyline points="${linePoints}" fill="none" stroke="${tone}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
+    ${dots}
+    <text class="health-chart-axis" x="${padX}" y="${height - 1}">W${minWeek}</text>
+    <text class="health-chart-axis" x="${width - padX}" y="${height - 1}" text-anchor="end">W${maxWeek}</text>
+  </svg>`;
+  return chart;
+}
+
 
 function renderProgress(twin) {
   document.querySelector('#progress-week').textContent = `${twin.semester} · Week ${twin.current_week}`;
-  document.querySelector('#overall-health').textContent = displayPercentage(twin.overall_academic_health);
-  const latest = twin.recent_interventions[0];
-  document.querySelector('#current-intervention').textContent = latest ? latest.message : 'No intervention recorded yet.';
+  const overallHealth = document.querySelector('#overall-health');
+  overallHealth.textContent = displayPercentage(twin.overall_academic_health);
+  overallHealth.className = healthTone(twin.overall_academic_health);
+  const latest = twin.recent_interventions.find((item) => item.status === 'active' || item.status === 'escalated');
+  document.querySelector('#current-intervention').textContent = latest?.message || twin.current_recommendation || 'No recommendation is needed right now.';
   const list = document.querySelector('#progress-course-list');
   list.replaceChildren();
   for (const course of twin.courses) {
@@ -115,13 +184,17 @@ function renderProgress(twin) {
     title.textContent = course.course_name;
     const risk = document.createElement('span');
     risk.className = `risk-badge ${course.risk_level || 'none'}`;
-    risk.textContent = course.risk_level || 'on track';
+    risk.textContent = course.risk_level === 'high' ? 'high risk' : course.risk_level === 'medium' ? 'mid risk' : 'safe';
     const facts = document.createElement('p');
-    facts.textContent = `Health ${displayPercentage(course.metrics.course_health)} · Weighted grade ${displayPercentage(course.metrics.weighted_grade)} · Lectures ${course.completed_lectures.length}/${course.lectures.filter((lecture) => lecture.available_week <= twin.current_week).length}`;
+    facts.textContent = `Academic health ${displayPercentage(course.metrics.course_health)} · ${gradeMarks(course)} · Lectures ${course.completed_lectures.length}/${course.lectures.filter((lecture) => lecture.available_week <= twin.current_week).length}`;
+    facts.classList.add(healthTone(course.metrics.course_health));
+    const trendRow = document.createElement('div');
+    trendRow.className = 'progress-trend-row';
     const details = document.createElement('p');
     details.className = 'progress-details';
-    details.textContent = `Assignments ${displayPercentage(course.metrics.assignment_average)} · Labs ${displayPercentage(course.metrics.lab_average)} · Exam ${displayPercentage(course.metrics.exam_percentage)} · ${course.metrics.trend}`;
-    card.append(title, risk, facts, details);
+    details.textContent = `Trend: ${course.metrics.trend}`;
+    trendRow.append(details, buildHealthChart(healthHistoryPoints(twin, course)));
+    card.append(title, risk, facts, trendRow);
     list.append(card);
   }
 }
@@ -137,6 +210,170 @@ async function loadProgress(studentId) {
     setMessage(document.querySelector('#progress-status'), error.message, true);
   }
 }
+
+
+const notifButton = document.querySelector('#notif-button');
+const notifBadge = document.querySelector('#notif-badge');
+const notifPanel = document.querySelector('#notif-panel');
+const notifList = document.querySelector('#notif-list');
+const notifEmpty = document.querySelector('#notif-empty');
+const notifClearButton = document.querySelector('#notif-clear-button');
+
+const NOTIF_POLL_MS = 60000;
+let notifTimer = null;
+let notifPrimed = false;
+let notifications = [];
+
+
+function renderNotifications() {
+  const unread = notifications.filter((item) => !item.read);
+
+  notifBadge.hidden = unread.length === 0;
+  notifBadge.textContent = String(unread.length);
+
+  notifList.replaceChildren();
+  notifEmpty.hidden = notifications.length > 0;
+  for (const item of notifications) {
+    const row = document.createElement('div');
+    row.className = `notif-item ${item.type}${item.read ? '' : ' unread'}`;
+    const dot = document.createElement('span');
+    dot.className = 'notif-dot';
+    const text = document.createElement('div');
+    const title = document.createElement('p');
+    title.className = 'notif-item-title';
+    title.textContent = item.title;
+    const body = document.createElement('p');
+    body.className = 'notif-item-body';
+    body.textContent = item.body;
+    text.append(title, body);
+    row.append(dot, text);
+    notifList.append(row);
+  }
+}
+
+
+const toastContainer = document.querySelector('#toast-container');
+const TOAST_DURATION_MS = 5000;
+
+
+function showToasts(items) {
+  for (const item of items.slice(0, 4)) {
+    const toast = document.createElement('div');
+    toast.className = `toast ${item.type}`;
+
+    const body = document.createElement('div');
+    body.className = 'toast-body';
+    const title = document.createElement('p');
+    title.className = 'toast-title';
+    title.textContent = item.title;
+    const text = document.createElement('p');
+    text.className = 'toast-text';
+    text.textContent = item.body;
+    body.append(title, text);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'toast-close';
+    close.textContent = '✕';
+    close.setAttribute('aria-label', 'Dismiss notification');
+
+    let dismissed = false;
+    const dismiss = () => {
+      if (dismissed) return;
+      dismissed = true;
+      toast.classList.add('leaving');
+      setTimeout(() => toast.remove(), 250);
+    };
+    close.addEventListener('click', dismiss);
+
+    toast.append(body, close);
+    toastContainer.append(toast);
+    setTimeout(dismiss, TOAST_DURATION_MS);
+  }
+}
+
+
+async function refreshNotifications() {
+  if (!currentStudent) return;
+  try {
+    const response = await apiRequest(`/portal/students/${encodeURIComponent(currentStudent.student_id)}/notifications`);
+    const items = response.notifications || [];
+    const fresh = items.filter((item) => !item.read && !notifications.some((old) => old.id === item.id));
+    notifications = items;
+    renderNotifications();
+    if (notifPrimed && fresh.length > 0) {
+      showToasts(fresh);
+    }
+    notifPrimed = true;
+  } catch (_error) {
+    // Notification sync is best-effort and must never break the dashboard.
+  }
+}
+
+
+function startNotificationSync() {
+  stopNotificationSync();
+  notifPrimed = false;
+  notifications = [];
+  renderNotifications();
+  refreshNotifications();
+  notifTimer = setInterval(refreshNotifications, NOTIF_POLL_MS);
+}
+
+function stopNotificationSync() {
+  if (notifTimer) {
+    clearInterval(notifTimer);
+    notifTimer = null;
+  }
+}
+
+
+async function markAllNotificationsRead() {
+  if (!currentStudent) return;
+  const unreadIds = notifications.filter((item) => !item.read).map((item) => item.id);
+  if (unreadIds.length === 0) return;
+  notifications = notifications.map((item) => ({ ...item, read: true }));
+  renderNotifications();
+  try {
+    const response = await apiRequest(
+      `/portal/students/${encodeURIComponent(currentStudent.student_id)}/notifications/read`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ notification_ids: unreadIds, read: true }),
+      },
+    );
+    notifications = response.notifications || [];
+    renderNotifications();
+  } catch (_error) {
+    await refreshNotifications();
+  }
+}
+
+
+notifButton.addEventListener('click', () => {
+  const opening = notifPanel.hidden;
+  notifPanel.hidden = !opening;
+  notifButton.setAttribute('aria-expanded', String(opening));
+  if (opening) {
+    markAllNotificationsRead();
+  }
+});
+
+notifClearButton.addEventListener('click', markAllNotificationsRead);
+
+document.addEventListener('click', (event) => {
+  if (notifPanel.hidden) return;
+  if (event.target instanceof Element && event.target.closest('.notif-wrap')) return;
+  notifPanel.hidden = true;
+  notifButton.setAttribute('aria-expanded', 'false');
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || notifPanel.hidden) return;
+  notifPanel.hidden = true;
+  notifButton.setAttribute('aria-expanded', 'false');
+  notifButton.focus();
+});
 
 
 function addAdvisorMessage(role, content, audioUrl = null) {
@@ -205,6 +442,7 @@ function renderStudent(student) {
   showDashboardSection('workspace');
   resetAdvisor();
   loadProgress(student.student_id);
+  startNotificationSync();
 
   if (student.courses.length > 0) {
     selectCourse(student.courses[0]);
@@ -471,6 +709,11 @@ advisorVoiceButton.addEventListener('click', async () => {
 
 
 document.querySelector('#sign-out-button').addEventListener('click', () => {
+  stopNotificationSync();
+  notifications = [];
+  toastContainer.replaceChildren();
+  notifPanel.hidden = true;
+  notifButton.setAttribute('aria-expanded', 'false');
   currentStudent = null;
   selectedCourse = null;
   advisorHistory = [];

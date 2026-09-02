@@ -62,9 +62,10 @@ def test_staff_grade_save_is_visible_to_student_portal(tmp_path: Path) -> None:
             "rows": [
                 {
                     "student_id": "231027905",
-                    "assignment_score": 91,
-                    "midterm_score": 84,
-                    "final_score": 88,
+                    "coursework_mark": 9.1,
+                    "week7_exam_mark": 25.2,
+                    "week12_exam_mark": 16.8,
+                    "final_exam_mark": 35.2,
                 }
             ],
         },
@@ -72,21 +73,23 @@ def test_staff_grade_save_is_visible_to_student_portal(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     saved_row = response.json()["rows"][0]
-    assert saved_row["assignment_score"] == 91
-    assert saved_row["midterm_score"] == 84
-    assert saved_row["final_score"] == 88
-    assert saved_row["total_score"] == 87.7
-    assert saved_row["letter_grade"] == "B+"
+    assert saved_row["coursework_mark"] == 9.1
+    assert saved_row["week7_exam_mark"] == 25.2
+    assert saved_row["week12_exam_mark"] == 16.8
+    assert saved_row["final_exam_mark"] == 35.2
+    assert saved_row["total_score"] == 86.3
+    assert saved_row["letter_grade"] == "B"
 
     student_response = client.get("/portal/students/231027905/grades")
     assert student_response.status_code == 200
     records = student_response.json()["records"]
     ai_record = next(record for record in records if record["course_id"] == "ai")
-    assert ai_record["assignment_score"] == 91
-    assert ai_record["midterm_score"] == 84
-    assert ai_record["final_score"] == 88
-    assert ai_record["total_score"] == 87.7
-    assert ai_record["letter_grade"] == "B+"
+    assert ai_record["coursework_mark"] == 9.1
+    assert ai_record["week7_exam_mark"] == 25.2
+    assert ai_record["week12_exam_mark"] == 16.8
+    assert ai_record["final_exam_mark"] == 35.2
+    assert ai_record["total_score"] == 86.3
+    assert ai_record["letter_grade"] == "B"
 
 
 def test_workspace_is_created_for_enrolled_course(tmp_path: Path) -> None:
@@ -161,6 +164,60 @@ def test_portal_student_academics_returns_courses_and_grades(tmp_path: Path) -> 
     assert "records" in data["grades"]
 
 
+def test_portal_notifications_use_live_academic_data(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get("/portal/students/231027905/notifications")
+
+    assert response.status_code == 200
+    notifications = response.json()["notifications"]
+    assert notifications
+    assert all(notification["read"] is False for notification in notifications)
+    assert any(
+        notification["type"] == "grade"
+        and notification["category"] == "Grades"
+        and "Artificial Intelligence" in notification["title"]
+        for notification in notifications
+    )
+
+
+def test_notification_read_state_is_shared_and_reversible(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    notifications = client.get(
+        "/portal/students/231027905/notifications"
+    ).json()["notifications"]
+    notification_id = notifications[0]["id"]
+
+    marked = client.put(
+        "/portal/students/231027905/notifications/read",
+        json={"notification_ids": [notification_id], "read": True},
+    )
+    assert marked.status_code == 200
+    assert next(
+        notification
+        for notification in marked.json()["notifications"]
+        if notification["id"] == notification_id
+    )["read"] is True
+    assert next(
+        notification
+        for notification in client.get(
+            "/portal/students/231027905/notifications"
+        ).json()["notifications"]
+        if notification["id"] == notification_id
+    )["read"] is True
+
+    unmarked = client.put(
+        "/portal/students/231027905/notifications/read",
+        json={"notification_ids": [notification_id], "read": False},
+    )
+    assert unmarked.status_code == 200
+    assert next(
+        notification
+        for notification in unmarked.json()["notifications"]
+        if notification["id"] == notification_id
+    )["read"] is False
+
+
 def test_portal_grade_save_feeds_progress_agent(tmp_path: Path) -> None:
     client = make_client(tmp_path)
 
@@ -171,9 +228,10 @@ def test_portal_grade_save_feeds_progress_agent(tmp_path: Path) -> None:
             "rows": [
                 {
                     "student_id": "231027905",
-                    "assignment_score": 40,
-                    "midterm_score": 35,
-                    "final_score": 30,
+                    "coursework_mark": 4,
+                    "week7_exam_mark": 10.5,
+                    "week12_exam_mark": 7,
+                    "final_exam_mark": 12,
                 }
             ],
         },

@@ -19,12 +19,12 @@ def build_student_twin(repository: StudentRepository, student_id: str) -> Studen
     course_twins: list[CourseTwin] = []
     for raw_course in raw["courses"]:
         assessments = [
-            Assessment(
-                **{
-                    **assessment,
-                    "covered_lecture_ids": json.loads(assessment["covered_lecture_ids"]),
-                }
-            )
+            Assessment(**{
+                **assessment,
+                "covered_lecture_ids": json.loads(assessment["covered_lecture_ids"]),
+                "mark": (assessment["percentage"] * assessment["weight"] / 100) if assessment["percentage"] is not None else None,
+                "max_marks": assessment["weight"],
+            })
             for assessment in raw_course["assessments"]
         ]
         lectures = [Lecture(**lecture) for lecture in raw_course["lectures"]]
@@ -55,7 +55,7 @@ def build_student_twin(repository: StudentRepository, student_id: str) -> Studen
         ))
     semester = course_twins[0].semester if course_twins else "Unknown"
     current_week = course_twins[0].current_week if course_twins else 1
-    return StudentTwin(
+    twin = StudentTwin(
         student=StudentProfile(**raw["student"]),
         semester=semester,
         current_week=current_week,
@@ -69,6 +69,55 @@ def build_student_twin(repository: StudentRepository, student_id: str) -> Studen
         weekly_history=repository.get_weekly_snapshots(student_id),
         recent_interventions=repository.get_interventions(student_id),
     )
+    twin.current_recommendation = build_current_recommendation(twin.courses, twin.current_week)
+    return twin
+
+
+
+def build_current_recommendation(courses: list[CourseTwin], current_week: int) -> str | None:
+    """Build a current, fact-specific recommendation without using stale interventions."""
+    available = [course for course in courses if course.metrics.course_health is not None]
+    if not available:
+        return None
+    course = max(
+        available,
+        key=lambda item: (
+            1 if item.risks else 0,
+            {"high": 3, "medium": 2, "low": 1, None: 0}[item.risk_level],
+            -(item.metrics.course_health or 0),
+        ),
+    )
+    parts: list[str] = []
+    if course.metrics.trend == "improving" and course.metrics.previous_course_health is not None:
+        parts.append(
+            f"{course.course_name} improved from {course.metrics.previous_course_health:.0f}% "
+            f"to {course.metrics.course_health:.0f}% academic health; keep the study pattern that produced this recovery."
+        )
+    elif course.risks:
+        parts.append(f"Prioritize {course.course_name} this week because it has {len(course.risks)} active risk signal(s).")
+    else:
+        parts.append(f"{course.course_name} is currently safe at {course.metrics.course_health:.0f}% academic health; maintain the current pace.")
+
+    posted = [assessment for assessment in course.assessments if assessment.mark is not None]
+    if posted:
+        weakest = min(posted, key=lambda item: (item.mark or 0) / item.max_marks if item.max_marks else 1)
+        parts.append(f"Use the feedback from {weakest.name}, recorded at {weakest.mark:.1f}/{weakest.max_marks:.0f} marks, to choose the first topic to review.")
+
+    upcoming = sorted(
+        [assessment for assessment in course.assessments if assessment.mark is None and assessment.due_week > current_week],
+        key=lambda item: (item.due_week, -item.max_marks),
+    )
+    if upcoming:
+        next_item = upcoming[0]
+        weeks = next_item.due_week - current_week
+        parts.append(
+            f"Start preparing for {next_item.name}, worth {next_item.max_marks:.0f} marks and due in week "
+            f"{next_item.due_week} ({weeks} week{'s' if weeks != 1 else ''} away)."
+        )
+    if course.unstudied_lectures:
+        lecture = course.unstudied_lectures[0]
+        parts.append(f"Complete Lecture {lecture.lecture_number}, {lecture.title}, as the next recorded study step.")
+    return " ".join(parts)
 
 
 def course_fingerprint(course: CourseTwin) -> str:

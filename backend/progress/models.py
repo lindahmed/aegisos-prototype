@@ -24,7 +24,9 @@ class Assessment(BaseModel):
     weight: float = Field(ge=0, le=100)
     due_week: int = Field(ge=1)
     covered_lecture_ids: list[str] = Field(default_factory=list)
-    percentage: float | None = Field(default=None, ge=0, le=100)
+    percentage: float | None = Field(default=None, ge=0, le=100, exclude=True)
+    mark: float | None = Field(default=None, ge=0)
+    max_marks: float = Field(default=100, ge=0)
 
 
 class Lecture(BaseModel):
@@ -88,6 +90,7 @@ class StudentTwin(BaseModel):
     active_risks: list[Risk] = Field(default_factory=list)
     weekly_history: list[dict[str, object]] = Field(default_factory=list)
     recent_interventions: list[dict[str, object]] = Field(default_factory=list)
+    current_recommendation: str | None = None
 
 
 class Intervention(BaseModel):

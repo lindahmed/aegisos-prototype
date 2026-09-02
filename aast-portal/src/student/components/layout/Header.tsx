@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Menu, Bell, Globe, MessageSquareText, ChevronDown, LogOut, UserRound, Settings } from 'lucide-react'
-import { notifications } from '@student/data/mockData'
 import { useAuth } from '@student/context/AuthContext'
+import { useNotifications } from '@student/context/NotificationsContext'
 
 function initials(name: string): string {
   return name
@@ -20,12 +20,32 @@ function firstName(name: string): string {
 export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const [notifOpen, setNotifOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const notifRef = useRef<HTMLDivElement>(null)
+  const { notifications, loading: notificationsLoading, markAllRead } = useNotifications()
   const unread = notifications.filter((n) => !n.read).length
   const { logout, student, portalId } = useAuth()
   const navigate = useNavigate()
 
   const displayName = student?.name ?? 'Student'
   const displayId = student?.student_id ?? portalId ?? ''
+
+  useEffect(() => {
+    if (!notifOpen) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (event.target instanceof Node && !notifRef.current?.contains(event.target)) {
+        setNotifOpen(false)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNotifOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [notifOpen])
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-surface/95 px-4 backdrop-blur sm:px-6">
@@ -50,13 +70,17 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
           <ChevronDown className="h-3 w-3" />
         </button>
 
-        <div className="relative">
+        <div ref={notifRef} className="relative">
           <button
             onClick={() => {
-              setNotifOpen((o) => !o)
+              const opening = !notifOpen
+              setNotifOpen(opening)
               setProfileOpen(false)
+              if (opening) void markAllRead()
             }}
             aria-label="Notifications"
+            aria-expanded={notifOpen}
+            aria-controls="student-notifications-menu"
             className="relative flex h-9 w-9 items-center justify-center rounded-md text-text-secondary hover:bg-surface-sunk"
           >
             <Bell className="h-4.5 w-4.5" />
@@ -67,7 +91,7 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
             )}
           </button>
           {notifOpen && (
-            <div className="absolute right-0 mt-2 w-80 rounded-lg border border-border bg-surface py-2 shadow-raised">
+            <div id="student-notifications-menu" className="absolute right-0 mt-2 w-80 rounded-lg border border-border bg-surface py-2 shadow-raised">
               <div className="flex items-center justify-between px-3.5 pb-2">
                 <p className="text-sm font-semibold text-text-primary">Notifications</p>
                 <Link to="/notifications" onClick={() => setNotifOpen(false)} className="text-xs font-semibold text-teal-700 hover:underline">
@@ -75,6 +99,9 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
                 </Link>
               </div>
               <div className="max-h-72 overflow-y-auto scrollbar-thin">
+                {notificationsLoading && notifications.length === 0 && (
+                  <p className="border-t border-border px-3.5 py-5 text-center text-xs text-text-muted">Loading notifications…</p>
+                )}
                 {notifications.slice(0, 4).map((n) => (
                   <div key={n.id} className="flex gap-2.5 border-t border-border px-3.5 py-2.5">
                     <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${n.read ? 'bg-transparent' : 'bg-coral-500'}`} />
@@ -84,6 +111,9 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
                     </div>
                   </div>
                 ))}
+                {!notificationsLoading && notifications.length === 0 && (
+                  <p className="border-t border-border px-3.5 py-5 text-center text-xs text-text-muted">You are all caught up.</p>
+                )}
               </div>
             </div>
           )}

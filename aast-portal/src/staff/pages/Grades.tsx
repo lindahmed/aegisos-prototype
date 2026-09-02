@@ -33,25 +33,27 @@ function scoreToGrade(total: number) {
   return gradeScale.find((g) => total >= g.min) ?? gradeScale[gradeScale.length - 1]
 }
 
-function weightedTotal(assignments: number, midterm: number, final: number) {
-  return Number(((assignments * 0.3) + (midterm * 0.3) + (final * 0.4)).toFixed(2))
+function totalMarks(coursework: number, week7Exam: number, week12Exam: number, finalExam: number) {
+  return Number((coursework + week7Exam + week12Exam + finalExam).toFixed(2))
 }
 
 function normalizeRow(row: {
   student_id: string
   student_name: string
-  assignment_score: number
-  midterm_score: number
-  final_score: number
+  coursework_mark: number
+  week7_exam_mark: number
+  week12_exam_mark: number
+  final_exam_mark: number
 }): GradeRow {
-  const total = weightedTotal(row.assignment_score, row.midterm_score, row.final_score)
+  const total = totalMarks(row.coursework_mark, row.week7_exam_mark, row.week12_exam_mark, row.final_exam_mark)
   const { grade, gpaPoints } = scoreToGrade(total)
   return {
     studentId: row.student_id,
     studentName: row.student_name,
-    assignments: row.assignment_score,
-    midterm: row.midterm_score,
-    final: row.final_score,
+    coursework: row.coursework_mark,
+    week7Exam: row.week7_exam_mark,
+    week12Exam: row.week12_exam_mark,
+    finalExam: row.final_exam_mark,
     total,
     grade,
     gpaPoints,
@@ -122,13 +124,13 @@ export default function Grades() {
     setCourseId(id)
   }
 
-  const updateCell = (studentId: string, field: 'assignments' | 'midterm' | 'final', value: number) => {
+  const updateCell = (studentId: string, field: 'coursework' | 'week7Exam' | 'week12Exam' | 'finalExam', value: number) => {
     setRows((prev) =>
       prev.map((r) => {
         if (r.studentId !== studentId) return r
-        const sanitizedValue = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0
+        const sanitizedValue = Number.isFinite(value) ? Math.max(0, Math.min(({ coursework: 10, week7Exam: 30, week12Exam: 20, finalExam: 40 })[field], value)) : 0
         const updated = { ...r, [field]: sanitizedValue }
-        const total = weightedTotal(updated.assignments, updated.midterm, updated.final)
+        const total = totalMarks(updated.coursework, updated.week7Exam, updated.week12Exam, updated.finalExam)
         const { grade, gpaPoints } = scoreToGrade(total)
         return { ...updated, total, grade, gpaPoints }
       })
@@ -145,9 +147,10 @@ export default function Grades() {
         semester,
         rows.map((row) => ({
           student_id: row.studentId,
-          assignment_score: row.assignments,
-          midterm_score: row.midterm,
-          final_score: row.final,
+          coursework_mark: row.coursework,
+          week7_exam_mark: row.week7Exam,
+          week12_exam_mark: row.week12Exam,
+          final_exam_mark: row.finalExam,
         }))
       )
       setRows(saved.rows.map(normalizeRow))
@@ -197,7 +200,7 @@ export default function Grades() {
         <Card className="mb-4">
           <div className="flex flex-col gap-1 text-sm text-text-secondary sm:flex-row sm:items-center sm:justify-between">
             <span className="font-medium text-text-primary">{course.course_name}</span>
-            <span>{semester} · Assignments 30% · Midterm 30% · Final 40%</span>
+            <span>{semester} · Coursework 10 marks · Week 7 exam 30 · Week 12 exam 20 · Final 40</span>
           </div>
         </Card>
       )}

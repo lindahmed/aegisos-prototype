@@ -29,7 +29,7 @@ function firstName(name: string): string {
 
 function courseStatus(health: number | null): { label: string; tone: 'success' | 'warning' | 'error' | 'info' } {
   if (health === null) return { label: 'No data', tone: 'info' }
-  if (health >= 75) return { label: 'On Track', tone: 'success' }
+  if (health >= 70) return { label: 'On Track', tone: 'success' }
   if (health >= 60) return { label: 'At Risk', tone: 'warning' }
   return { label: 'Critical', tone: 'error' }
 }

@@ -187,8 +187,29 @@ class StudentRepository:
                     FOREIGN KEY (student_id) REFERENCES students(student_id),
                     FOREIGN KEY (course_id) REFERENCES course_offerings(course_id)
                 );
+                CREATE TABLE IF NOT EXISTS portal_notification_reads (
+                    student_id TEXT NOT NULL,
+                    notification_id TEXT NOT NULL,
+                    read_at TEXT NOT NULL,
+                    PRIMARY KEY (student_id, notification_id),
+                    FOREIGN KEY (student_id) REFERENCES students(student_id)
+                );
                 """
             )
+            gradebook_columns = {row[1] for row in connection.execute("PRAGMA table_info(course_gradebook_entries)")}
+            for name, definition in {
+                "coursework_mark": "REAL CHECK(coursework_mark BETWEEN 0 AND 10)",
+                "week7_exam_mark": "REAL CHECK(week7_exam_mark BETWEEN 0 AND 30)",
+                "week12_exam_mark": "REAL CHECK(week12_exam_mark BETWEEN 0 AND 20)",
+                "final_exam_mark": "REAL CHECK(final_exam_mark BETWEEN 0 AND 40)",
+            }.items():
+                if name not in gradebook_columns:
+                    connection.execute(f"ALTER TABLE course_gradebook_entries ADD COLUMN {name} {definition}")
+            connection.execute("""UPDATE course_gradebook_entries SET
+                coursework_mark=COALESCE(coursework_mark, assignment_score * 0.10),
+                week7_exam_mark=COALESCE(week7_exam_mark, midterm_score * 0.30),
+                week12_exam_mark=COALESCE(week12_exam_mark, 0),
+                final_exam_mark=COALESCE(final_exam_mark, final_score * 0.40)""")
             with self.dataset_path.open(newline="", encoding="utf-8") as dataset:
                 for row in csv.DictReader(dataset):
                     student_id = row["student_id"].strip()
@@ -437,9 +458,10 @@ class StudentRepository:
 
             rows = connection.execute(
                 """SELECT student.student_id, student.name AS student_name,
-                          COALESCE(grade.assignment_score, 0) AS assignment_score,
-                          COALESCE(grade.midterm_score, 0) AS midterm_score,
-                          COALESCE(grade.final_score, 0) AS final_score
+                          COALESCE(grade.coursework_mark, 0) AS coursework_mark,
+                          COALESCE(grade.week7_exam_mark, 0) AS week7_exam_mark,
+                          COALESCE(grade.week12_exam_mark, 0) AS week12_exam_mark,
+                          COALESCE(grade.final_exam_mark, 0) AS final_exam_mark
                    FROM courses enrollment
                    JOIN students student ON student.student_id = enrollment.student_id
                    JOIN course_offerings offering ON offering.course_name = enrollment.course_name
@@ -458,23 +480,16 @@ class StudentRepository:
     ) -> None:
         now = datetime.now(UTC).isoformat()
         values = [
-            (
-                row["student_id"],
-                course_id,
-                semester,
-                row["assignment_score"],
-                row["midterm_score"],
-                row["final_score"],
-                now,
-                now,
-            )
+            (row["student_id"], course_id, semester,
+             row["coursework_mark"] * 10, row["week7_exam_mark"] * (100/30), row["final_exam_mark"] * 2.5,
+             row["coursework_mark"], row["week7_exam_mark"], row["week12_exam_mark"], row["final_exam_mark"], now, now)
             for row in rows
         ]
         grade_values = []
         for row in rows:
-            assignment_score = row["assignment_score"]
-            midterm_score = row["midterm_score"]
-            final_score = row["final_score"]
+            assignment_score = row["coursework_mark"] * 10
+            midterm_score = row["week7_exam_mark"] * (100/30)
+            final_score = row["final_exam_mark"] * 2.5
             grade_values.extend(
                 [
                     (row["student_id"], f"{course_id}-a1", assignment_score, now),
@@ -487,12 +502,14 @@ class StudentRepository:
         with self._connect() as connection:
             connection.executemany(
                 """INSERT INTO course_gradebook_entries
-                   (student_id, course_id, semester, assignment_score, midterm_score, final_score, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   (student_id, course_id, semester, assignment_score, midterm_score, final_score, coursework_mark, week7_exam_mark, week12_exam_mark, final_exam_mark, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(student_id, course_id, semester) DO UPDATE SET
                      assignment_score=excluded.assignment_score,
                      midterm_score=excluded.midterm_score,
                      final_score=excluded.final_score,
+                     coursework_mark=excluded.coursework_mark, week7_exam_mark=excluded.week7_exam_mark,
+                     week12_exam_mark=excluded.week12_exam_mark, final_exam_mark=excluded.final_exam_mark,
                      updated_at=excluded.updated_at""",
                 values,
             )
@@ -512,9 +529,10 @@ class StudentRepository:
         with self._connect() as connection:
             rows = connection.execute(
                 """SELECT offering.course_id, offering.course_name, offering.semester,
-                          COALESCE(grade.assignment_score, 0) AS assignment_score,
-                          COALESCE(grade.midterm_score, 0) AS midterm_score,
-                          COALESCE(grade.final_score, 0) AS final_score
+                          COALESCE(grade.coursework_mark, 0) AS coursework_mark,
+                          COALESCE(grade.week7_exam_mark, 0) AS week7_exam_mark,
+                          COALESCE(grade.week12_exam_mark, 0) AS week12_exam_mark,
+                          COALESCE(grade.final_exam_mark, 0) AS final_exam_mark
                    FROM courses enrollment
                    JOIN course_offerings offering ON offering.course_name = enrollment.course_name
                    LEFT JOIN course_gradebook_entries grade
@@ -526,6 +544,37 @@ class StudentRepository:
                 (student_id,),
             ).fetchall()
         return {"student": student.as_dict(), "records": [dict(row) for row in rows]}
+
+    def get_read_notification_ids(self, student_id: str) -> set[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT notification_id FROM portal_notification_reads WHERE student_id = ?",
+                (student_id,),
+            ).fetchall()
+        return {str(row["notification_id"]) for row in rows}
+
+    def set_notifications_read(
+        self, student_id: str, notification_ids: list[str], read: bool
+    ) -> None:
+        if not notification_ids:
+            return
+        with self._connect() as connection:
+            if read:
+                read_at = datetime.now(UTC).isoformat()
+                connection.executemany(
+                    """INSERT INTO portal_notification_reads
+                       (student_id, notification_id, read_at) VALUES (?, ?, ?)
+                       ON CONFLICT(student_id, notification_id) DO UPDATE SET
+                         read_at=excluded.read_at""",
+                    ((student_id, notification_id, read_at) for notification_id in notification_ids),
+                )
+            else:
+                placeholders = ", ".join("?" for _ in notification_ids)
+                connection.execute(
+                    f"""DELETE FROM portal_notification_reads
+                        WHERE student_id = ? AND notification_id IN ({placeholders})""",
+                    (student_id, *notification_ids),
+                )
 
     def get_student_progress(self, student_id: str) -> dict[str, Any] | None:
         """Return authoritative academic records for one registered student."""

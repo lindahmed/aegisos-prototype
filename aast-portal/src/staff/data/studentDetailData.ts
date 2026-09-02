@@ -21,17 +21,19 @@ function scoreToGrade(total: number) {
 
 export function gradeHistoryFor(student: Student): GradeRow[] {
   return student.courses.map((code, i) => {
-    const assignments = 15 + ((student.id.charCodeAt(2) + i * 3) % 6)
-    const midterm = 22 + ((student.id.charCodeAt(3) + i * 5) % 8)
-    const final = 30 + ((student.id.charCodeAt(4) + i * 7) % 10)
-    const total = Math.min(100, assignments + midterm + final)
+    const coursework = 5 + ((student.id.charCodeAt(2) + i) % 6)
+    const week7Exam = 15 + ((student.id.charCodeAt(3) + i * 3) % 16)
+    const week12Exam = 10 + ((student.id.charCodeAt(4) + i * 2) % 11)
+    const finalExam = 20 + ((student.id.charCodeAt(4) + i * 5) % 21)
+    const total = coursework + week7Exam + week12Exam + finalExam
     const { grade, gpaPoints } = scoreToGrade(total)
     return {
       studentId: `${student.studentId}-${code.replace(/\s/g, '')}`,
       studentName: code,
-      assignments,
-      midterm,
-      final,
+      coursework,
+      week7Exam,
+      week12Exam,
+      finalExam,
       total,
       grade,
       gpaPoints,

@@ -71,7 +71,7 @@ export default function CourseDetail() {
               {activeTab === 'Overview' && (
                 <div>
                   <p className="text-sm leading-relaxed text-text-secondary">
-                    Course health: <span className="font-mono font-semibold">{course.metrics.course_health?.toFixed(0) ?? '—'}</span>/100.
+                    Course health: <span className="font-mono font-semibold">{course.metrics.course_health?.toFixed(0) ?? '—'}%</span>.
                     Lecture completion: <span className="font-mono font-semibold">{course.metrics.lecture_completion.toFixed(0)}%</span>.
                     Assessment completion: <span className="font-mono font-semibold">{course.metrics.assessment_completion.toFixed(0)}%</span>.
                   </p>
@@ -123,10 +123,10 @@ export default function CourseDetail() {
                             <p className="text-xs text-text-muted">Due week {a.due_week}</p>
                           </div>
                           <div className="flex items-center gap-2">
-                            {a.percentage !== null && <span className="font-mono text-sm font-semibold text-success">{a.percentage.toFixed(0)}%</span>}
+                            {a.mark !== null && <span className="font-mono text-sm font-semibold text-success">{a.mark.toFixed(1)}/{a.max_marks.toFixed(0)} marks</span>}
                             <StatusBadge
-                              label={a.percentage !== null ? 'Graded' : 'Pending'}
-                              tone={a.percentage !== null ? 'success' : 'warning'}
+                              label={a.mark !== null ? 'Graded' : 'Pending'}
+                              tone={a.mark !== null ? 'success' : 'warning'}
                             />
                           </div>
                         </div>

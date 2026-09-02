@@ -10,7 +10,7 @@ const gradeTone = (grade: string) => {
 interface GradeTableProps {
   rows: GradeRow[]
   editable?: boolean
-  onChange?: (studentId: string, field: 'assignments' | 'midterm' | 'final', value: number) => void
+  onChange?: (studentId: string, field: 'coursework' | 'week7Exam' | 'week12Exam' | 'finalExam', value: number) => void
 }
 
 export default function GradeTable({ rows, editable, onChange }: GradeTableProps) {
@@ -20,10 +20,11 @@ export default function GradeTable({ rows, editable, onChange }: GradeTableProps
         <thead>
           <tr className="border-b border-border bg-surface-raised text-xs font-semibold uppercase tracking-wide text-text-muted">
             <th className="px-4 py-3">Student</th>
-            <th className="px-4 py-3">Assignments %</th>
-            <th className="px-4 py-3">Midterm %</th>
-            <th className="px-4 py-3">Final %</th>
-            <th className="px-4 py-3">Weighted Total</th>
+            <th className="px-4 py-3">Coursework (/10)</th>
+            <th className="px-4 py-3">Week 7 exam (/30)</th>
+            <th className="px-4 py-3">Week 12 exam (/20)</th>
+            <th className="px-4 py-3">Final exam (/40)</th>
+            <th className="px-4 py-3">Total (/100)</th>
             <th className="px-4 py-3">Grade</th>
             <th className="px-4 py-3">GPA</th>
           </tr>
@@ -35,13 +36,13 @@ export default function GradeTable({ rows, editable, onChange }: GradeTableProps
                 <p className="font-medium text-text-primary">{r.studentName}</p>
                 <p className="font-mono text-xs text-text-muted">{r.studentId}</p>
               </td>
-              {(['assignments', 'midterm', 'final'] as const).map((field) => (
+              {(['coursework', 'week7Exam', 'week12Exam', 'finalExam'] as const).map((field) => (
                 <td key={field} className="px-4 py-3">
                   {editable ? (
                     <input
                       type="number"
                       min={0}
-                      max={100}
+                      max={({ coursework: 10, week7Exam: 30, week12Exam: 20, finalExam: 40 })[field]}
                       step="0.01"
                       value={r[field]}
                       onChange={(e) => onChange?.(r.studentId, field, Number(e.target.value))}

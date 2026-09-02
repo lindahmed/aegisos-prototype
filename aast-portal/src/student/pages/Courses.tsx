@@ -11,7 +11,7 @@ import { CardSkeleton } from '@student/components/ui/LoadingState'
 function mapToCourse(course: {
   course_id: string
   course_name: string
-  assessments: { assessment_id: string; name: string; assessment_type: string; due_week: number; percentage: number | null }[]
+  assessments: { assessment_id: string; name: string; assessment_type: string; due_week: number; mark: number | null; max_marks: number }[]
   materials: { material_id: string; title: string; material_type: string }[]
 }): Course {
   return {
@@ -33,8 +33,8 @@ function mapToCourse(course: {
     assignments: course.assessments.map((a) => ({
       name: a.name,
       due: `Week ${a.due_week}`,
-      status: a.percentage !== null ? 'Graded' : 'Pending',
-      grade: a.percentage !== null ? `${a.percentage.toFixed(0)}%` : undefined,
+      status: a.mark !== null ? 'Graded' : 'Pending',
+      grade: a.mark !== null ? `${a.mark.toFixed(1)}/{a.max_marks.toFixed(0)} marks` : undefined,
     })),
   }
 }

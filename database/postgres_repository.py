@@ -37,7 +37,7 @@ class PostgresStudentRepository:
         self.dsn = dsn
         self.semester = os.getenv("AEGIS_CURRENT_SEMESTER", "Current semester")
         try:
-            self.current_week = max(1, int(os.getenv("AEGIS_CURRENT_WEEK", "1")))
+            self.current_week = max(1, int(os.getenv("AEGIS_CURRENT_WEEK", "5")))
         except ValueError as error:
             raise ValueError("AEGIS_CURRENT_WEEK must be a positive integer") from error
 
@@ -101,6 +101,15 @@ class PostgresStudentRepository:
                         ) THEN
                             ALTER TABLE progress_interventions ADD COLUMN course_health_at_creation DOUBLE PRECISION;
                         END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'progress_interventions' AND column_name = 'resolved_week') THEN
+                            ALTER TABLE progress_interventions ADD COLUMN resolved_week INTEGER;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'progress_interventions' AND column_name = 'resolution_outcome') THEN
+                            ALTER TABLE progress_interventions ADD COLUMN resolution_outcome TEXT;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'progress_interventions' AND column_name = 'follow_up_week') THEN
+                            ALTER TABLE progress_interventions ADD COLUMN follow_up_week INTEGER;
+                        END IF;
                     END $$;
                     CREATE TABLE IF NOT EXISTS student_semester_grades (
                         grade_id BIGSERIAL PRIMARY KEY,
@@ -128,6 +137,17 @@ class PostgresStudentRepository:
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         PRIMARY KEY (student_id, course_id, semester)
                     );
+                    CREATE TABLE IF NOT EXISTS portal_notification_reads (
+                        student_id TEXT NOT NULL,
+                        notification_id TEXT NOT NULL,
+                        read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY (student_id, notification_id)
+                    );
+                    ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS coursework_mark DOUBLE PRECISION CHECK(coursework_mark BETWEEN 0 AND 10);
+                    ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS week7_exam_mark DOUBLE PRECISION CHECK(week7_exam_mark BETWEEN 0 AND 30);
+                    ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS week12_exam_mark DOUBLE PRECISION CHECK(week12_exam_mark BETWEEN 0 AND 20);
+                    ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS final_exam_mark DOUBLE PRECISION CHECK(final_exam_mark BETWEEN 0 AND 40);
+                    UPDATE course_gradebook_entries SET coursework_mark=COALESCE(coursework_mark, assignment_score * 0.10), week7_exam_mark=COALESCE(week7_exam_mark, midterm_score * 0.30), week12_exam_mark=COALESCE(week12_exam_mark, 0), final_exam_mark=COALESCE(final_exam_mark, final_score * 0.40);
                     """
                 )
 
@@ -211,9 +231,10 @@ class PostgresStudentRepository:
             return None
         rows = self._fetch_all(
             """SELECT s.student_id::text AS student_id, s.full_name AS student_name,
-                      COALESCE(g.assignment_score, 0) AS assignment_score,
-                      COALESCE(g.midterm_score, 0) AS midterm_score,
-                      COALESCE(g.final_score, 0) AS final_score
+                      COALESCE(g.coursework_mark, 0) AS coursework_mark,
+                      COALESCE(g.week7_exam_mark, 0) AS week7_exam_mark,
+                      COALESCE(g.week12_exam_mark, 0) AS week12_exam_mark,
+                      COALESCE(g.final_exam_mark, 0) AS final_exam_mark
                FROM student_courses sc
                JOIN students s ON s.student_id = sc.student_id
                LEFT JOIN course_gradebook_entries g
@@ -234,22 +255,22 @@ class PostgresStudentRepository:
                 psycopg2.extras.execute_batch(
                     cursor,
                     """INSERT INTO course_gradebook_entries
-                       (student_id, course_id, semester, assignment_score, midterm_score, final_score, created_at, updated_at)
-                       VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                       (student_id, course_id, semester, coursework_mark, week7_exam_mark, week12_exam_mark, final_exam_mark, created_at, updated_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                        ON CONFLICT (student_id, course_id, semester)
                        DO UPDATE SET
-                         assignment_score=EXCLUDED.assignment_score,
-                         midterm_score=EXCLUDED.midterm_score,
-                         final_score=EXCLUDED.final_score,
+                         coursework_mark=EXCLUDED.coursework_mark,
+                         week7_exam_mark=EXCLUDED.week7_exam_mark,
+                         week12_exam_mark=EXCLUDED.week12_exam_mark,
+                         final_exam_mark=EXCLUDED.final_exam_mark,
                          updated_at=NOW()""",
                     [
                         (
                             row["student_id"],
                             course_id,
                             semester,
-                            row["assignment_score"],
-                            row["midterm_score"],
-                            row["final_score"],
+                            row["coursework_mark"], row["week7_exam_mark"],
+                            row["week12_exam_mark"], row["final_exam_mark"],
                         )
                         for row in rows
                     ],
@@ -261,9 +282,10 @@ class PostgresStudentRepository:
             return None
         records = self._fetch_all(
             """SELECT c.course_id::text AS course_id, c.course_title AS course_name, %s AS semester,
-                      COALESCE(g.assignment_score, 0) AS assignment_score,
-                      COALESCE(g.midterm_score, 0) AS midterm_score,
-                      COALESCE(g.final_score, 0) AS final_score
+                      COALESCE(g.coursework_mark, 0) AS coursework_mark,
+                      COALESCE(g.week7_exam_mark, 0) AS week7_exam_mark,
+                      COALESCE(g.week12_exam_mark, 0) AS week12_exam_mark,
+                      COALESCE(g.final_exam_mark, 0) AS final_exam_mark
                FROM student_courses sc
                JOIN courses c ON c.course_id = sc.course_id
                LEFT JOIN course_gradebook_entries g
@@ -275,6 +297,36 @@ class PostgresStudentRepository:
             (self.semester, self.semester, student_id),
         )
         return {"student": student.as_dict(), "records": records}
+
+    def get_read_notification_ids(self, student_id: str) -> set[str]:
+        rows = self._fetch_all(
+            "SELECT notification_id FROM portal_notification_reads WHERE student_id = %s",
+            (student_id,),
+        )
+        return {str(row["notification_id"]) for row in rows}
+
+    def set_notifications_read(
+        self, student_id: str, notification_ids: list[str], read: bool
+    ) -> None:
+        if not notification_ids:
+            return
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                if read:
+                    psycopg2.extras.execute_batch(
+                        cursor,
+                        """INSERT INTO portal_notification_reads
+                           (student_id, notification_id, read_at) VALUES (%s, %s, NOW())
+                           ON CONFLICT (student_id, notification_id) DO UPDATE SET
+                             read_at=EXCLUDED.read_at""",
+                        ((student_id, notification_id) for notification_id in notification_ids),
+                    )
+                else:
+                    cursor.execute(
+                        """DELETE FROM portal_notification_reads
+                           WHERE student_id = %s AND notification_id = ANY(%s)""",
+                        (student_id, notification_ids),
+                    )
 
     def get_student_progress(self, student_id: str) -> dict[str, Any] | None:
         """Return verified source records from the normalized schema.
@@ -302,9 +354,10 @@ class PostgresStudentRepository:
                 cursor.execute(
                     """
                     SELECT g.course_id::text AS course_id,
-                           COALESCE(g.assignment_score, 0) AS assignment_score,
-                           COALESCE(g.midterm_score, 0) AS midterm_score,
-                           COALESCE(g.final_score, 0) AS final_score
+                           COALESCE(g.coursework_mark, 0) AS coursework_mark,
+                      COALESCE(g.week7_exam_mark, 0) AS week7_exam_mark,
+                      COALESCE(g.week12_exam_mark, 0) AS week12_exam_mark,
+                      COALESCE(g.final_exam_mark, 0) AS final_exam_mark
                     FROM course_gradebook_entries g
                     WHERE g.student_id = %s AND g.semester = %s
                     """,
@@ -318,9 +371,10 @@ class PostgresStudentRepository:
             assessments: list[dict[str, Any]] = []
             if grades is not None:
                 assessments = [
-                    {"assessment_id": f"{course_id}-coursework", "name": "Coursework", "assessment_type": "assignment", "weight": 30.0, "due_week": 5, "covered_lecture_ids": "[]", "percentage": grades["assignment_score"]},
-                    {"assessment_id": f"{course_id}-midterm", "name": "Midterm", "assessment_type": "midterm", "weight": 30.0, "due_week": 7, "covered_lecture_ids": "[]", "percentage": grades["midterm_score"]},
-                    {"assessment_id": f"{course_id}-final", "name": "Final", "assessment_type": "final", "weight": 40.0, "due_week": 16, "covered_lecture_ids": "[]", "percentage": grades["final_score"]},
+                    {"assessment_id": f"{course_id}-coursework", "name": "Coursework", "assessment_type": "assignment", "weight": 10.0, "due_week": 5, "covered_lecture_ids": "[]", "percentage": grades["coursework_mark"] * 10},
+                    {"assessment_id": f"{course_id}-week7", "name": "Week 7 exam", "assessment_type": "midterm", "weight": 30.0, "due_week": 7, "covered_lecture_ids": "[]", "percentage": grades["week7_exam_mark"] * (100/30) if self.current_week >= 7 else None},
+                    {"assessment_id": f"{course_id}-week12", "name": "Week 12 exam", "assessment_type": "midterm", "weight": 20.0, "due_week": 12, "covered_lecture_ids": "[]", "percentage": grades["week12_exam_mark"] * 5 if self.current_week >= 12 else None},
+                    {"assessment_id": f"{course_id}-final", "name": "Final exam", "assessment_type": "final", "weight": 40.0, "due_week": 16, "covered_lecture_ids": "[]", "percentage": grades["final_exam_mark"] * 2.5 if self.current_week >= 16 else None},
                 ]
             courses.append({
                 "course_id": course_id,

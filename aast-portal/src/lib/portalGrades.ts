@@ -10,9 +10,10 @@ export interface PortalCourse {
 export interface PortalGradeRow {
   student_id: string
   student_name: string
-  assignment_score: number
-  midterm_score: number
-  final_score: number
+  coursework_mark: number
+  week7_exam_mark: number
+  week12_exam_mark: number
+  final_exam_mark: number
   total_score: number
   letter_grade: string
   gpa_points: number
@@ -55,9 +56,10 @@ export interface PortalStudentGradeReport {
 
 export interface PortalGradebookUpdateRow {
   student_id: string
-  assignment_score: number
-  midterm_score: number
-  final_score: number
+  coursework_mark: number
+  week7_exam_mark: number
+  week12_exam_mark: number
+  final_exam_mark: number
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -99,7 +101,8 @@ export interface PortalAssessment {
   weight: number
   due_week: number
   covered_lecture_ids: string[]
-  percentage: number | null
+  mark: number | null
+  max_marks: number
 }
 
 export interface PortalLecture {
@@ -167,6 +170,32 @@ export interface PortalStudentAcademics {
 
 export function getPortalStudentAcademics(studentId: string) {
   return request<PortalStudentAcademics>(`/portal/students/${studentId}/academics`)
+}
+
+export interface PortalNotification {
+  id: string
+  type: 'grade' | 'exam'
+  category: 'Grades' | 'Registration' | 'Financial' | 'System'
+  title: string
+  body: string
+  timestamp: string
+  read: boolean
+}
+
+export function getPortalStudentNotifications(studentId: string) {
+  return request<{ notifications: PortalNotification[] }>(
+    `/portal/students/${encodeURIComponent(studentId)}/notifications`,
+  )
+}
+
+export function setPortalNotificationsRead(studentId: string, notificationIds: string[], read = true) {
+  return request<{ notifications: PortalNotification[] }>(
+    `/portal/students/${encodeURIComponent(studentId)}/notifications/read`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ notification_ids: notificationIds, read }),
+    },
+  )
 }
 
 export interface ValidatedStudent {
