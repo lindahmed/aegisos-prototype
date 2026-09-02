@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/advisor_message.dart';
 import '../models/student.dart';
+import '../models/student_notification.dart';
 
 class ApiService {
   ApiService({http.Client? client, String? baseUrl})
@@ -15,7 +16,8 @@ class ApiService {
   /// --dart-define=API_BASE_URL=https://api.example.com
   static const String defaultBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-defaultValue: 'https://backend-production-6069.up.railway.app',  );
+    defaultValue: 'https://backend-production-6069.up.railway.app',
+  );
 
   final http.Client _client;
   final String baseUrl;
@@ -133,23 +135,111 @@ defaultValue: 'https://backend-production-6069.up.railway.app',  );
     }
   }
 
-
   Future<Map<String, dynamic>> getStudentAcademics(String studentId) async {
     final normalizedId = Uri.encodeComponent(studentId.trim());
-    final uri = Uri.parse("$baseUrl/portal/students/$normalizedId/academics");
+    final uri = Uri.parse('$baseUrl/portal/students/$normalizedId/academics');
     late http.Response response;
     try {
       response = await _client.get(uri).timeout(const Duration(seconds: 15));
     } on Exception {
-      throw const ApiException('Could not load academic progress. Check your connection and try again.');
+      throw const ApiException(
+        'Could not load academic progress. Check your connection and try again.',
+      );
     }
     if (response.statusCode != 200) {
-      throw ApiException(_errorDetail(response, 'Could not load academic progress (${response.statusCode}).'));
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not load academic progress (${response.statusCode}).',
+        ),
+      );
     }
     try {
       return jsonDecode(response.body) as Map<String, dynamic>;
     } on Exception {
       throw const ApiException('The server returned invalid academic progress data.');
+    }
+  }
+
+  Future<List<StudentNotification>> getStudentNotifications(
+    String studentId,
+  ) async {
+    final normalizedId = Uri.encodeComponent(studentId.trim());
+    final uri = Uri.parse(
+      '$baseUrl/portal/students/$normalizedId/notifications',
+    );
+    late http.Response response;
+    try {
+      response = await _client.get(uri).timeout(const Duration(seconds: 15));
+    } on Exception {
+      throw const ApiException(
+        'Could not load notifications. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not load notifications (${response.statusCode}).',
+        ),
+      );
+    }
+    return _decodeNotifications(response);
+  }
+
+  Future<List<StudentNotification>> setNotificationsRead({
+    required String studentId,
+    required List<String> notificationIds,
+    required bool read,
+  }) async {
+    if (notificationIds.isEmpty) return getStudentNotifications(studentId);
+    final normalizedId = Uri.encodeComponent(studentId.trim());
+    final uri = Uri.parse(
+      '$baseUrl/portal/students/$normalizedId/notifications/read',
+    );
+    late http.Response response;
+    try {
+      response = await _client
+          .put(
+            uri,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'notification_ids': notificationIds,
+              'read': read,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+    } on Exception {
+      throw const ApiException(
+        'Could not update notifications. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not update notifications (${response.statusCode}).',
+        ),
+      );
+    }
+    return _decodeNotifications(response);
+  }
+
+  static List<StudentNotification> _decodeNotifications(
+    http.Response response,
+  ) {
+    try {
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      final items = payload['notifications'] as List<dynamic>? ?? const [];
+      return items
+          .map(
+            (item) => StudentNotification.fromJson(
+              item as Map<String, dynamic>,
+            ),
+          )
+          .toList();
+    } catch (_) {
+      throw const ApiException('The server returned invalid notification data.');
     }
   }
 

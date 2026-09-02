@@ -96,4 +96,83 @@ void main() {
     );
     service.close();
   });
+
+  test('loads notifications from the shared student feed', () async {
+    final service = ApiService(
+      client: MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(
+          request.url.toString(),
+          'https://api.example.test/portal/students/231027905/notifications',
+        );
+        return http.Response(
+          jsonEncode({
+            'notifications': [
+              {
+                'id': 'grade:ai:Fall 2026:86.30',
+                'type': 'grade',
+                'category': 'Grades',
+                'title': 'Grade posted: Artificial Intelligence',
+                'body': 'B · 86.3% overall',
+                'timestamp': 'Fall 2026',
+                'read': false,
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+      baseUrl: 'https://api.example.test',
+    );
+
+    final notifications = await service.getStudentNotifications('231027905');
+
+    expect(notifications, hasLength(1));
+    expect(notifications.single.type, 'grade');
+    expect(notifications.single.read, isFalse);
+    service.close();
+  });
+
+  test('updates shared notification read state', () async {
+    final client = MockClient((request) async {
+      expect(request.method, 'PUT');
+      expect(
+        request.url.toString(),
+        'https://api.example.test/portal/students/231027905/notifications/read',
+      );
+      expect(jsonDecode(request.body), {
+        'notification_ids': ['exam:ai-final'],
+        'read': true,
+      });
+      return http.Response(
+        jsonEncode({
+          'notifications': [
+            {
+              'id': 'exam:ai-final',
+              'type': 'exam',
+              'category': 'Registration',
+              'title': 'Upcoming final: Final',
+              'body': 'Artificial Intelligence · week 12',
+              'timestamp': 'Week 12',
+              'read': true,
+            },
+          ],
+        }),
+        200,
+      );
+    });
+    final service = ApiService(
+      client: client,
+      baseUrl: 'https://api.example.test',
+    );
+
+    final notifications = await service.setNotificationsRead(
+      studentId: '231027905',
+      notificationIds: ['exam:ai-final'],
+      read: true,
+    );
+
+    expect(notifications.single.read, isTrue);
+    service.close();
+  });
 }
