@@ -528,11 +528,16 @@ class StudentRepository:
             return None
         with self._connect() as connection:
             rows = connection.execute(
-                """SELECT offering.course_id, offering.course_name, offering.semester,
-                          COALESCE(grade.coursework_mark, 0) AS coursework_mark,
-                          COALESCE(grade.week7_exam_mark, 0) AS week7_exam_mark,
-                          COALESCE(grade.week12_exam_mark, 0) AS week12_exam_mark,
-                          COALESCE(grade.final_exam_mark, 0) AS final_exam_mark
+                """SELECT offering.course_id, offering.course_id AS course_code,
+                          offering.course_name, offering.semester,
+                          'Current' AS enrollment_status,
+                          NULL AS stored_letter_grade,
+                          CASE WHEN grade.student_id IS NULL THEN 'none' ELSE 'gradebook' END AS grade_source,
+                          grade.coursework_mark,
+                          grade.week7_exam_mark,
+                          grade.week12_exam_mark,
+                          grade.final_exam_mark,
+                          grade.updated_at AS grade_updated_at
                    FROM courses enrollment
                    JOIN course_offerings offering ON offering.course_name = enrollment.course_name
                    LEFT JOIN course_gradebook_entries grade

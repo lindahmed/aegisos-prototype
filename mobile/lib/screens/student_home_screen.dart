@@ -7,13 +7,10 @@ import '../models/student_notification.dart';
 import '../services/api_service.dart';
 import 'advisor_screen.dart';
 import 'login_screen.dart';
+import 'results_screen.dart';
 
 class StudentHomeScreen extends StatelessWidget {
-  const StudentHomeScreen({
-    required this.student,
-    this.apiService,
-    super.key,
-  });
+  const StudentHomeScreen({required this.student, this.apiService, super.key});
 
   final Student student;
   final ApiService? apiService;
@@ -58,9 +55,8 @@ class StudentHomeScreen extends StatelessWidget {
                   const SizedBox(height: 16),
                   Text(
                     student.name,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                    style: Theme.of(context).textTheme.headlineSmall
+                        ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 6),
                   Text(student.major),
@@ -90,13 +86,40 @@ class StudentHomeScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          _AcademicProgress(studentId: student.studentId),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: ListTile(
+              key: const Key('open-results'),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 10,
+              ),
+              leading: const CircleAvatar(
+                child: Icon(Icons.assessment_outlined),
+              ),
+              title: const Text(
+                'Results',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: const Text(
+                'View live grades from the shared AAST portal database',
+              ),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 18),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        ResultsScreen(student: student, apiService: apiService),
+                  ),
+                );
+              },
+            ),
+          ),
           const SizedBox(height: 24),
           Text(
             'Current courses',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+            style: Theme.of(context).textTheme.titleLarge
+                ?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 10),
           if (student.courses.isEmpty)
@@ -147,10 +170,7 @@ class StudentHomeScreen extends StatelessWidget {
 }
 
 class _NotificationButton extends StatefulWidget {
-  const _NotificationButton({
-    required this.studentId,
-    this.apiService,
-  });
+  const _NotificationButton({required this.studentId, this.apiService});
 
   final String studentId;
   final ApiService? apiService;
@@ -159,7 +179,8 @@ class _NotificationButton extends StatefulWidget {
   State<_NotificationButton> createState() => _NotificationButtonState();
 }
 
-class _NotificationButtonState extends State<_NotificationButton> {
+class _NotificationButtonState extends State<_NotificationButton>
+    with WidgetsBindingObserver {
   late final ApiService _apiService;
   late final bool _ownsApiService;
   Timer? _pollTimer;
@@ -174,6 +195,7 @@ class _NotificationButtonState extends State<_NotificationButton> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _ownsApiService = widget.apiService == null;
     _apiService = widget.apiService ?? ApiService();
     unawaited(_loadNotifications());
@@ -185,9 +207,17 @@ class _NotificationButtonState extends State<_NotificationButton> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     if (_ownsApiService) _apiService.close();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_loadNotifications());
+    }
   }
 
   Future<void> _loadNotifications({bool showError = false}) async {
@@ -206,9 +236,8 @@ class _NotificationButtonState extends State<_NotificationButton> {
       if (!mounted) return;
       setState(() => _error = error.message);
       if (showError) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.message)),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
       }
     } finally {
       _loading = false;
@@ -297,9 +326,19 @@ class _NotificationsSheet extends StatefulWidget {
 }
 
 class _NotificationsSheetState extends State<_NotificationsSheet> {
+  static const _filters = [
+    'All',
+    'Unread',
+    'Grades',
+    'Registration',
+    'Financial',
+    'System',
+  ];
+
   late List<StudentNotification> _notifications;
   String? _error;
   bool _updating = false;
+  String _filter = 'All';
 
   @override
   void initState() {
@@ -336,6 +375,11 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         .where((notification) => !notification.read)
         .map((notification) => notification.id)
         .toList();
+    final filteredNotifications = _notifications.where((notification) {
+      if (_filter == 'All') return true;
+      if (_filter == 'Unread') return !notification.read;
+      return notification.category == _filter;
+    }).toList();
     return SafeArea(
       child: SizedBox(
         height: MediaQuery.sizeOf(context).height * 0.72,
@@ -348,9 +392,8 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                   Expanded(
                     child: Text(
                       'Notifications',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                      style: Theme.of(context).textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.bold),
                     ),
                   ),
                   if (unreadIds.isNotEmpty)
@@ -377,14 +420,41 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ),
+            SizedBox(
+              height: 48,
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                scrollDirection: Axis.horizontal,
+                itemCount: _filters.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final filter = _filters[index];
+                  return ChoiceChip(
+                    label: Text(filter),
+                    selected: filter == _filter,
+                    showCheckmark: false,
+                    onSelected: (_) => setState(() => _filter = filter),
+                  );
+                },
+              ),
+            ),
+            const Divider(height: 1),
             Expanded(
-              child: _notifications.isEmpty
-                  ? const Center(child: Text('You are all caught up.'))
+              child: filteredNotifications.isEmpty
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Text(
+                          'You are all caught up. No notifications match this filter.',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    )
                   : ListView.separated(
-                      itemCount: _notifications.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemCount: filteredNotifications.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, index) {
-                        final notification = _notifications[index];
+                        final notification = filteredNotifications[index];
                         final colorScheme = Theme.of(context).colorScheme;
                         return Material(
                           color: notification.read
@@ -398,10 +468,12 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                               vertical: 8,
                             ),
                             leading: CircleAvatar(
+                              backgroundColor: _notificationColor(
+                                notification.category,
+                                colorScheme,
+                              ),
                               child: Icon(
-                                notification.type == 'grade'
-                                    ? Icons.school_outlined
-                                    : Icons.event_outlined,
+                                _notificationIcon(notification.category),
                               ),
                             ),
                             title: Text(
@@ -414,8 +486,18 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                             ),
                             subtitle: Padding(
                               padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                '${notification.body}\n${notification.timestamp}',
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(notification.body),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    '${notification.category} · ${notification.timestamp}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall,
+                                  ),
+                                ],
                               ),
                             ),
                             trailing: notification.read
@@ -430,10 +512,9 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                                   ),
                             onTap: _updating
                                 ? null
-                                : () => _setRead(
-                                      [notification.id],
-                                      !notification.read,
-                                    ),
+                                : () => _setRead([
+                                    notification.id,
+                                  ], !notification.read),
                           ),
                         );
                       },
@@ -444,38 +525,23 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       ),
     );
   }
-}
 
-class _AcademicProgress extends StatelessWidget {
-  const _AcademicProgress({required this.studentId});
-  final String studentId;
-  Color _color(double h) => h >= 70 ? Colors.green : (h >= 60 ? Colors.amber : Colors.red);
+  static IconData _notificationIcon(String category) {
+    return switch (category) {
+      'Grades' => Icons.school_outlined,
+      'Registration' => Icons.assignment_turned_in_outlined,
+      'Financial' => Icons.account_balance_wallet_outlined,
+      _ => Icons.settings_outlined,
+    };
+  }
 
-  Widget build(BuildContext context) {
-    return FutureBuilder<Map<String, dynamic>>(
-      future: ApiService().getStudentAcademics(studentId),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Card(child: Padding(padding: EdgeInsets.all(20), child: LinearProgressIndicator()));
-        final data = snapshot.data!;
-        final courses = data["courses"] as List<dynamic>? ?? const [];
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text("Academic progress · Week " + data["current_week"].toString(), style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          ...courses.map((raw) {
-            final course = raw as Map<String, dynamic>;
-            final metrics = course["metrics"] as Map<String, dynamic>;
-            final health = (metrics["course_health"] as num?)?.toDouble();
-            final assessments = course["assessments"] as List<dynamic>? ?? const [];
-            final marks = assessments.where((a) => a["mark"] != null).map((a) => a["name"].toString() + ": " + a["mark"].toString() + "/" + a["max_marks"].toString()).join(" · ");
-            final color = _color(health ?? 0);
-            return Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Expanded(child: Text(course["course_name"] as String, style: const TextStyle(fontWeight: FontWeight.bold))), if (health != null) Chip(label: Text(health.toStringAsFixed(1) + "%"), backgroundColor: color.withValues(alpha: 0.16), side: BorderSide(color: color))]),
-              Text(marks.isEmpty ? "No marks posted yet" : marks),
-            ])));
-          }),
-        ]);
-      },
-    );
+  static Color _notificationColor(String category, ColorScheme colorScheme) {
+    return switch (category) {
+      'Grades' => colorScheme.primaryContainer,
+      'Registration' => colorScheme.secondaryContainer,
+      'Financial' => colorScheme.tertiaryContainer,
+      _ => colorScheme.surfaceContainerHighest,
+    };
   }
 }
 
@@ -487,9 +553,6 @@ class _InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Chip(
-      avatar: Icon(icon, size: 18),
-      label: Text(label),
-    );
+    return Chip(avatar: Icon(icon, size: 18), label: Text(label));
   }
 }

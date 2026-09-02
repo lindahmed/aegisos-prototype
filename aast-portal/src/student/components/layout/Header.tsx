@@ -21,7 +21,7 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const [notifOpen, setNotifOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
-  const { notifications, loading: notificationsLoading, markAllRead } = useNotifications()
+  const { notifications, loading: notificationsLoading } = useNotifications()
   const unread = notifications.filter((n) => !n.read).length
   const { logout, student, portalId } = useAuth()
   const navigate = useNavigate()
@@ -76,7 +76,6 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
               const opening = !notifOpen
               setNotifOpen(opening)
               setProfileOpen(false)
-              if (opening) void markAllRead()
             }}
             aria-label="Notifications"
             aria-expanded={notifOpen}

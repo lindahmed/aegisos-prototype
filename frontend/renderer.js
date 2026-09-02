@@ -1,4 +1,5 @@
 const apiBaseUrl = window.aegis.apiBaseUrl;
+const academicApiBaseUrl = window.aegis.academicApiBaseUrl || apiBaseUrl;
 
 const loginView = document.querySelector('#login-view');
 const dashboardView = document.querySelector('#dashboard-view');
@@ -41,6 +42,25 @@ async function apiRequest(path, options = {}) {
     });
   } catch (_error) {
     throw new Error('AegisOS backend is unavailable. Start the app with desktop/start-aegis.sh.');
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.detail || `Request failed (${response.status})`);
+  }
+  return payload;
+}
+
+
+async function academicApiRequest(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(`${academicApiBaseUrl}${path}`, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    });
+  } catch (_error) {
+    throw new Error('The shared academic notification service is unavailable.');
   }
 
   const payload = await response.json().catch(() => ({}));
@@ -234,8 +254,11 @@ function renderNotifications() {
   notifList.replaceChildren();
   notifEmpty.hidden = notifications.length > 0;
   for (const item of notifications) {
-    const row = document.createElement('div');
+    const row = document.createElement('button');
+    row.type = 'button';
     row.className = `notif-item ${item.type}${item.read ? '' : ' unread'}`;
+    row.setAttribute('aria-label', `${item.read ? 'Mark unread' : 'Mark read'}: ${item.title}`);
+    row.addEventListener('click', () => setNotificationReadState(item.id, !item.read));
     const dot = document.createElement('span');
     dot.className = 'notif-dot';
     const text = document.createElement('div');
@@ -245,7 +268,10 @@ function renderNotifications() {
     const body = document.createElement('p');
     body.className = 'notif-item-body';
     body.textContent = item.body;
-    text.append(title, body);
+    const meta = document.createElement('p');
+    meta.className = 'notif-item-meta';
+    meta.textContent = `${item.category} · ${item.timestamp}`;
+    text.append(title, body, meta);
     row.append(dot, text);
     notifList.append(row);
   }
@@ -296,7 +322,7 @@ function showToasts(items) {
 async function refreshNotifications() {
   if (!currentStudent) return;
   try {
-    const response = await apiRequest(`/portal/students/${encodeURIComponent(currentStudent.student_id)}/notifications`);
+    const response = await academicApiRequest(`/portal/students/${encodeURIComponent(currentStudent.student_id)}/notifications`);
     const items = response.notifications || [];
     const fresh = items.filter((item) => !item.read && !notifications.some((old) => old.id === item.id));
     notifications = items;
@@ -335,7 +361,7 @@ async function markAllNotificationsRead() {
   notifications = notifications.map((item) => ({ ...item, read: true }));
   renderNotifications();
   try {
-    const response = await apiRequest(
+    const response = await academicApiRequest(
       `/portal/students/${encodeURIComponent(currentStudent.student_id)}/notifications/read`,
       {
         method: 'PUT',
@@ -350,13 +376,33 @@ async function markAllNotificationsRead() {
 }
 
 
+async function setNotificationReadState(notificationId, read) {
+  if (!currentStudent) return;
+  notifications = notifications.map((item) =>
+    item.id === notificationId ? { ...item, read } : item,
+  );
+  renderNotifications();
+  try {
+    const response = await academicApiRequest(
+      `/portal/students/${encodeURIComponent(currentStudent.student_id)}/notifications/read`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ notification_ids: [notificationId], read }),
+      },
+    );
+    notifications = response.notifications || [];
+    renderNotifications();
+  } catch (_error) {
+    await refreshNotifications();
+  }
+}
+
+
 notifButton.addEventListener('click', () => {
   const opening = notifPanel.hidden;
   notifPanel.hidden = !opening;
   notifButton.setAttribute('aria-expanded', String(opening));
-  if (opening) {
-    markAllNotificationsRead();
-  }
+  if (opening) refreshNotifications();
 });
 
 notifClearButton.addEventListener('click', markAllNotificationsRead);
@@ -373,6 +419,11 @@ document.addEventListener('keydown', (event) => {
   notifPanel.hidden = true;
   notifButton.setAttribute('aria-expanded', 'false');
   notifButton.focus();
+});
+
+window.addEventListener('focus', refreshNotifications);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshNotifications();
 });
 
 

@@ -3,13 +3,14 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/advisor_message.dart';
+import '../models/grade_report.dart';
 import '../models/student.dart';
 import '../models/student_notification.dart';
 
 class ApiService {
   ApiService({http.Client? client, String? baseUrl})
-      : _client = client ?? http.Client(),
-        baseUrl = (baseUrl ?? defaultBaseUrl).replaceFirst(RegExp(r'/$'), '');
+    : _client = client ?? http.Client(),
+      baseUrl = (baseUrl ?? defaultBaseUrl).replaceFirst(RegExp(r'/$'), '');
 
   /// Android emulators reach the development machine through 10.0.2.2.
   /// Override this for a physical device or deployed API with:
@@ -48,11 +49,15 @@ class ApiService {
 
     if (response.statusCode == 200) {
       try {
-        return Student.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+        return Student.fromJson(
+          jsonDecode(response.body) as Map<String, dynamic>,
+        );
       } on FormatException {
         throw const ApiException('The server returned an invalid response.');
       } on TypeError {
-        throw const ApiException('The server returned an invalid student record.');
+        throw const ApiException(
+          'The server returned an invalid student record.',
+        );
       }
     }
 
@@ -60,7 +65,9 @@ class ApiService {
       throw const ApiException('Student ID not found.');
     }
 
-    throw ApiException('The server could not sign you in (${response.statusCode}).');
+    throw ApiException(
+      'The server could not sign you in (${response.statusCode}).',
+    );
   }
 
   Future<AdvisorReply> askAdvisor({
@@ -157,7 +164,37 @@ class ApiService {
     try {
       return jsonDecode(response.body) as Map<String, dynamic>;
     } on Exception {
-      throw const ApiException('The server returned invalid academic progress data.');
+      throw const ApiException(
+        'The server returned invalid academic progress data.',
+      );
+    }
+  }
+
+  Future<StudentGradeReport> getStudentGrades(String studentId) async {
+    final normalizedId = Uri.encodeComponent(studentId.trim());
+    final uri = Uri.parse('$baseUrl/portal/students/$normalizedId/grades');
+    late http.Response response;
+    try {
+      response = await _client.get(uri).timeout(const Duration(seconds: 15));
+    } on Exception {
+      throw const ApiException(
+        'Could not load grades. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not load grades (${response.statusCode}).',
+        ),
+      );
+    }
+    try {
+      return StudentGradeReport.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
+    } on Exception {
+      throw const ApiException('The server returned invalid grade data.');
     }
   }
 
@@ -233,13 +270,14 @@ class ApiService {
       final items = payload['notifications'] as List<dynamic>? ?? const [];
       return items
           .map(
-            (item) => StudentNotification.fromJson(
-              item as Map<String, dynamic>,
-            ),
+            (item) =>
+                StudentNotification.fromJson(item as Map<String, dynamic>),
           )
           .toList();
     } catch (_) {
-      throw const ApiException('The server returned invalid notification data.');
+      throw const ApiException(
+        'The server returned invalid notification data.',
+      );
     }
   }
 

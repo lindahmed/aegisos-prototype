@@ -47,7 +47,11 @@ export default function Grades() {
 
   const records = report?.records.filter((record) => record.semester === semester) ?? []
   const summary = report?.semesters.find((item) => item.semester === semester) ?? null
-  const bestCourse = records.reduce((best, record) => (record.total_score > (best?.total_score ?? -1) ? record : best), records[0])
+  const scoredRecords = records.filter((record) => record.total_score !== null)
+  const bestCourse = scoredRecords.reduce(
+    (best, record) => ((record.total_score ?? -1) > (best?.total_score ?? -1) ? record : best),
+    scoredRecords[0],
+  )
 
   return (
     <div>
@@ -94,7 +98,7 @@ export default function Grades() {
       ) : (
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Semester GPA" value={summary.gpa.toFixed(2)} icon={<GraduationCap className="h-5 w-5" />} accent="teal" />
+            <StatCard label="Semester GPA" value={summary.gpa?.toFixed(2) ?? 'In progress'} icon={<GraduationCap className="h-5 w-5" />} accent="teal" />
             <StatCard
               label="Academic GPA"
               value={report?.student.gpa?.toFixed(2) ?? 'N/A'}
@@ -105,7 +109,7 @@ export default function Grades() {
             <StatCard
               label="Courses Graded"
               value={String(summary.courses_graded)}
-              sublabel={bestCourse ? `Best total: ${bestCourse.total_score.toFixed(2)}` : 'No scores yet'}
+              sublabel={bestCourse && bestCourse.total_score !== null ? `Best total: ${bestCourse.total_score.toFixed(2)}` : 'No scores yet'}
               icon={<Award className="h-5 w-5" />}
               accent="teal"
             />
@@ -130,11 +134,11 @@ export default function Grades() {
                   <div className="flex h-32 w-10 items-end rounded-md bg-surface-sunk">
                     <div
                       className="w-full rounded-md bg-teal-600"
-                      style={{ height: `${(item.gpa / 4) * 100}%` }}
-                      title={`${item.gpa.toFixed(2)} GPA`}
+                      style={{ height: `${((item.gpa ?? 0) / 4) * 100}%` }}
+                      title={item.gpa === null ? 'In progress' : `${item.gpa.toFixed(2)} GPA`}
                     />
                   </div>
-                  <span className="font-mono text-xs font-semibold text-text-primary">{item.gpa.toFixed(2)}</span>
+                  <span className="font-mono text-xs font-semibold text-text-primary">{item.gpa?.toFixed(2) ?? '—'}</span>
                   <span className="max-w-[90px] text-center text-[11px] text-text-muted">{item.semester}</span>
                 </div>
               ))}

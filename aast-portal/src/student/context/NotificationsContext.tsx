@@ -45,7 +45,16 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     void refresh()
     const timer = window.setInterval(() => void refresh(), POLL_INTERVAL_MS)
-    return () => window.clearInterval(timer)
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    window.addEventListener('focus', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
   }, [refresh])
 
   const updateReadState = async (ids: string[], read: boolean) => {

@@ -1,4 +1,5 @@
 from pathlib import Path
+import sqlite3
 
 from fastapi.testclient import TestClient
 
@@ -90,6 +91,33 @@ def test_staff_grade_save_is_visible_to_student_portal(tmp_path: Path) -> None:
     assert ai_record["final_exam_mark"] == 35.2
     assert ai_record["total_score"] == 86.3
     assert ai_record["letter_grade"] == "B"
+
+
+def test_unposted_grades_remain_null_and_do_not_create_false_notifications(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    with sqlite3.connect(tmp_path / "aegisos.db") as connection:
+        connection.execute(
+            "DELETE FROM course_gradebook_entries WHERE student_id = ? AND course_id = ?",
+            ("231027905", "ai"),
+        )
+
+    records = client.get("/portal/students/231027905/grades").json()["records"]
+    ai_record = next(record for record in records if record["course_id"] == "ai")
+    assert ai_record["coursework_mark"] is None
+    assert ai_record["total_score"] is None
+    assert ai_record["letter_grade"] is None
+    assert ai_record["grade_source"] == "none"
+    assert ai_record["grade_posted"] is False
+
+    notifications = client.get(
+        "/portal/students/231027905/notifications"
+    ).json()["notifications"]
+    assert not any(
+        item["type"] == "grade" and "Artificial Intelligence" in item["title"]
+        for item in notifications
+    )
 
 
 def test_workspace_is_created_for_enrolled_course(tmp_path: Path) -> None:

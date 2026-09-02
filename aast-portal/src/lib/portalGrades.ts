@@ -1,4 +1,5 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
+export const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ?? 'https://backend-production-6069.up.railway.app'
 
 export interface PortalCourse {
   course_id: string
@@ -28,15 +29,26 @@ export interface PortalCourseGradebook {
   rows: PortalGradeRow[]
 }
 
-export interface PortalStudentGradeRecord extends PortalGradeRow {
+export interface PortalStudentGradeRecord {
   course_id: string
+  course_code: string
   course_name: string
   semester: string
+  enrollment_status: string
+  coursework_mark: number | null
+  week7_exam_mark: number | null
+  week12_exam_mark: number | null
+  final_exam_mark: number | null
+  total_score: number | null
+  letter_grade: string | null
+  gpa_points: number | null
+  grade_source: 'gradebook' | 'transcript' | 'none'
+  grade_posted: boolean
 }
 
 export interface PortalSemesterSummary {
   semester: string
-  gpa: number
+  gpa: number | null
   courses_graded: number
   standing: string
 }
@@ -50,6 +62,7 @@ export interface PortalStudentGradeReport {
     gpa: number | null
     courses: string[]
   }
+  completed_courses: number
   semesters: PortalSemesterSummary[]
   records: PortalStudentGradeRecord[]
 }

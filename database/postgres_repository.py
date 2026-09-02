@@ -158,7 +158,7 @@ class PostgresStudentRepository:
                 cursor.execute(
                     """
                     SELECT s.student_id::text AS student_id, s.full_name,
-                           s.academic_level, p.program_name
+                           s.academic_level, s.gpa, p.program_name
                     FROM students s
                     JOIN programs p ON p.program_id = s.program_id
                     WHERE s.student_id::text = %s
@@ -194,7 +194,7 @@ class PostgresStudentRepository:
             name=student_row["full_name"],
             major=student_row["program_name"],
             year=student_row["academic_level"],
-            gpa=self._compute_gpa(completed_rows),
+            gpa=float(student_row["gpa"]) if student_row["gpa"] is not None else self._compute_gpa(completed_rows),
             courses=tuple(row["course_title"] for row in current_rows),
         )
 
@@ -237,10 +237,18 @@ class PostgresStudentRepository:
                       COALESCE(g.final_exam_mark, 0) AS final_exam_mark
                FROM student_courses sc
                JOIN students s ON s.student_id = sc.student_id
-               LEFT JOIN course_gradebook_entries g
-                 ON g.student_id = s.student_id::text
-                AND g.course_id = sc.course_id::text
-                AND g.semester = %s
+               LEFT JOIN LATERAL (
+                 SELECT entry.*
+                 FROM course_gradebook_entries entry
+                 WHERE entry.student_id = s.student_id::text
+                   AND entry.course_id = sc.course_id::text
+                 ORDER BY CASE
+                   WHEN entry.semester = %s THEN 0
+                   WHEN entry.semester = 'Current semester' THEN 1
+                   ELSE 2
+                 END, entry.updated_at DESC
+                 LIMIT 1
+               ) g ON TRUE
                WHERE sc.course_id::text = %s AND sc.status = 'Current'
                ORDER BY s.full_name""",
             (selected_semester, course_id),
@@ -281,19 +289,38 @@ class PostgresStudentRepository:
         if student is None:
             return None
         records = self._fetch_all(
-            """SELECT c.course_id::text AS course_id, c.course_title AS course_name, %s AS semester,
-                      COALESCE(g.coursework_mark, 0) AS coursework_mark,
-                      COALESCE(g.week7_exam_mark, 0) AS week7_exam_mark,
-                      COALESCE(g.week12_exam_mark, 0) AS week12_exam_mark,
-                      COALESCE(g.final_exam_mark, 0) AS final_exam_mark
+            """SELECT c.course_id::text AS course_id,
+                      COALESCE(NULLIF(c.course_code, ''), c.course_id::text) AS course_code,
+                      c.course_title AS course_name,
+                      CASE WHEN sc.status = 'Current' THEN %s
+                           ELSE 'Semester ' || sc.semester::text END AS semester,
+                      sc.status AS enrollment_status,
+                      sc.grade AS stored_letter_grade,
+                      CASE WHEN g.student_id IS NOT NULL THEN 'gradebook'
+                           WHEN sc.status = 'Completed' AND sc.grade IS NOT NULL THEN 'transcript'
+                           ELSE 'none' END AS grade_source,
+                      g.coursework_mark,
+                      g.week7_exam_mark,
+                      g.week12_exam_mark,
+                      g.final_exam_mark,
+                      g.updated_at AS grade_updated_at
                FROM student_courses sc
                JOIN courses c ON c.course_id = sc.course_id
-               LEFT JOIN course_gradebook_entries g
-                 ON g.student_id = sc.student_id::text
-                AND g.course_id = c.course_id::text
-                AND g.semester = %s
-               WHERE sc.student_id::text = %s AND sc.status = 'Current'
-               ORDER BY c.course_title""",
+               LEFT JOIN LATERAL (
+                 SELECT entry.*
+                 FROM course_gradebook_entries entry
+                 WHERE entry.student_id = sc.student_id::text
+                   AND entry.course_id = c.course_id::text
+                 ORDER BY CASE
+                   WHEN entry.semester = %s THEN 0
+                   WHEN entry.semester = 'Current semester' THEN 1
+                   ELSE 2
+                 END, entry.updated_at DESC
+                 LIMIT 1
+               ) g ON sc.status = 'Current'
+               WHERE sc.student_id::text = %s
+               ORDER BY CASE WHEN sc.status = 'Current' THEN 0 ELSE 1 END,
+                        sc.semester DESC, c.course_title""",
             (self.semester, self.semester, student_id),
         )
         return {"student": student.as_dict(), "records": records}

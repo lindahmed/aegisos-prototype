@@ -76,6 +76,7 @@ class PortalNotificationReadRequest(BaseModel):
 
 
 GRADE_SCALE = [
+    ("A+", 4.0, 97),
     ("A", 4.0, 93),
     ("A-", 3.7, 90),
     ("B+", 3.3, 87),
@@ -83,9 +84,14 @@ GRADE_SCALE = [
     ("B-", 2.7, 80),
     ("C+", 2.3, 77),
     ("C", 2.0, 73),
-    ("D", 1.0, 60),
+    ("C-", 1.7, 70),
+    ("D+", 1.3, 67),
+    ("D", 1.0, 63),
+    ("D-", 0.7, 60),
     ("F", 0.0, 0),
 ]
+
+GRADE_POINTS = {letter: points for letter, points, _ in GRADE_SCALE}
 
 
 def _weighted_total(record: dict[str, object]) -> float:
@@ -102,15 +108,34 @@ def _score_to_grade(total: float) -> tuple[str, float]:
 
 def _enrich_grade_record(record: dict[str, object]) -> dict[str, object]:
     fields = ("coursework_mark", "week7_exam_mark", "week12_exam_mark", "final_exam_mark")
-    marks = {field: round(float(record.get(field, 0) or 0), 2) for field in fields}
-    total_score = _weighted_total(marks)
-    letter_grade, gpa_points = _score_to_grade(total_score)
+    marks = {
+        field: round(float(value), 2) if (value := record.get(field)) is not None else None
+        for field in fields
+    }
+    grade_source = str(record.get("grade_source") or "")
+    if not grade_source:
+        grade_source = "gradebook" if any(value is not None for value in marks.values()) else "none"
+
+    total_score: float | None = None
+    letter_grade: str | None = None
+    gpa_points: float | None = None
+    if grade_source == "gradebook":
+        total_score = _weighted_total(marks)
+        letter_grade, gpa_points = _score_to_grade(total_score)
+    else:
+        stored_letter = record.get("stored_letter_grade")
+        if stored_letter:
+            letter_grade = str(stored_letter).strip().upper()
+            gpa_points = GRADE_POINTS.get(letter_grade)
+
     return {
         **record,
         **marks,
         "total_score": total_score,
         "letter_grade": letter_grade,
         "gpa_points": gpa_points,
+        "grade_source": grade_source,
+        "grade_posted": letter_grade is not None,
     }
 
 
@@ -130,25 +155,32 @@ def _semester_summaries(records: list[dict[str, object]]) -> list[dict[str, obje
 
     summaries = []
     for semester, semester_records in grouped.items():
-        gpa = round(
-            sum(float(record["gpa_points"]) for record in semester_records)
-            / len(semester_records),
-            2,
+        graded_records = [
+            record for record in semester_records if record.get("gpa_points") is not None
+        ]
+        gpa = (
+            round(
+                sum(float(record["gpa_points"]) for record in graded_records)
+                / len(graded_records),
+                2,
+            )
+            if graded_records
+            else None
         )
         standing = (
             "In Progress"
-            if any(float(record["final_exam_mark"]) == 0 for record in semester_records)
-            else _standing_for_gpa(gpa)
+            if any(str(record.get("enrollment_status", "Current")) != "Completed" for record in semester_records)
+            else _standing_for_gpa(gpa or 0)
         )
         summaries.append(
             {
                 "semester": semester,
                 "gpa": gpa,
-                "courses_graded": len(semester_records),
+                "courses_graded": len(graded_records),
                 "standing": standing,
             }
         )
-    return sorted(summaries, key=lambda summary: str(summary["semester"]), reverse=True)
+    return summaries
 
 
 def _portal_notifications(
@@ -162,6 +194,8 @@ def _portal_notifications(
     items: list[dict[str, object]] = []
     for raw_record in report["records"]:
         record = _enrich_grade_record(raw_record)
+        if record["grade_source"] != "gradebook" or record["total_score"] is None:
+            continue
         total = float(record["total_score"])
         notification_id = (
             f"grade:{record['course_id']}:{record['semester']}:{total:.2f}"
@@ -328,6 +362,11 @@ def create_app(
         records = [_enrich_grade_record(record) for record in report["records"]]
         return {
             "student": report["student"],
+            "completed_courses": sum(
+                1
+                for record in records
+                if str(record.get("enrollment_status", "")) == "Completed"
+            ),
             "semesters": _semester_summaries(records),
             "records": records,
         }
@@ -346,6 +385,11 @@ def create_app(
             "current_week": twin.current_week if twin else 1,
             "courses": [course.model_dump() for course in (twin.courses if twin else [])],
             "grades": {
+                "completed_courses": sum(
+                    1
+                    for record in records
+                    if str(record.get("enrollment_status", "")) == "Completed"
+                ),
                 "semesters": _semester_summaries(records),
                 "records": records,
             },
