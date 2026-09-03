@@ -15,9 +15,11 @@ const openVsCodeButton = document.querySelector('#open-vscode-button');
 const workspaceTab = document.querySelector('#workspace-tab');
 const advisorTab = document.querySelector('#advisor-tab');
 const progressTab = document.querySelector('#progress-tab');
+const calendarTab = document.querySelector('#calendar-tab');
 const workspacePanel = document.querySelector('#workspace-panel');
 const advisorPanel = document.querySelector('#advisor-panel');
 const progressPanel = document.querySelector('#progress-panel');
+const calendarPanel = document.querySelector('#calendar-panel');
 const advisorForm = document.querySelector('#advisor-form');
 const advisorInput = document.querySelector('#advisor-input');
 const advisorSendButton = document.querySelector('#advisor-send-button');
@@ -27,10 +29,28 @@ const advisorMessages = document.querySelector('#advisor-messages');
 const advisorStatus = document.querySelector('#advisor-status');
 const advisorIntent = document.querySelector('#advisor-intent');
 
+const calendarGrid = document.querySelector('#calendar-grid');
+const calendarMonthTitle = document.querySelector('#calendar-month-title');
+const calendarSelectedTitle = document.querySelector('#calendar-selected-title');
+const calendarAgendaList = document.querySelector('#calendar-agenda-list');
+const calendarModal = document.querySelector('#calendar-modal');
+const calendarEventForm = document.querySelector('#calendar-event-form');
+const calendarEventTitle = document.querySelector('#calendar-event-title');
+const calendarEventDescription = document.querySelector('#calendar-event-description');
+const calendarEventDate = document.querySelector('#calendar-event-date');
+const calendarEventTime = document.querySelector('#calendar-event-time');
+const calendarEventDuration = document.querySelector('#calendar-event-duration');
+const calendarEventType = document.querySelector('#calendar-event-type');
+const calendarFormStatus = document.querySelector('#calendar-form-status');
+
 let currentStudent = null;
 let selectedCourse = null;
 let advisorHistory = [];
 let activeRecording = null;
+let currentTwin = null;
+let calendarCustomEvents = [];
+let calendarSelectedDate = new Date();
+let calendarMonth = new Date(calendarSelectedDate.getFullYear(), calendarSelectedDate.getMonth(), 1);
 
 
 async function apiRequest(path, options = {}) {
@@ -103,15 +123,21 @@ function selectCourse(course) {
 function showDashboardSection(section) {
   const showAdvisor = section === 'advisor';
   const showProgress = section === 'progress';
-  workspacePanel.hidden = showAdvisor || showProgress;
+  const showCalendar = section === 'calendar';
+  workspacePanel.hidden = showAdvisor || showProgress || showCalendar;
   advisorPanel.hidden = !showAdvisor;
   progressPanel.hidden = !showProgress;
-  workspaceTab.setAttribute('aria-pressed', String(!showAdvisor && !showProgress));
+  calendarPanel.hidden = !showCalendar;
+  workspaceTab.setAttribute('aria-pressed', String(!showAdvisor && !showProgress && !showCalendar));
   advisorTab.setAttribute('aria-pressed', String(showAdvisor));
   progressTab.setAttribute('aria-pressed', String(showProgress));
+  calendarTab.setAttribute('aria-pressed', String(showCalendar));
 
   if (showAdvisor) {
     advisorInput.focus();
+  }
+  if (showCalendar) {
+    renderCalendar();
   }
 }
 
@@ -224,11 +250,270 @@ async function loadProgress(studentId) {
   setMessage(document.querySelector('#progress-status'), 'Loading semester progress...');
   try {
     const twin = await apiRequest(`/progress/${encodeURIComponent(studentId)}`);
+    if (!currentStudent || currentStudent.student_id !== studentId) return;
+    currentTwin = twin;
     renderProgress(twin);
+    const scheduled = scheduleUrgentStudySessions();
+    renderCalendar();
+    if (scheduled.length > 0) {
+      showToasts([{
+        type: 'study',
+        title: 'AI study plan updated',
+        body: `${scheduled.length} urgent study ${scheduled.length === 1 ? 'session was' : 'sessions were'} added to your calendar.`,
+      }]);
+    }
     setMessage(document.querySelector('#progress-status'), '');
   } catch (error) {
+    if (!currentStudent || currentStudent.student_id !== studentId) return;
+    currentTwin = null;
+    renderCalendar();
     setMessage(document.querySelector('#progress-status'), error.message, true);
   }
+}
+
+
+const CALENDAR_EXAM_TYPES = new Set(['midterm', 'final', 'exam']);
+
+function calendarDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function calendarStorageKey(studentId) {
+  return `aegisos-calendar:${studentId}`;
+}
+
+function loadCalendarEvents(studentId) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(calendarStorageKey(studentId)) || '[]');
+    return Array.isArray(stored)
+      ? stored.filter((event) => event?.id && event?.title && event?.startAt && event?.endAt)
+      : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function saveCalendarEvents() {
+  if (!currentStudent) return;
+  try {
+    localStorage.setItem(calendarStorageKey(currentStudent.student_id), JSON.stringify(calendarCustomEvents));
+  } catch (_error) {
+    // Keep the planner usable for this session when local storage is unavailable.
+  }
+}
+
+function semesterStart(currentWeek) {
+  const monday = new Date();
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  monday.setDate(monday.getDate() - (Number(currentWeek) - 1) * 7);
+  return monday;
+}
+
+function academicCalendarEvents() {
+  if (!currentTwin) return [];
+  const startOfSemester = semesterStart(currentTwin.current_week);
+  return currentTwin.courses.flatMap((course) => (course.assessments || []).map((assessment) => {
+    const isExam = CALENDAR_EXAM_TYPES.has(String(assessment.assessment_type).toLowerCase());
+    const start = new Date(startOfSemester);
+    start.setDate(start.getDate() + (Number(assessment.due_week) - 1) * 7 + (isExam ? 0 : 6));
+    start.setHours(isExam ? 9 : 22, 0, 0, 0);
+    return {
+      id: `academic:${assessment.assessment_id}`,
+      title: assessment.name,
+      description: `${course.course_name} · ${assessment.max_marks} marks · academic week ${assessment.due_week}`,
+      startAt: start.toISOString(),
+      endAt: new Date(start.getTime() + (isExam ? 120 : 60) * 60000).toISOString(),
+      type: isExam ? 'exam' : 'assignment',
+      source: 'academic',
+      courseId: course.course_id,
+      completed: assessment.mark !== null && assessment.mark !== undefined,
+    };
+  }));
+}
+
+function allCalendarEvents() {
+  return [...academicCalendarEvents(), ...calendarCustomEvents]
+    .sort((left, right) => new Date(left.startAt) - new Date(right.startAt));
+}
+
+function eventsOverlap(start, end, events) {
+  return events.some((event) => start < new Date(event.endAt) && end > new Date(event.startAt));
+}
+
+function nextStudySlot(events, offset) {
+  const now = new Date();
+  const first = new Date(now);
+  first.setMinutes(0, 0, 0);
+  if (first.getHours() >= 18) first.setDate(first.getDate() + 1);
+  const candidates = [];
+  for (let day = 0; day < 5; day += 1) {
+    for (const hour of [18, 20]) {
+      const candidate = new Date(first);
+      candidate.setDate(first.getDate() + day);
+      candidate.setHours(hour, 0, 0, 0);
+      candidates.push(candidate);
+    }
+  }
+  const rotated = [...candidates.slice(offset), ...candidates.slice(0, offset)];
+  return rotated.find((start) => start > now && !eventsOverlap(start, new Date(start.getTime() + 90 * 60000), events))
+    || candidates[candidates.length - 1];
+}
+
+function riskText(course) {
+  const risks = Array.isArray(course.risks) ? course.risks : [];
+  const messages = risks.slice(0, 2).map((risk) => typeof risk === 'string' ? risk : risk.message).filter(Boolean);
+  return messages.length > 0 ? messages.join('; ') : `${course.risk_level || 'elevated'} academic risk was detected`;
+}
+
+function scheduleUrgentStudySessions() {
+  if (!currentTwin) return [];
+  const existing = allCalendarEvents();
+  const urgentCourses = currentTwin.courses.filter((course) => {
+    const health = course.metrics?.course_health;
+    return course.risk_level === 'high'
+      || (health !== null && health !== undefined && Number(health) < 60 && (course.risks || []).length > 0);
+  });
+  const added = [];
+  for (const [index, course] of urgentCourses.entries()) {
+    const id = `ai:${currentTwin.semester}:${currentTwin.current_week}:${course.course_id}`;
+    if (calendarCustomEvents.some((event) => event.id === id)) continue;
+    const start = nextStudySlot([...existing, ...added], index);
+    added.push({
+      id,
+      title: `Urgent study: ${course.course_name}`,
+      description: `AI scheduled this focus session because ${riskText(course)}.`,
+      startAt: start.toISOString(),
+      endAt: new Date(start.getTime() + 90 * 60000).toISOString(),
+      type: 'study_session',
+      source: 'ai',
+      courseId: course.course_id,
+      urgent: true,
+    });
+  }
+  if (added.length > 0) {
+    calendarCustomEvents.push(...added);
+    saveCalendarEvents();
+  }
+  return added;
+}
+
+function eventTypeLabel(event) {
+  if (event.type === 'study_session') return event.source === 'ai' ? 'AI study session' : 'Study session';
+  if (event.type === 'assignment') return 'Assignment deadline';
+  return event.type.charAt(0).toUpperCase() + event.type.slice(1);
+}
+
+function renderCalendarAgenda(events) {
+  calendarSelectedTitle.textContent = calendarSelectedDate.toLocaleDateString(undefined, {
+    weekday: 'long', month: 'long', day: 'numeric',
+  });
+  calendarAgendaList.replaceChildren();
+  if (events.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'calendar-empty';
+    empty.textContent = 'No events yet. Add a study session or personal event.';
+    calendarAgendaList.append(empty);
+    return;
+  }
+  for (const event of events) {
+    const card = document.createElement('article');
+    card.className = `calendar-agenda-card ${event.type}${event.completed ? ' completed' : ''}`;
+    const meta = document.createElement('p');
+    meta.className = 'calendar-event-meta';
+    meta.textContent = `${new Date(event.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · ${eventTypeLabel(event)}`;
+    const title = document.createElement('h5');
+    title.textContent = event.title;
+    const description = document.createElement('p');
+    description.textContent = event.description || (event.source === 'student' ? 'Personal calendar event' : 'Academic calendar event');
+    card.append(meta, title, description);
+    if (event.completed) {
+      const done = document.createElement('span');
+      done.className = 'calendar-completed';
+      done.textContent = 'Completed';
+      card.append(done);
+    } else if (event.source !== 'academic') {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'calendar-delete-button';
+      remove.textContent = 'Remove';
+      remove.addEventListener('click', () => {
+        calendarCustomEvents = calendarCustomEvents.filter((item) => item.id !== event.id);
+        saveCalendarEvents();
+        renderCalendar();
+      });
+      card.append(remove);
+    }
+    calendarAgendaList.append(card);
+  }
+}
+
+function renderCalendar() {
+  if (!calendarGrid) return;
+  const events = allCalendarEvents();
+  calendarMonthTitle.textContent = calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  calendarGrid.replaceChildren();
+  const first = new Date(calendarMonth);
+  first.setDate(1 - ((first.getDay() + 6) % 7));
+  const todayKey = calendarDateKey(new Date());
+  const selectedKey = calendarDateKey(calendarSelectedDate);
+
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(first);
+    date.setDate(first.getDate() + index);
+    const dateKey = calendarDateKey(date);
+    const dayEvents = events.filter((event) => calendarDateKey(new Date(event.startAt)) === dateKey);
+    const day = document.createElement('button');
+    day.type = 'button';
+    day.className = 'calendar-day';
+    if (date.getMonth() !== calendarMonth.getMonth()) day.classList.add('outside');
+    if (dateKey === todayKey) day.classList.add('today');
+    if (dateKey === selectedKey) day.classList.add('selected');
+    day.setAttribute('aria-label', `${date.toLocaleDateString()}${dayEvents.length ? `, ${dayEvents.length} events` : ''}`);
+    const number = document.createElement('span');
+    number.className = 'calendar-day-number';
+    number.textContent = String(date.getDate());
+    day.append(number);
+    for (const event of dayEvents.slice(0, 3)) {
+      const pill = document.createElement('span');
+      pill.className = `calendar-event-pill ${event.type}`;
+      pill.textContent = event.title;
+      day.append(pill);
+    }
+    if (dayEvents.length > 3) {
+      const more = document.createElement('span');
+      more.className = 'calendar-event-more';
+      more.textContent = `+${dayEvents.length - 3} more`;
+      day.append(more);
+    }
+    day.addEventListener('click', () => {
+      calendarSelectedDate = date;
+      renderCalendar();
+    });
+    day.addEventListener('dblclick', () => openCalendarModal(date));
+    calendarGrid.append(day);
+  }
+  renderCalendarAgenda(events.filter((event) => calendarDateKey(new Date(event.startAt)) === selectedKey));
+}
+
+function openCalendarModal(date = calendarSelectedDate) {
+  calendarEventForm.reset();
+  calendarEventDate.value = calendarDateKey(date);
+  calendarEventTime.value = '18:00';
+  calendarEventDuration.value = '60';
+  calendarEventType.value = 'study_session';
+  setMessage(calendarFormStatus, '');
+  calendarModal.hidden = false;
+  calendarEventTitle.focus();
+}
+
+function closeCalendarModal() {
+  calendarModal.hidden = true;
+  calendarEventForm.reset();
+  setMessage(calendarFormStatus, '');
 }
 
 
@@ -415,10 +700,17 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape' || notifPanel.hidden) return;
-  notifPanel.hidden = true;
-  notifButton.setAttribute('aria-expanded', 'false');
-  notifButton.focus();
+  if (event.key !== 'Escape') return;
+  if (!calendarModal.hidden) {
+    closeCalendarModal();
+    document.querySelector('#calendar-add-button').focus();
+    return;
+  }
+  if (!notifPanel.hidden) {
+    notifPanel.hidden = true;
+    notifButton.setAttribute('aria-expanded', 'false');
+    notifButton.focus();
+  }
 });
 
 window.addEventListener('focus', refreshNotifications);
@@ -470,6 +762,10 @@ function resetAdvisor() {
 
 function renderStudent(student) {
   currentStudent = student;
+  currentTwin = null;
+  calendarCustomEvents = loadCalendarEvents(student.student_id);
+  calendarSelectedDate = new Date();
+  calendarMonth = new Date(calendarSelectedDate.getFullYear(), calendarSelectedDate.getMonth(), 1);
   document.querySelector('#welcome-title').textContent = `Welcome, ${student.name}`;
   document.querySelector('#student-major').textContent = student.major;
   document.querySelector('#student-year').textContent = `Year ${student.year}`;
@@ -491,6 +787,7 @@ function renderStudent(student) {
   loginView.hidden = true;
   dashboardView.hidden = false;
   showDashboardSection('workspace');
+  renderCalendar();
   resetAdvisor();
   loadProgress(student.student_id);
   startNotificationSync();
@@ -561,6 +858,75 @@ openVsCodeButton.addEventListener('click', () => {
 workspaceTab.addEventListener('click', () => showDashboardSection('workspace'));
 advisorTab.addEventListener('click', () => showDashboardSection('advisor'));
 progressTab.addEventListener('click', () => showDashboardSection('progress'));
+calendarTab.addEventListener('click', () => showDashboardSection('calendar'));
+
+document.querySelector('#calendar-previous-button').addEventListener('click', () => {
+  calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1);
+  renderCalendar();
+});
+
+document.querySelector('#calendar-next-button').addEventListener('click', () => {
+  calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1);
+  renderCalendar();
+});
+
+document.querySelector('#calendar-today-button').addEventListener('click', () => {
+  calendarSelectedDate = new Date();
+  calendarMonth = new Date(calendarSelectedDate.getFullYear(), calendarSelectedDate.getMonth(), 1);
+  renderCalendar();
+});
+
+document.querySelector('#calendar-add-button').addEventListener('click', () => openCalendarModal());
+document.querySelector('#calendar-day-add-button').addEventListener('click', () => openCalendarModal());
+document.querySelector('#calendar-modal-close').addEventListener('click', closeCalendarModal);
+document.querySelector('#calendar-cancel-button').addEventListener('click', closeCalendarModal);
+document.querySelector('#calendar-modal-overlay').addEventListener('click', closeCalendarModal);
+
+document.querySelector('#calendar-ai-button').addEventListener('click', () => {
+  if (!currentTwin) {
+    showToasts([{ type: 'study', title: 'Academic data is loading', body: 'Try planning again after semester progress has loaded.' }]);
+    return;
+  }
+  const added = scheduleUrgentStudySessions();
+  renderCalendar();
+  showToasts([{
+    type: 'study',
+    title: added.length > 0 ? 'AI study plan updated' : 'Study plan is up to date',
+    body: added.length > 0
+      ? `${added.length} urgent study ${added.length === 1 ? 'session was' : 'sessions were'} added.`
+      : 'No new urgent sessions are needed right now.',
+  }]);
+});
+
+calendarEventForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!currentStudent) return;
+  const title = calendarEventTitle.value.trim();
+  const dateParts = calendarEventDate.value.split('-').map(Number);
+  const timeParts = calendarEventTime.value.split(':').map(Number);
+  if (!title || dateParts.length !== 3 || timeParts.length !== 2 || dateParts.some(Number.isNaN) || timeParts.some(Number.isNaN)) {
+    setMessage(calendarFormStatus, 'Enter a title, date, and start time.', true);
+    return;
+  }
+  const start = new Date(dateParts[0], dateParts[1] - 1, dateParts[2], timeParts[0], timeParts[1]);
+  const durationMinutes = Number(calendarEventDuration.value);
+  const eventType = calendarEventType.value;
+  calendarCustomEvents.push({
+    id: `student:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+    title,
+    description: calendarEventDescription.value.trim(),
+    startAt: start.toISOString(),
+    endAt: new Date(start.getTime() + durationMinutes * 60000).toISOString(),
+    type: eventType,
+    source: 'student',
+  });
+  calendarSelectedDate = start;
+  calendarMonth = new Date(start.getFullYear(), start.getMonth(), 1);
+  saveCalendarEvents();
+  closeCalendarModal();
+  renderCalendar();
+  showToasts([{ type: eventType, title: 'Calendar updated', body: `${title} was added to your calendar.` }]);
+});
 
 
 advisorForm.addEventListener('submit', async (event) => {
@@ -767,6 +1133,11 @@ document.querySelector('#sign-out-button').addEventListener('click', () => {
   notifButton.setAttribute('aria-expanded', 'false');
   currentStudent = null;
   selectedCourse = null;
+  currentTwin = null;
+  calendarCustomEvents = [];
+  calendarSelectedDate = new Date();
+  calendarMonth = new Date(calendarSelectedDate.getFullYear(), calendarSelectedDate.getMonth(), 1);
+  closeCalendarModal();
   advisorHistory = [];
   advisorMessages.replaceChildren();
   dashboardView.hidden = true;

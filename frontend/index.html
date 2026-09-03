@@ -92,6 +92,9 @@
             <button id="progress-tab" class="tab-button" type="button" aria-pressed="false">
               Progress
             </button>
+            <button id="calendar-tab" class="tab-button" type="button" aria-pressed="false">
+              Calendar
+            </button>
           </nav>
 
           <section id="workspace-panel">
@@ -172,9 +175,101 @@
             <div id="progress-course-list" class="progress-course-list"></div>
             <p id="progress-status" class="message" role="status" aria-live="polite"></p>
           </section>
+
+          <section id="calendar-panel" class="calendar-panel" hidden>
+            <div class="calendar-heading">
+              <div>
+                <p class="eyebrow">Academic + personal planner</p>
+                <h3>My calendar</h3>
+              </div>
+              <div class="calendar-actions">
+                <button id="calendar-ai-button" class="secondary-button" type="button">Plan with AI</button>
+                <button id="calendar-add-button" class="primary-button" type="button">Add event</button>
+              </div>
+            </div>
+
+            <p class="calendar-note">
+              Exams are placed on Monday at 9:00 AM and assignment deadlines on Sunday at 10:00 PM of their academic week because the academic system provides week numbers rather than exact dates.
+            </p>
+
+            <div class="calendar-toolbar">
+              <button id="calendar-previous-button" class="calendar-nav-button" type="button" aria-label="Previous month">&#8249;</button>
+              <h4 id="calendar-month-title">Month</h4>
+              <button id="calendar-next-button" class="calendar-nav-button" type="button" aria-label="Next month">&#8250;</button>
+              <button id="calendar-today-button" class="text-button" type="button">Today</button>
+            </div>
+
+            <div class="calendar-layout">
+              <div class="calendar-board">
+                <div class="calendar-weekdays" aria-hidden="true">
+                  <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+                </div>
+                <div id="calendar-grid" class="calendar-grid" aria-label="Month calendar"></div>
+              </div>
+              <aside class="calendar-agenda" aria-live="polite">
+                <div class="calendar-agenda-heading">
+                  <div>
+                    <p class="eyebrow">Selected day</p>
+                    <h4 id="calendar-selected-title">Today</h4>
+                  </div>
+                  <button id="calendar-day-add-button" class="calendar-inline-add" type="button" aria-label="Add event on selected day">+</button>
+                </div>
+                <div id="calendar-agenda-list" class="calendar-agenda-list"></div>
+              </aside>
+            </div>
+
+            <div class="calendar-legend" aria-label="Calendar legend">
+              <span><i class="exam"></i>Exam</span>
+              <span><i class="assignment"></i>Deadline</span>
+              <span><i class="study_session"></i>Study session</span>
+              <span><i class="personal"></i>Personal</span>
+            </div>
+          </section>
         </section>
       </section>
     </main>
+
+    <div id="calendar-modal" class="calendar-modal" hidden>
+      <button id="calendar-modal-overlay" class="calendar-modal-overlay" type="button" aria-label="Close event editor"></button>
+      <section class="calendar-dialog" role="dialog" aria-modal="true" aria-labelledby="calendar-dialog-title">
+        <div class="calendar-dialog-heading">
+          <div>
+            <p class="eyebrow">Personal planner</p>
+            <h3 id="calendar-dialog-title">Add calendar event</h3>
+          </div>
+          <button id="calendar-modal-close" class="calendar-close-button" type="button" aria-label="Close">&#10005;</button>
+        </div>
+        <form id="calendar-event-form" class="calendar-event-form">
+          <label>Title<input id="calendar-event-title" maxlength="100" required></label>
+          <label>Description<textarea id="calendar-event-description" maxlength="400" rows="3" placeholder="Optional notes"></textarea></label>
+          <div class="calendar-form-row">
+            <label>Date<input id="calendar-event-date" type="date" required></label>
+            <label>Start time<input id="calendar-event-time" type="time" value="18:00" required></label>
+          </div>
+          <div class="calendar-form-row">
+            <label>Duration
+              <select id="calendar-event-duration">
+                <option value="30">30 minutes</option>
+                <option value="60" selected>1 hour</option>
+                <option value="90">1.5 hours</option>
+                <option value="120">2 hours</option>
+              </select>
+            </label>
+            <label>Event type
+              <select id="calendar-event-type">
+                <option value="study_session">Study session</option>
+                <option value="personal">Personal event</option>
+              </select>
+            </label>
+          </div>
+          <p id="calendar-form-status" class="message" role="status" aria-live="polite"></p>
+          <div class="calendar-form-actions">
+            <button id="calendar-cancel-button" class="secondary-button" type="button">Cancel</button>
+            <button class="primary-button" type="submit">Save event</button>
+          </div>
+        </form>
+      </section>
+    </div>
     <div id="toast-container" class="toast-container" aria-live="polite"></div>
     <script src="renderer.js"></script>
   </body>

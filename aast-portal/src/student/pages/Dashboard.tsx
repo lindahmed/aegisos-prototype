@@ -172,7 +172,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <h2 className="font-display text-base font-semibold text-text-primary">Today's Classes</h2>
               <Link to="/schedule" className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:underline">
-                Full schedule <ArrowRight className="h-3 w-3" />
+                Full calendar <ArrowRight className="h-3 w-3" />
               </Link>
             </div>
             {todaysClasses.length === 0 ? (
@@ -253,7 +253,7 @@ export default function Dashboard() {
                 { label: 'Transcript', to: '/documents' },
                 { label: 'Pay Fees', to: '/fees' },
                 { label: 'GPA Calculator', to: '/services/gpa-calculator' },
-                { label: 'My Schedule', to: '/schedule' },
+                { label: 'My Calendar', to: '/schedule' },
                 { label: 'All Services', to: '/services' },
                 { label: 'Clinic Booking', to: '/services/clinic-reservation' },
               ].map((a) => (

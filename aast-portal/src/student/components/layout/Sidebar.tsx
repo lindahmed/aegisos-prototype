@@ -28,7 +28,7 @@ const navGroups = [
     items: [
       { to: '/registration', label: 'Registration', icon: ClipboardList },
       { to: '/courses', label: 'Courses', icon: BookOpen },
-      { to: '/schedule', label: 'Schedule', icon: CalendarDays },
+      { to: '/schedule', label: 'Calendar', icon: CalendarDays },
       { to: '/grades', label: 'Grades', icon: GraduationCap },
       { to: '/exams', label: 'Exams', icon: FileClock },
     ],
