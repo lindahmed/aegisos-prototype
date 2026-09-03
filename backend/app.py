@@ -7,7 +7,8 @@ from typing import Callable
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 
-load_dotenv(override=False)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(PROJECT_ROOT / ".env", override=False)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -32,6 +33,7 @@ from backend.progress.models import StudentTwin, WhatIfRequest, WhatIfResponse
 from backend.progress.narrative import generate_weekly_narrative
 from backend.progress.scheduler import run_analysis_cycle
 from backend.progress.service import build_student_twin
+from backend.planner.service import build_semester_plan
 from backend.progress_agent.graph import (
     StudentNotFoundError,
     build_progress_graph,
@@ -40,9 +42,6 @@ from backend.simulation.what_if import run_assessment_grade_scenario
 from database.repository import Student, StudentRepository
 from database.postgres_repository import PostgresStudentRepository
 from workspace.manager import ToolUnavailableError, WorkspaceManager
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class WorkspaceRequest(BaseModel):
@@ -192,6 +191,27 @@ def _portal_notifications(
 
     read_ids = repository.get_read_notification_ids(student_id)
     items: list[dict[str, object]] = []
+    twin = build_student_twin(repository, student_id)
+    if twin is not None:
+        for course in twin.courses:
+            for risk in course.risks:
+                notification_id = (
+                    f"risk:{course.course_id}:{risk.code}:{twin.current_week}"
+                )
+                items.append(
+                    {
+                        "id": notification_id,
+                        "type": "risk",
+                        "category": "System",
+                        "title": f"{course.course_name} needs attention",
+                        "body": risk.message,
+                        "timestamp": (
+                            f"Week {twin.current_week} · {risk.severity.upper()} RISK"
+                        ),
+                        "read": notification_id in read_ids,
+                    }
+                )
+
     for raw_record in report["records"]:
         record = _enrich_grade_record(raw_record)
         if record["grade_source"] != "gradebook" or record["total_score"] is None:
@@ -212,7 +232,6 @@ def _portal_notifications(
             }
         )
 
-    twin = build_student_twin(repository, student_id)
     if twin is not None:
         exam_types = {"midterm", "final", "exam"}
         for course in twin.courses:
@@ -394,6 +413,21 @@ def create_app(
                 "records": records,
             },
         }
+
+    @api.get("/portal/students/{student_id}/semester-plan")
+    def get_portal_student_semester_plan(
+        student_id: str,
+        max_credits: int = 18,
+        expected_term_gpa: float = 3.3,
+    ) -> dict[str, object]:
+        source = repository.get_semester_planner_source(student_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        return build_semester_plan(
+            source,
+            max_credits=max_credits,
+            expected_term_gpa=expected_term_gpa,
+        )
 
     @api.get("/portal/students/{student_id}/notifications")
     def get_portal_student_notifications(student_id: str) -> dict[str, object]:

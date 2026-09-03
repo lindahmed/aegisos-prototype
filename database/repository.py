@@ -194,6 +194,16 @@ class StudentRepository:
                     PRIMARY KEY (student_id, notification_id),
                     FOREIGN KEY (student_id) REFERENCES students(student_id)
                 );
+                CREATE TABLE IF NOT EXISTS course_schedule_slots (
+                    schedule_slot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    course_id TEXT NOT NULL,
+                    day_of_week TEXT NOT NULL,
+                    start_minute INTEGER NOT NULL CHECK(start_minute BETWEEN 0 AND 1439),
+                    end_minute INTEGER NOT NULL CHECK(end_minute BETWEEN 1 AND 1440),
+                    location TEXT,
+                    CHECK(end_minute > start_minute),
+                    FOREIGN KEY (course_id) REFERENCES course_offerings(course_id)
+                );
                 """
             )
             gradebook_columns = {row[1] for row in connection.execute("PRAGMA table_info(course_gradebook_entries)")}
@@ -363,6 +373,49 @@ class StudentRepository:
         with self._connect() as connection:
             student_ids = [row["student_id"] for row in connection.execute("SELECT student_id FROM students ORDER BY student_id")]
         return [student for student_id in student_ids if (student := self.get_student(student_id)) is not None]
+
+    def get_semester_planner_source(self, student_id: str) -> dict[str, Any] | None:
+        """Provide a data-limited planner source for the local SQLite prototype."""
+        student = self.get_student(student_id)
+        if student is None:
+            return None
+        with self._connect() as connection:
+            current = connection.execute(
+                """SELECT offering.course_id, offering.course_name
+                   FROM courses enrollment
+                   JOIN course_offerings offering ON offering.course_name = enrollment.course_name
+                   WHERE enrollment.student_id = ? ORDER BY enrollment.rowid""",
+                (student_id,),
+            ).fetchall()
+            schedules = connection.execute(
+                """SELECT course_id, day_of_week, start_minute, end_minute, location
+                   FROM course_schedule_slots"""
+            ).fetchall()
+        courses = [
+            {
+                "course_id": row["course_id"],
+                "course_code": row["course_id"],
+                "course_name": row["course_name"],
+                "curriculum_semester": student.year * 2,
+                "course_type": "Current",
+            }
+            for row in current
+        ]
+        return {
+            "student": {
+                "student_id": student.student_id,
+                "current_semester": max(1, student.year * 2 - 1),
+                "gpa": student.gpa,
+            },
+            "courses": courses,
+            "enrollments": [
+                {"course_id": row["course_id"], "status": "Current"}
+                for row in current
+            ],
+            "prerequisites": [],
+            "schedules": [dict(row) for row in schedules],
+            "schedule_data_available": bool(schedules),
+        }
 
     @staticmethod
     def _seed_portal_gradebook(connection: sqlite3.Connection) -> None:

@@ -143,6 +143,15 @@ class PostgresStudentRepository:
                         read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         PRIMARY KEY (student_id, notification_id)
                     );
+                    CREATE TABLE IF NOT EXISTS course_schedule_slots (
+                        schedule_slot_id BIGSERIAL PRIMARY KEY,
+                        course_id INTEGER NOT NULL REFERENCES courses(course_id),
+                        day_of_week TEXT NOT NULL,
+                        start_minute INTEGER NOT NULL CHECK(start_minute BETWEEN 0 AND 1439),
+                        end_minute INTEGER NOT NULL CHECK(end_minute BETWEEN 1 AND 1440),
+                        location TEXT,
+                        CHECK(end_minute > start_minute)
+                    );
                     ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS coursework_mark DOUBLE PRECISION CHECK(coursework_mark BETWEEN 0 AND 10);
                     ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS week7_exam_mark DOUBLE PRECISION CHECK(week7_exam_mark BETWEEN 0 AND 30);
                     ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS week12_exam_mark DOUBLE PRECISION CHECK(week12_exam_mark BETWEEN 0 AND 20);
@@ -204,6 +213,61 @@ class PostgresStudentRepository:
                 cursor.execute("SELECT student_id::text AS student_id FROM students ORDER BY student_id")
                 ids = [row["student_id"] for row in cursor.fetchall()]
         return [student for student_id in ids if (student := self.get_student(student_id))]
+
+    def get_semester_planner_source(self, student_id: str) -> dict[str, Any] | None:
+        """Return normalized curriculum facts used by the semester planner."""
+        student = self._fetch_one(
+            """SELECT s.student_id::text AS student_id, s.program_id,
+                      s.current_semester, s.gpa, p.program_name
+               FROM students s
+               JOIN programs p ON p.program_id = s.program_id
+               WHERE s.student_id::text = %s""",
+            (student_id.strip(),),
+        )
+        if student is None:
+            return None
+        courses = self._fetch_all(
+            """SELECT c.course_id::text AS course_id,
+                      COALESCE(NULLIF(c.course_code, ''), c.course_id::text) AS course_code,
+                      c.course_title AS course_name,
+                      pc.semester AS curriculum_semester,
+                      pc.course_type
+               FROM program_courses pc
+               JOIN courses c ON c.course_id = pc.course_id
+               WHERE pc.program_id = %s
+               ORDER BY pc.semester, c.course_code, c.course_title""",
+            (student["program_id"],),
+        )
+        enrollments = self._fetch_all(
+            """SELECT course_id::text AS course_id, semester, status, grade
+               FROM student_courses WHERE student_id::text = %s""",
+            (student_id.strip(),),
+        )
+        prerequisites = self._fetch_all(
+            """SELECT prerequisite.course_id::text AS course_id,
+                      prerequisite.prerequisite_course_id::text AS prerequisite_course_id
+               FROM course_prerequisites prerequisite
+               JOIN program_courses pc ON pc.course_id = prerequisite.course_id
+               WHERE pc.program_id = %s""",
+            (student["program_id"],),
+        )
+        schedules = self._fetch_all(
+            """SELECT slot.course_id::text AS course_id, slot.day_of_week,
+                      slot.start_minute, slot.end_minute, slot.location
+               FROM course_schedule_slots slot
+               JOIN program_courses pc ON pc.course_id = slot.course_id
+               WHERE pc.program_id = %s
+               ORDER BY slot.day_of_week, slot.start_minute""",
+            (student["program_id"],),
+        )
+        return {
+            "student": student,
+            "courses": courses,
+            "enrollments": enrollments,
+            "prerequisites": prerequisites,
+            "schedules": schedules,
+            "schedule_data_available": bool(schedules),
+        }
 
     def list_portal_courses(self) -> list[dict[str, Any]]:
         return self._fetch_all(
@@ -380,15 +444,27 @@ class PostgresStudentRepository:
                 course_rows = cursor.fetchall()
                 cursor.execute(
                     """
-                    SELECT g.course_id::text AS course_id,
-                           COALESCE(g.coursework_mark, 0) AS coursework_mark,
-                      COALESCE(g.week7_exam_mark, 0) AS week7_exam_mark,
-                      COALESCE(g.week12_exam_mark, 0) AS week12_exam_mark,
-                      COALESCE(g.final_exam_mark, 0) AS final_exam_mark
-                    FROM course_gradebook_entries g
-                    WHERE g.student_id = %s AND g.semester = %s
+                    SELECT sc.course_id::text AS course_id,
+                           g.coursework_mark,
+                           g.week7_exam_mark,
+                           g.week12_exam_mark,
+                           g.final_exam_mark
+                    FROM student_courses sc
+                    JOIN LATERAL (
+                      SELECT entry.*
+                      FROM course_gradebook_entries entry
+                      WHERE entry.student_id = sc.student_id::text
+                        AND entry.course_id = sc.course_id::text
+                      ORDER BY CASE
+                        WHEN entry.semester = %s THEN 0
+                        WHEN entry.semester = 'Current semester' THEN 1
+                        ELSE 2
+                      END, entry.updated_at DESC
+                      LIMIT 1
+                    ) g ON TRUE
+                    WHERE sc.student_id::text = %s AND sc.status = 'Current'
                     """,
-                    (student.student_id, self.semester),
+                    (self.semester, student.student_id),
                 )
                 gradebook_rows = {row["course_id"]: row for row in cursor.fetchall()}
         courses = []
@@ -397,11 +473,15 @@ class PostgresStudentRepository:
             grades = gradebook_rows.get(course_id)
             assessments: list[dict[str, Any]] = []
             if grades is not None:
+                coursework_mark = grades["coursework_mark"]
+                week7_mark = grades["week7_exam_mark"]
+                week12_mark = grades["week12_exam_mark"]
+                final_mark = grades["final_exam_mark"]
                 assessments = [
-                    {"assessment_id": f"{course_id}-coursework", "name": "Coursework", "assessment_type": "assignment", "weight": 10.0, "due_week": 5, "covered_lecture_ids": "[]", "percentage": grades["coursework_mark"] * 10},
-                    {"assessment_id": f"{course_id}-week7", "name": "Week 7 exam", "assessment_type": "midterm", "weight": 30.0, "due_week": 7, "covered_lecture_ids": "[]", "percentage": grades["week7_exam_mark"] * (100/30) if self.current_week >= 7 else None},
-                    {"assessment_id": f"{course_id}-week12", "name": "Week 12 exam", "assessment_type": "midterm", "weight": 20.0, "due_week": 12, "covered_lecture_ids": "[]", "percentage": grades["week12_exam_mark"] * 5 if self.current_week >= 12 else None},
-                    {"assessment_id": f"{course_id}-final", "name": "Final exam", "assessment_type": "final", "weight": 40.0, "due_week": 16, "covered_lecture_ids": "[]", "percentage": grades["final_exam_mark"] * 2.5 if self.current_week >= 16 else None},
+                    {"assessment_id": f"{course_id}-coursework", "name": "Coursework", "assessment_type": "assignment", "weight": 10.0, "due_week": 5, "covered_lecture_ids": "[]", "percentage": coursework_mark * 10 if coursework_mark is not None else None},
+                    {"assessment_id": f"{course_id}-week7", "name": "Week 7 exam", "assessment_type": "midterm", "weight": 30.0, "due_week": 7, "covered_lecture_ids": "[]", "percentage": week7_mark * (100/30) if week7_mark is not None and self.current_week >= 7 else None},
+                    {"assessment_id": f"{course_id}-week12", "name": "Week 12 exam", "assessment_type": "midterm", "weight": 20.0, "due_week": 12, "covered_lecture_ids": "[]", "percentage": week12_mark * 5 if week12_mark is not None and self.current_week >= 12 else None},
+                    {"assessment_id": f"{course_id}-final", "name": "Final exam", "assessment_type": "final", "weight": 40.0, "due_week": 16, "covered_lecture_ids": "[]", "percentage": final_mark * 2.5 if final_mark is not None and self.current_week >= 16 else None},
                 ]
             courses.append({
                 "course_id": course_id,

@@ -192,6 +192,18 @@ def test_portal_student_academics_returns_courses_and_grades(tmp_path: Path) -> 
     assert "records" in data["grades"]
 
 
+def test_semester_planner_endpoint_uses_repository_data(tmp_path: Path) -> None:
+    response = make_client(tmp_path).get(
+        "/portal/students/231027905/semester-plan?max_credits=15&expected_term_gpa=3.7"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["student_id"] == "231027905"
+    assert data["maximum_credit_hours"] == 15
+    assert data["credit_policy"]["estimated"] is True
+    assert data["conflict_check"]["status"] == "unavailable"
+
+
 def test_portal_notifications_use_live_academic_data(tmp_path: Path) -> None:
     client = make_client(tmp_path)
 
@@ -205,6 +217,13 @@ def test_portal_notifications_use_live_academic_data(tmp_path: Path) -> None:
         notification["type"] == "grade"
         and notification["category"] == "Grades"
         and "Artificial Intelligence" in notification["title"]
+        for notification in notifications
+    )
+    assert any(
+        notification["type"] == "risk"
+        and notification["category"] == "System"
+        and notification["title"] == "Artificial Intelligence needs attention"
+        and "threshold" in notification["body"]
         for notification in notifications
     )
 
