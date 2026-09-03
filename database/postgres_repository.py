@@ -167,9 +167,9 @@ class PostgresStudentRepository:
                 cursor.execute(
                     """
                     SELECT s.student_id::text AS student_id, s.full_name,
-                           s.academic_level, s.gpa, p.program_name
+                           s.academic_level, s.gpa, p.major_name
                     FROM students s
-                    JOIN programs p ON p.program_id = s.program_id
+                    JOIN majors p ON p.program_id = s.program_id
                     WHERE s.student_id::text = %s
                     """,
                     (normalized_id,),
@@ -191,7 +191,7 @@ class PostgresStudentRepository:
                     """
                     SELECT c.course_title
                     FROM student_courses sc
-                    JOIN courses c ON c.course_id = sc.course_id
+                    JOIN courses c ON c.course_code = sc.course_code
                     WHERE sc.student_id::text = %s AND sc.status = 'Current'
                     ORDER BY c.course_title
                     """,
@@ -201,7 +201,7 @@ class PostgresStudentRepository:
         return Student(
             student_id=student_row["student_id"],
             name=student_row["full_name"],
-            major=student_row["program_name"],
+            major=student_row["major_name"],
             year=student_row["academic_level"],
             gpa=float(student_row["gpa"]) if student_row["gpa"] is not None else self._compute_gpa(completed_rows),
             courses=tuple(row["course_title"] for row in current_rows),
@@ -218,47 +218,50 @@ class PostgresStudentRepository:
         """Return normalized curriculum facts used by the semester planner."""
         student = self._fetch_one(
             """SELECT s.student_id::text AS student_id, s.program_id,
-                      s.current_semester, s.gpa, p.program_name
+                      s.current_semester, s.gpa, p.major_name
                FROM students s
-               JOIN programs p ON p.program_id = s.program_id
+               JOIN majors p ON p.program_id = s.program_id
                WHERE s.student_id::text = %s""",
             (student_id.strip(),),
         )
         if student is None:
             return None
         courses = self._fetch_all(
-            """SELECT c.course_id::text AS course_id,
-                      COALESCE(NULLIF(c.course_code, ''), c.course_id::text) AS course_code,
+            """SELECT c.course_code AS course_id,
+                      c.course_code,
                       c.course_title AS course_name,
-                      pc.semester AS curriculum_semester,
-                      pc.course_type
-               FROM program_courses pc
-               JOIN courses c ON c.course_id = pc.course_id
-               WHERE pc.program_id = %s
-               ORDER BY pc.semester, c.course_code, c.course_title""",
+                      dpc.program_semester AS curriculum_semester,
+                      NULL AS course_type
+               FROM department_plan_courses dpc
+               JOIN courses c ON c.course_code = dpc.course_code
+               JOIN majors m ON m.major_code = dpc.major_code
+               WHERE m.program_id = %s
+               ORDER BY dpc.program_semester, c.course_code, c.course_title""",
             (student["program_id"],),
         )
         enrollments = self._fetch_all(
-            """SELECT course_id::text AS course_id, semester, status, grade
-               FROM student_courses WHERE student_id::text = %s""",
+            """SELECT sc.course_code AS course_id, sem.name AS semester,
+                      sc.status, sc.grade
+               FROM student_courses sc
+               LEFT JOIN semesters sem ON sem.id = sc.semester_id
+               WHERE sc.student_id::text = %s""",
             (student_id.strip(),),
         )
         prerequisites = self._fetch_all(
-            """SELECT prerequisite.course_id::text AS course_id,
-                      prerequisite.prerequisite_course_id::text AS prerequisite_course_id
-               FROM course_prerequisites prerequisite
-               JOIN program_courses pc ON pc.course_id = prerequisite.course_id
-               WHERE pc.program_id = %s""",
+            """SELECT pre.course_code AS course_id,
+                      pre.prerequisite_code AS prerequisite_course_id
+               FROM course_prerequisites pre
+               JOIN department_plan_courses dpc ON dpc.course_code = pre.course_code
+               JOIN majors m ON m.major_code = dpc.major_code
+               WHERE m.program_id = %s""",
             (student["program_id"],),
         )
         schedules = self._fetch_all(
-            """SELECT slot.course_id::text AS course_id, slot.day_of_week,
-                      slot.start_minute, slot.end_minute, slot.location
-               FROM course_schedule_slots slot
-               JOIN program_courses pc ON pc.course_id = slot.course_id
-               WHERE pc.program_id = %s
-               ORDER BY slot.day_of_week, slot.start_minute""",
-            (student["program_id"],),
+            """SELECT course_id::text AS course_id, day_of_week,
+                      start_minute, end_minute, location
+               FROM course_schedule_slots
+               ORDER BY day_of_week, start_minute""",
+            (),
         )
         return {
             "student": student,
@@ -271,12 +274,12 @@ class PostgresStudentRepository:
 
     def list_portal_courses(self) -> list[dict[str, Any]]:
         return self._fetch_all(
-            """SELECT c.course_id::text AS course_id, c.course_title AS course_name,
+            """SELECT c.course_code AS course_id, c.course_title AS course_name,
                       %s AS semester, COUNT(sc.student_id) AS student_count
                FROM courses c
-               JOIN student_courses sc ON sc.course_id = c.course_id
+               JOIN student_courses sc ON sc.course_code = c.course_code
                WHERE sc.status = 'Current'
-               GROUP BY c.course_id, c.course_title
+               GROUP BY c.course_code, c.course_title
                ORDER BY c.course_title""",
             (self.semester,),
         )
@@ -286,9 +289,9 @@ class PostgresStudentRepository:
     ) -> dict[str, Any] | None:
         selected_semester = semester or self.semester
         course = self._fetch_one(
-            """SELECT c.course_id::text AS course_id, c.course_title AS course_name, %s AS semester
+            """SELECT c.course_code AS course_id, c.course_title AS course_name, %s AS semester
                FROM courses c
-               WHERE c.course_id::text = %s""",
+               WHERE c.course_code = %s""",
             (selected_semester, course_id),
         )
         if course is None:
@@ -305,7 +308,7 @@ class PostgresStudentRepository:
                  SELECT entry.*
                  FROM course_gradebook_entries entry
                  WHERE entry.student_id = s.student_id::text
-                   AND entry.course_id = sc.course_id::text
+                   AND entry.course_id = sc.course_code
                  ORDER BY CASE
                    WHEN entry.semester = %s THEN 0
                    WHEN entry.semester = 'Current semester' THEN 1
@@ -313,7 +316,7 @@ class PostgresStudentRepository:
                  END, entry.updated_at DESC
                  LIMIT 1
                ) g ON TRUE
-               WHERE sc.course_id::text = %s AND sc.status = 'Current'
+               WHERE sc.course_code = %s AND sc.status = 'Current'
                ORDER BY s.full_name""",
             (selected_semester, course_id),
         )
@@ -353,11 +356,11 @@ class PostgresStudentRepository:
         if student is None:
             return None
         records = self._fetch_all(
-            """SELECT c.course_id::text AS course_id,
-                      COALESCE(NULLIF(c.course_code, ''), c.course_id::text) AS course_code,
+            """SELECT c.course_code AS course_id,
+                      c.course_code,
                       c.course_title AS course_name,
                       CASE WHEN sc.status = 'Current' THEN %s
-                           ELSE 'Semester ' || sc.semester::text END AS semester,
+                           ELSE sem.name END AS semester,
                       sc.status AS enrollment_status,
                       sc.grade AS stored_letter_grade,
                       CASE WHEN g.student_id IS NOT NULL THEN 'gradebook'
@@ -369,12 +372,13 @@ class PostgresStudentRepository:
                       g.final_exam_mark,
                       g.updated_at AS grade_updated_at
                FROM student_courses sc
-               JOIN courses c ON c.course_id = sc.course_id
+               JOIN courses c ON c.course_code = sc.course_code
+               LEFT JOIN semesters sem ON sem.id = sc.semester_id
                LEFT JOIN LATERAL (
                  SELECT entry.*
                  FROM course_gradebook_entries entry
                  WHERE entry.student_id = sc.student_id::text
-                   AND entry.course_id = c.course_id::text
+                   AND entry.course_id = c.course_code
                  ORDER BY CASE
                    WHEN entry.semester = %s THEN 0
                    WHEN entry.semester = 'Current semester' THEN 1
@@ -384,7 +388,7 @@ class PostgresStudentRepository:
                ) g ON sc.status = 'Current'
                WHERE sc.student_id::text = %s
                ORDER BY CASE WHEN sc.status = 'Current' THEN 0 ELSE 1 END,
-                        sc.semester DESC, c.course_title""",
+                        sc.semester_id DESC, c.course_title""",
             (self.semester, self.semester, student_id),
         )
         return {"student": student.as_dict(), "records": records}
@@ -433,9 +437,9 @@ class PostgresStudentRepository:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT c.course_id::text AS course_id, c.course_title AS course_name
+                    SELECT c.course_code AS course_id, c.course_title AS course_name
                     FROM student_courses sc
-                    JOIN courses c ON c.course_id = sc.course_id
+                    JOIN courses c ON c.course_code = sc.course_code
                     WHERE sc.student_id::text = %s AND sc.status = 'Current'
                     ORDER BY c.course_title
                     """,
@@ -444,7 +448,7 @@ class PostgresStudentRepository:
                 course_rows = cursor.fetchall()
                 cursor.execute(
                     """
-                    SELECT sc.course_id::text AS course_id,
+                    SELECT sc.course_code AS course_id,
                            g.coursework_mark,
                            g.week7_exam_mark,
                            g.week12_exam_mark,
@@ -454,7 +458,7 @@ class PostgresStudentRepository:
                       SELECT entry.*
                       FROM course_gradebook_entries entry
                       WHERE entry.student_id = sc.student_id::text
-                        AND entry.course_id = sc.course_id::text
+                        AND entry.course_id = sc.course_code
                       ORDER BY CASE
                         WHEN entry.semester = %s THEN 0
                         WHEN entry.semester = 'Current semester' THEN 1
@@ -506,7 +510,7 @@ class PostgresStudentRepository:
         return self._fetch_all(
             """SELECT snapshot.*, course.course_title AS course_name
                FROM weekly_progress_snapshots snapshot
-               LEFT JOIN courses course ON course.course_id::text = snapshot.course_id
+               LEFT JOIN courses course ON course.course_code = snapshot.course_id
                WHERE snapshot.student_id = %s
                ORDER BY snapshot.week_number, snapshot.course_id""",
             (student_id,),
@@ -566,7 +570,7 @@ class PostgresStudentRepository:
     ) -> list[dict[str, Any]]:
         query = """SELECT intervention.*, course.course_title AS course_name
                    FROM progress_interventions intervention
-                   LEFT JOIN courses course ON course.course_id::text = intervention.course_id
+                   LEFT JOIN courses course ON course.course_code = intervention.course_id
                    WHERE intervention.student_id = %s AND intervention.status = 'active'"""
         parameters: list[Any] = [student_id]
         if course_id is not None:
