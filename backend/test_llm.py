@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from backend.advisor import llm
@@ -26,12 +27,19 @@ class FakeModels:
 
 def install_fake_client(monkeypatch, responses: dict[str, object]) -> FakeModels:
     models = FakeModels(responses)
+    client_options = {}
+
+    def fake_client(**options):
+        client_options.update(options)
+        return SimpleNamespace(models=models)
+
     monkeypatch.setattr(
         llm,
         "genai",
-        SimpleNamespace(Client=lambda api_key: SimpleNamespace(models=models)),
+        SimpleNamespace(Client=fake_client),
     )
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    models.client_options = client_options
     return models
 
 
@@ -40,6 +48,26 @@ def test_ask_gemini_falls_back_after_transient_error(monkeypatch) -> None:
         monkeypatch,
         {
             "primary-model": GeminiError(503),
+            "fallback-model": SimpleNamespace(text="Fallback answer"),
+        },
+    )
+    monkeypatch.setenv("GEMINI_MODEL", "primary-model")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODELS", "fallback-model")
+
+    assert llm.ask_gemini("Hello") == "Fallback answer"
+    assert models.calls == [("primary-model", None), ("fallback-model", None)]
+    assert models.client_options["http_options"] == {
+        "timeout": 30_000,
+        "retry_options": {"attempts": 1},
+    }
+
+
+def test_ask_gemini_falls_back_after_timeout(monkeypatch) -> None:
+    request = httpx.Request("POST", "https://generativelanguage.googleapis.com")
+    models = install_fake_client(
+        monkeypatch,
+        {
+            "primary-model": httpx.ReadTimeout("Timed out", request=request),
             "fallback-model": SimpleNamespace(text="Fallback answer"),
         },
     )

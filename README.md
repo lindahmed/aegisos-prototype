@@ -132,6 +132,7 @@ AEGIS_CURRENT_WEEK=...
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-3.5-flash
 GEMINI_FALLBACK_MODELS=gemini-3.5-flash-lite
+GEMINI_TIMEOUT_MS=30000
 ```
 
 Important:
@@ -384,6 +385,7 @@ DATABASE_URL
 GEMINI_API_KEY
 GEMINI_MODEL
 GEMINI_FALLBACK_MODELS
+GEMINI_TIMEOUT_MS
 ```
 
 Do not commit those values to GitHub.
@@ -514,6 +516,8 @@ Check that:
 - `GEMINI_API_KEY` is configured on the backend host.
 - `GEMINI_MODEL` names an available model; transient `429`/`5xx` failures
   automatically try the models in `GEMINI_FALLBACK_MODELS`.
+- `GEMINI_TIMEOUT_MS` limits each model attempt so one busy model cannot hold
+  the Advisor request until the app gives up.
 - Railway/backend logs do not show an exception.
 
 ---

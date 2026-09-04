@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import TypeVar
 
+import httpx
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 DEFAULT_GEMINI_FALLBACK_MODELS = ("gemini-3.5-flash-lite",)
+DEFAULT_GEMINI_TIMEOUT_MS = 30_000
 RETRYABLE_GEMINI_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
@@ -42,6 +44,9 @@ def _gemini_models() -> tuple[str, ...]:
 
 
 def _is_retryable_gemini_error(error: Exception) -> bool:
+    if isinstance(error, (httpx.TimeoutException, httpx.ConnectError)):
+        return True
+
     status_code = getattr(error, "code", None)
     if status_code is None:
         status_code = getattr(error, "status_code", None)
@@ -52,7 +57,15 @@ def _is_retryable_gemini_error(error: Exception) -> bool:
 
 
 def _generate_content(prompt: str, *, config: dict[str, str] | None = None):
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    timeout_ms = int(os.getenv("GEMINI_TIMEOUT_MS", DEFAULT_GEMINI_TIMEOUT_MS))
+    client = genai.Client(
+        api_key=os.environ["GEMINI_API_KEY"],
+        http_options={
+            "timeout": timeout_ms,
+            # Handle retries here so a busy model cannot consume the full app timeout.
+            "retry_options": {"attempts": 1},
+        },
+    )
     models = _gemini_models()
 
     for index, model in enumerate(models):
