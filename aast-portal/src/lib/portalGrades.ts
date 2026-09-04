@@ -1,5 +1,15 @@
+const LOCAL_API_BASE_URL = 'http://127.0.0.1:8001'
+const RAILWAY_API_BASE_URL = 'https://web-production-3a6ad.up.railway.app'
+const LEGACY_RAILWAY_API_BASE_URL = 'https://backend-production-6069.up.railway.app'
+
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '')
+
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001'
+  configuredApiBaseUrl && configuredApiBaseUrl !== LEGACY_RAILWAY_API_BASE_URL
+    ? configuredApiBaseUrl
+    : import.meta.env.DEV
+      ? LOCAL_API_BASE_URL
+      : RAILWAY_API_BASE_URL
 
 export interface PortalCourse {
   course_id: string
