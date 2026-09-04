@@ -1,15 +1,24 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/advisor_message.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
+import '../services/advisor_voice_service.dart';
 import '../theme/app_theme.dart';
 
 class AdvisorScreen extends StatefulWidget {
-  const AdvisorScreen({required this.student, this.apiService, super.key});
+  const AdvisorScreen({
+    required this.student,
+    this.apiService,
+    this.voiceService,
+    super.key,
+  });
 
   final Student student;
   final ApiService? apiService;
+  final AdvisorVoiceService? voiceService;
 
   @override
   State<AdvisorScreen> createState() => _AdvisorScreenState();
@@ -28,7 +37,10 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
 
   late final ApiService _apiService;
   late final bool _ownsApiService;
+  late final AdvisorVoiceService _voiceService;
+  late final bool _ownsVoiceService;
   bool _isSending = false;
+  bool _isRecording = false;
   String _language = 'english';
   String? _errorMessage;
 
@@ -37,11 +49,72 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
     super.initState();
     _ownsApiService = widget.apiService == null;
     _apiService = widget.apiService ?? ApiService();
+    _ownsVoiceService = widget.voiceService == null;
+    _voiceService = widget.voiceService ?? DeviceAdvisorVoiceService();
+  }
+
+  Future<void> _toggleVoiceRecording() async {
+    if (_isSending) return;
+
+    if (!_isRecording) {
+      try {
+        final started = await _voiceService.startRecording();
+        if (!mounted) return;
+        setState(() {
+          _isRecording = started;
+          _errorMessage = started
+              ? null
+              : 'Microphone permission is required for Advisor voice.';
+        });
+      } catch (_) {
+        if (mounted) {
+          setState(() => _errorMessage = 'Could not start the microphone.');
+        }
+      }
+      return;
+    }
+
+    setState(() {
+      _isRecording = false;
+      _isSending = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final audioBytes = await _voiceService.stopRecording();
+      if (audioBytes == null || audioBytes.isEmpty) {
+        throw const ApiException('No voice recording was captured.');
+      }
+      final reply = await _apiService.askAdvisorVoice(
+        studentId: widget.student.studentId,
+        audioBytes: audioBytes,
+        language: _language,
+      );
+      if (!mounted) return;
+      setState(() {
+        _messages.add(AdvisorMessage.user(reply.transcript));
+        _messages.add(AdvisorMessage.assistant(reply.response));
+      });
+      await _voiceService.play(reply.audioBytes);
+    } on ApiException catch (error) {
+      if (mounted) setState(() => _errorMessage = error.message);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _errorMessage = 'Advisor voice could not complete the request.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+        _scrollToBottom();
+      }
+    }
   }
 
   Future<void> _sendMessage([String? suggestedMessage]) async {
     final message = (suggestedMessage ?? _messageController.text).trim();
-    if (message.isEmpty || _isSending) return;
+    if (message.isEmpty || _isSending || _isRecording) return;
 
     final history = List<AdvisorMessage>.from(_messages);
     _messageController.clear();
@@ -95,6 +168,8 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    if (_isRecording) unawaited(_voiceService.cancelRecording());
+    if (_ownsVoiceService) unawaited(_voiceService.dispose());
     if (_ownsApiService) _apiService.close();
     super.dispose();
   }
@@ -140,6 +215,24 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
             ),
             if (_isSending)
               const LinearProgressIndicator(key: Key('advisor-loading')),
+            if (_isRecording)
+              Container(
+                key: const Key('advisor-recording'),
+                width: double.infinity,
+                color: Theme.of(context).colorScheme.errorContainer,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.mic, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text('Listening… Tap the microphone again to send'),
+                  ],
+                ),
+              ),
             if (_errorMessage != null)
               Container(
                 width: double.infinity,
@@ -159,7 +252,9 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
             _MessageComposer(
               controller: _messageController,
               enabled: !_isSending,
+              isRecording: _isRecording,
               onSend: _sendMessage,
+              onVoice: _toggleVoiceRecording,
             ),
           ],
         ),
@@ -252,12 +347,16 @@ class _MessageComposer extends StatelessWidget {
   const _MessageComposer({
     required this.controller,
     required this.enabled,
+    required this.isRecording,
     required this.onSend,
+    required this.onVoice,
   });
 
   final TextEditingController controller;
   final bool enabled;
+  final bool isRecording;
   final VoidCallback onSend;
+  final VoidCallback onVoice;
 
   @override
   Widget build(BuildContext context) {
@@ -272,7 +371,7 @@ class _MessageComposer extends StatelessWidget {
               child: TextField(
                 key: const Key('advisor-input'),
                 controller: controller,
-                enabled: enabled,
+                enabled: enabled && !isRecording,
                 minLines: 1,
                 maxLines: 4,
                 textCapitalization: TextCapitalization.sentences,
@@ -283,10 +382,27 @@ class _MessageComposer extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
+            IconButton.filledTonal(
+              key: const Key('advisor-voice'),
+              tooltip: isRecording
+                  ? 'Stop and send recording'
+                  : 'Speak to Advisor',
+              onPressed: enabled ? onVoice : null,
+              style: isRecording
+                  ? IconButton.styleFrom(
+                      backgroundColor: Theme.of(context)
+                          .colorScheme
+                          .errorContainer,
+                      foregroundColor: Theme.of(context).colorScheme.error,
+                    )
+                  : null,
+              icon: Icon(isRecording ? Icons.stop : Icons.mic),
+            ),
+            const SizedBox(width: 8),
             IconButton.filled(
               key: const Key('advisor-send'),
               tooltip: 'Send',
-              onPressed: enabled ? onSend : null,
+              onPressed: enabled && !isRecording ? onSend : null,
               icon: const Icon(Icons.send),
             ),
           ],

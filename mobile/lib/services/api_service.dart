@@ -315,6 +315,69 @@ class ApiService {
     }
   }
 
+  Future<AdvisorVoiceReply> askAdvisorVoice({
+    required String studentId,
+    required List<int> audioBytes,
+    String language = 'english',
+  }) async {
+    if (audioBytes.isEmpty) {
+      throw const ApiException('No voice recording was captured.');
+    }
+
+    final parsedBaseUrl = Uri.parse(baseUrl);
+    final uri = parsedBaseUrl.replace(
+      pathSegments: [
+        ...parsedBaseUrl.pathSegments.where((segment) => segment.isNotEmpty),
+        'advisor',
+        'voice',
+      ],
+    );
+    final request = http.MultipartRequest('POST', uri)
+      ..fields['student_id'] = studentId
+      ..fields['language'] = language
+      ..files.add(
+        http.MultipartFile.fromBytes(
+          'audio',
+          audioBytes,
+          filename: 'advisor_voice.wav',
+        ),
+      );
+
+    late http.Response response;
+    try {
+      final streamed = await _client
+          .send(request)
+          .timeout(const Duration(seconds: 120));
+      response = await http.Response.fromStream(streamed);
+    } on Exception {
+      throw const ApiException(
+        'Could not reach Advisor voice. Check your connection and try again.',
+      );
+    }
+
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Advisor voice could not complete the request (${response.statusCode}).',
+        ),
+      );
+    }
+
+    try {
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      return AdvisorVoiceReply(
+        intent: payload['intent'] as String,
+        response: payload['response'] as String,
+        language: payload['language'] as String? ?? language,
+        transcript: payload['transcript'] as String,
+        audioBytes: base64Decode(payload['audio_base64'] as String),
+      );
+    } on Exception {
+      throw const ApiException('Advisor voice returned an invalid response.');
+    }
+  }
+
   Future<StudentCoursesReport> getStudentCourses(
     String studentId, {
     bool forceRefresh = false,
