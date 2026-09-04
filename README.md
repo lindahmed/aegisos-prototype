@@ -130,7 +130,8 @@ NEO4J_PASSWORD=your_neo4j_password
 AEGIS_CURRENT_SEMESTER=...
 AEGIS_CURRENT_WEEK=...
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=...
+GEMINI_MODEL=gemini-3.5-flash
+GEMINI_FALLBACK_MODELS=gemini-3.5-flash-lite
 ```
 
 Important:
@@ -381,6 +382,8 @@ Production secrets should be configured as Railway service variables, especially
 ```text
 DATABASE_URL
 GEMINI_API_KEY
+GEMINI_MODEL
+GEMINI_FALLBACK_MODELS
 ```
 
 Do not commit those values to GitHub.
@@ -509,6 +512,8 @@ Check that:
 - The backend `/health` endpoint works.
 - The mobile app is pointing to the correct backend URL.
 - `GEMINI_API_KEY` is configured on the backend host.
+- `GEMINI_MODEL` names an available model; transient `429`/`5xx` failures
+  automatically try the models in `GEMINI_FALLBACK_MODELS`.
 - Railway/backend logs do not show an exception.
 
 ---
