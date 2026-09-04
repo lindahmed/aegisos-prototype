@@ -1,5 +1,5 @@
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'https://backend-production-6069.up.railway.app'
+  import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001'
 
 export interface PortalCourse {
   course_id: string
@@ -17,7 +17,7 @@ export interface PortalGradeRow {
   final_exam_mark: number
   total_score: number
   letter_grade: string
-  gpa_points: number
+  gpa_points: number | null
 }
 
 export interface PortalCourseGradebook {

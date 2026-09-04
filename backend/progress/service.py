@@ -29,8 +29,14 @@ def build_student_twin(repository: StudentRepository, student_id: str) -> Studen
         ]
         lectures = [Lecture(**lecture) for lecture in raw_course["lectures"]]
         materials = [CourseMaterial(**material) for material in raw_course["materials"]]
-        previous = repository.get_previous_course_snapshot(
-            student_id, raw_course["course_id"], raw_course["current_week"]
+        previous = next(
+            (
+                snapshot
+                for snapshot in reversed(all_snapshots)
+                if snapshot["course_id"] == raw_course["course_id"]
+                and snapshot["week_number"] < raw_course["current_week"]
+            ),
+            None,
         )
         previous_health = previous["course_health"] if previous else None
         metrics = build_metrics(assessments, lectures, raw_course["current_week"], previous_health)
@@ -66,7 +72,7 @@ def build_student_twin(repository: StudentRepository, student_id: str) -> Studen
             else None
         ),
         active_risks=[risk for course in course_twins for risk in course.risks],
-        weekly_history=repository.get_weekly_snapshots(student_id),
+        weekly_history=all_snapshots,
         recent_interventions=repository.get_interventions(student_id),
     )
     twin.current_recommendation = build_current_recommendation(twin.courses, twin.current_week)

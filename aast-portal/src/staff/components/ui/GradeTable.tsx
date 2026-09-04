@@ -1,6 +1,7 @@
 import type { GradeRow } from '@staff/types'
 
 const gradeTone = (grade: string) => {
+  if (grade === 'U') return 'text-text-muted'
   if (grade.startsWith('A')) return 'text-success'
   if (grade.startsWith('B')) return 'text-teal-700'
   if (grade.startsWith('C')) return 'text-warning'
@@ -55,7 +56,7 @@ export default function GradeTable({ rows, editable, onChange }: GradeTableProps
               ))}
               <td className="px-4 py-3 font-mono font-semibold text-text-primary">{r.total}</td>
               <td className={`px-4 py-3 font-mono text-base font-bold ${gradeTone(r.grade)}`}>{r.grade}</td>
-              <td className="px-4 py-3 font-mono text-text-secondary">{r.gpaPoints.toFixed(1)}</td>
+              <td className="px-4 py-3 font-mono text-text-secondary">{r.grade === 'U' ? '—' : r.gpaPoints.toFixed(1)}</td>
             </tr>
           ))}
         </tbody>

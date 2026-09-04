@@ -311,6 +311,24 @@ class Neo4jAcademicGraph(AcademicKnowledgeGraph):
             {"code": course_code.upper()},
         )
 
+    def extract_course_code(self, message: str) -> str | None:
+        """Resolve codes and titles from the synchronized course catalogue."""
+        match = re.search(r"\b([A-Z]{2,4}\s?\d{3,4})\b", message.upper())
+        if match:
+            return match.group(1).replace(" ", "")
+        rows = self._run(
+            """
+            MATCH (course:Course)
+            WHERE trim(course.title) <> ''
+              AND toLower($message) CONTAINS toLower(course.title)
+            RETURN course.code AS course_code
+            ORDER BY size(course.title) DESC
+            LIMIT 1
+            """,
+            {"message": message},
+        )
+        return rows[0]["course_code"] if rows else None
+
     def get_course_eligibility(
         self, student_id: str, course_code: str
     ) -> dict[str, Any] | None:
@@ -319,11 +337,10 @@ class Neo4jAcademicGraph(AcademicKnowledgeGraph):
             """
             MATCH (c:Course {code: $code})
             OPTIONAL MATCH (c)<-[:PREREQUISITE_FOR]-(p:Course)
-            OPTIONAL MATCH (s:Student {student_id: $student_id})-[:COMPLETED]->(p)
-            OPTIONAL MATCH (s)-[:REGISTERED]->(p)
-            WITH c, p,
+            OPTIONAL MATCH (s:Student {student_id: $student_id})
+            WITH c, p, s,
                  CASE WHEN p IS NULL THEN null
-                      WHEN s IS NOT NULL THEN 'completed'
+                      WHEN EXISTS((s)-[:COMPLETED]->(p)) THEN 'completed'
                       WHEN EXISTS((s)-[:REGISTERED]->(p)) THEN 'in_progress'
                       ELSE 'missing' END AS status
             RETURN c.code AS course_code, c.title AS course_title,
@@ -374,15 +391,19 @@ class Neo4jAcademicGraph(AcademicKnowledgeGraph):
             """
             MATCH (s:Student {student_id: $student_id})-[:ENROLLED_IN]->(p:Programme)
             OPTIONAL MATCH (s)-[:COMPLETED]->(c:Course)
+            WITH s, p, collect(DISTINCT c) AS completed
             OPTIONAL MATCH (s)-[:REGISTERED]->(r:Course)
+            WITH s, p, completed, collect(DISTINCT r) AS registered
             OPTIONAL MATCH (p)-[:REQUIRES]->(req:Course)
+            WITH p, completed, registered, collect(DISTINCT req) AS required
             RETURN p.programme_id AS programme_id, p.name AS programme_name,
                    p.total_credits_required AS total_credits_required,
                    p.elective_credits AS elective_credits,
-                   sum(c.credits) AS completed_credits,
-                   collect(DISTINCT c.code) AS completed_courses,
-                   collect(DISTINCT r.code) AS registered_courses,
-                   collect(DISTINCT req.code) AS required_courses
+                   reduce(total = 0, course IN completed |
+                          total + coalesce(course.credits, 0)) AS completed_credits,
+                   [course IN completed | course.code] AS completed_courses,
+                   [course IN registered | course.code] AS registered_courses,
+                   [course IN required | course.code] AS required_courses
             """,
             {"student_id": student_id},
         )
@@ -407,6 +428,7 @@ class Neo4jAcademicGraph(AcademicKnowledgeGraph):
             """
             MATCH (s:Student {student_id: $student_id})-[:ENROLLED_IN]->(p:Programme)-[:REQUIRES]->(c:Course)
             WHERE NOT EXISTS((s)-[:COMPLETED]->(c))
+              AND NOT EXISTS((s)-[:REGISTERED]->(c))
             OPTIONAL MATCH (c)<-[:PREREQUISITE_FOR]-(pr:Course)
             WITH c, collect(pr) AS prereqs
             WHERE ALL(pr IN prereqs WHERE EXISTS((s)-[:COMPLETED]->(pr)))

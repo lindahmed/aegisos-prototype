@@ -10,14 +10,18 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
 try:
     import psycopg2
     import psycopg2.extras
+    from psycopg2.pool import ThreadedConnectionPool
 except ImportError:  # permits SQLite-only development and test runs
     psycopg2 = None
+    ThreadedConnectionPool = None
 
 from .repository import Student
 
@@ -37,18 +41,63 @@ class PostgresStudentRepository:
         self.dsn = dsn
         self.semester = os.getenv("AEGIS_CURRENT_SEMESTER", "Current semester")
         try:
+            self._pool_size = max(1, int(os.getenv("AEGIS_DB_POOL_SIZE", "8")))
+        except ValueError as error:
+            raise ValueError("AEGIS_DB_POOL_SIZE must be a positive integer") from error
+        self._pool = None
+        self._pool_lock = threading.Lock()
+        self._pool_slots = threading.BoundedSemaphore(self._pool_size)
+        try:
             self.current_week = max(1, int(os.getenv("AEGIS_CURRENT_WEEK", "5")))
         except ValueError as error:
             raise ValueError("AEGIS_CURRENT_WEEK must be a positive integer") from error
 
-    def _connect(self):
-        if psycopg2 is None:
+    def _connection_pool(self):
+        if psycopg2 is None or ThreadedConnectionPool is None:
             raise RuntimeError(
                 "PostgreSQL support requires psycopg2-binary. Install backend requirements."
             )
-        return psycopg2.connect(
-            self.dsn, cursor_factory=psycopg2.extras.RealDictCursor
-        )
+        if self._pool is None:
+            with self._pool_lock:
+                if self._pool is None:
+                    self._pool = ThreadedConnectionPool(
+                        1,
+                        self._pool_size,
+                        self.dsn,
+                        cursor_factory=psycopg2.extras.RealDictCursor,
+                        connect_timeout=10,
+                        application_name="aegisos-api",
+                    )
+        return self._pool
+
+    @contextmanager
+    def _connect(self):
+        """Borrow a reusable connection instead of negotiating TLS per query."""
+        pool = self._connection_pool()
+        self._pool_slots.acquire()
+        connection = None
+        try:
+            connection = pool.getconn()
+            if connection.closed:
+                pool.putconn(connection, close=True)
+                connection = pool.getconn()
+            yield connection
+            connection.commit()
+        except Exception:
+            if connection is not None and not connection.closed:
+                connection.rollback()
+            raise
+        finally:
+            if connection is not None:
+                pool.putconn(connection, close=bool(connection.closed))
+            self._pool_slots.release()
+
+    def close(self) -> None:
+        """Close pooled connections during application shutdown."""
+        with self._pool_lock:
+            if self._pool is not None:
+                self._pool.closeall()
+                self._pool = None
 
     def initialize(self) -> None:
         """Create only progress-agent history tables; academic source tables are external."""
@@ -145,13 +194,27 @@ class PostgresStudentRepository:
                     );
                     CREATE TABLE IF NOT EXISTS course_schedule_slots (
                         schedule_slot_id BIGSERIAL PRIMARY KEY,
-                        course_id INTEGER NOT NULL REFERENCES courses(course_id),
+                        course_id TEXT NOT NULL REFERENCES courses(course_code),
                         day_of_week TEXT NOT NULL,
                         start_minute INTEGER NOT NULL CHECK(start_minute BETWEEN 0 AND 1439),
                         end_minute INTEGER NOT NULL CHECK(end_minute BETWEEN 1 AND 1440),
                         location TEXT,
                         CHECK(end_minute > start_minute)
                     );
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'course_schedule_slots'
+                              AND column_name = 'course_id'
+                              AND data_type <> 'text'
+                        ) THEN
+                            ALTER TABLE course_schedule_slots
+                            ALTER COLUMN course_id TYPE TEXT USING course_id::text;
+                        END IF;
+                    END $$;
                     ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS coursework_mark DOUBLE PRECISION CHECK(coursework_mark BETWEEN 0 AND 10);
                     ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS week7_exam_mark DOUBLE PRECISION CHECK(week7_exam_mark BETWEEN 0 AND 30);
                     ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS week12_exam_mark DOUBLE PRECISION CHECK(week12_exam_mark BETWEEN 0 AND 20);
@@ -167,7 +230,21 @@ class PostgresStudentRepository:
                 cursor.execute(
                     """
                     SELECT s.student_id::text AS student_id, s.full_name,
-                           s.academic_level, s.gpa, p.major_name
+                           s.academic_level, s.gpa, p.major_name,
+                           (
+                               SELECT ARRAY_AGG(sc.grade)
+                               FROM student_courses sc
+                               WHERE sc.student_id = s.student_id
+                                 AND sc.status = 'Completed'
+                                 AND sc.grade IS NOT NULL
+                           ) AS completed_grades,
+                           (
+                               SELECT ARRAY_AGG(c.course_title ORDER BY c.course_title)
+                               FROM student_courses sc
+                               JOIN courses c ON c.course_code = sc.course_code
+                               WHERE sc.student_id = s.student_id
+                                 AND sc.status = 'Current'
+                           ) AS current_courses
                     FROM students s
                     JOIN majors p ON p.program_id = s.program_id
                     WHERE s.student_id::text = %s
@@ -177,34 +254,16 @@ class PostgresStudentRepository:
                 student_row = cursor.fetchone()
                 if student_row is None:
                     return None
-                cursor.execute(
-                    """
-                    SELECT sc.grade
-                    FROM student_courses sc
-                    WHERE sc.student_id::text = %s
-                      AND sc.status = 'Completed' AND sc.grade IS NOT NULL
-                    """,
-                    (normalized_id,),
-                )
-                completed_rows = cursor.fetchall()
-                cursor.execute(
-                    """
-                    SELECT c.course_title
-                    FROM student_courses sc
-                    JOIN courses c ON c.course_code = sc.course_code
-                    WHERE sc.student_id::text = %s AND sc.status = 'Current'
-                    ORDER BY c.course_title
-                    """,
-                    (normalized_id,),
-                )
-                current_rows = cursor.fetchall()
+        completed_rows = [
+            {"grade": grade} for grade in (student_row["completed_grades"] or [])
+        ]
         return Student(
             student_id=student_row["student_id"],
             name=student_row["full_name"],
             major=student_row["major_name"],
             year=student_row["academic_level"],
             gpa=float(student_row["gpa"]) if student_row["gpa"] is not None else self._compute_gpa(completed_rows),
-            courses=tuple(row["course_title"] for row in current_rows),
+            courses=tuple(student_row["current_courses"] or []),
         )
 
     def get_registered_students(self) -> list[Student]:
@@ -257,10 +316,11 @@ class PostgresStudentRepository:
             (student["program_id"],),
         )
         schedules = self._fetch_all(
-            """SELECT course_id::text AS course_id, day_of_week,
-                      start_minute, end_minute, location
-               FROM course_schedule_slots
-               ORDER BY day_of_week, start_minute""",
+            """SELECT c.course_code AS course_id, slot.day_of_week,
+                      slot.start_minute, slot.end_minute, slot.location
+               FROM course_schedule_slots slot
+               JOIN courses c ON c.course_code = slot.course_id
+               ORDER BY slot.day_of_week, slot.start_minute""",
             (),
         )
         return {
@@ -270,6 +330,54 @@ class PostgresStudentRepository:
             "prerequisites": prerequisites,
             "schedules": schedules,
             "schedule_data_available": bool(schedules),
+        }
+
+    def get_student_current_courses(self, student_id: str) -> dict[str, Any] | None:
+        student = self.get_student(student_id)
+        if student is None:
+            return None
+        rows = self._fetch_all(
+            """SELECT c.course_code, c.course_title AS course_name,
+                      sc.status, COALESCE(sem.name, %s) AS semester,
+                      slot.day_of_week, slot.start_minute,
+                      slot.end_minute, slot.location
+               FROM student_courses sc
+               JOIN courses c ON c.course_code = sc.course_code
+               LEFT JOIN semesters sem ON sem.id = sc.semester_id
+               LEFT JOIN course_schedule_slots slot ON slot.course_id = c.course_code
+               WHERE sc.student_id::text = %s AND sc.status = 'Current'
+               ORDER BY c.course_title, slot.day_of_week, slot.start_minute""",
+            (self.semester, student.student_id),
+        )
+        courses: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            course_code = str(row["course_code"])
+            course = courses.setdefault(
+                course_code,
+                {
+                    "course_code": course_code,
+                    "course_name": row["course_name"],
+                    "status": row["status"],
+                    "semester": row["semester"],
+                    "schedule": [],
+                },
+            )
+            if row["day_of_week"] is not None:
+                course["schedule"].append(
+                    {
+                        "day_of_week": row["day_of_week"],
+                        "start_minute": row["start_minute"],
+                        "end_minute": row["end_minute"],
+                        "location": row["location"],
+                    }
+                )
+        return {
+            "student": student.as_dict(),
+            "course_count": len(courses),
+            "schedule_published": any(
+                course["schedule"] for course in courses.values()
+            ),
+            "courses": list(courses.values()),
         }
 
     def list_portal_courses(self) -> list[dict[str, Any]]:
@@ -437,24 +545,16 @@ class PostgresStudentRepository:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT c.course_code AS course_id, c.course_title AS course_name
-                    FROM student_courses sc
-                    JOIN courses c ON c.course_code = sc.course_code
-                    WHERE sc.student_id::text = %s AND sc.status = 'Current'
-                    ORDER BY c.course_title
-                    """,
-                    (student.student_id,),
-                )
-                course_rows = cursor.fetchall()
-                cursor.execute(
-                    """
-                    SELECT sc.course_code AS course_id,
+                    SELECT c.course_code AS course_id,
+                           c.course_title AS course_name,
+                           g.student_id AS gradebook_student_id,
                            g.coursework_mark,
                            g.week7_exam_mark,
                            g.week12_exam_mark,
                            g.final_exam_mark
                     FROM student_courses sc
-                    JOIN LATERAL (
+                    JOIN courses c ON c.course_code = sc.course_code
+                    LEFT JOIN LATERAL (
                       SELECT entry.*
                       FROM course_gradebook_entries entry
                       WHERE entry.student_id = sc.student_id::text
@@ -467,14 +567,15 @@ class PostgresStudentRepository:
                       LIMIT 1
                     ) g ON TRUE
                     WHERE sc.student_id::text = %s AND sc.status = 'Current'
+                    ORDER BY c.course_title
                     """,
                     (self.semester, student.student_id),
                 )
-                gradebook_rows = {row["course_id"]: row for row in cursor.fetchall()}
+                course_rows = cursor.fetchall()
         courses = []
         for row in course_rows:
             course_id = row["course_id"]
-            grades = gradebook_rows.get(course_id)
+            grades = row if row["gradebook_student_id"] is not None else None
             assessments: list[dict[str, Any]] = []
             if grades is not None:
                 coursework_mark = grades["coursework_mark"]

@@ -120,7 +120,14 @@ def _enrich_grade_record(record: dict[str, object]) -> dict[str, object]:
     gpa_points: float | None = None
     if grade_source == "gradebook":
         total_score = _weighted_total(marks)
-        letter_grade, gpa_points = _score_to_grade(total_score)
+        # A zero is the gradebook's current placeholder for an exam that has
+        # not been entered. Do not turn partial coursework into a failing final
+        # grade; U means the result is still unfinalized and is excluded from GPA.
+        final_mark = marks["final_exam_mark"]
+        if final_mark is None or final_mark <= 0:
+            letter_grade = "U"
+        else:
+            letter_grade, gpa_points = _score_to_grade(total_score)
     else:
         stored_letter = record.get("stored_letter_grade")
         if stored_letter:
@@ -134,7 +141,7 @@ def _enrich_grade_record(record: dict[str, object]) -> dict[str, object]:
         "letter_grade": letter_grade,
         "gpa_points": gpa_points,
         "grade_source": grade_source,
-        "grade_posted": letter_grade is not None,
+        "grade_posted": letter_grade is not None and letter_grade != "U",
     }
 
 
@@ -214,7 +221,11 @@ def _portal_notifications(
 
     for raw_record in report["records"]:
         record = _enrich_grade_record(raw_record)
-        if record["grade_source"] != "gradebook" or record["total_score"] is None:
+        if (
+            record["grade_source"] != "gradebook"
+            or record["total_score"] is None
+            or not record["grade_posted"]
+        ):
             continue
         total = float(record["total_score"])
         notification_id = (
@@ -390,19 +401,25 @@ def create_app(
             "records": records,
         }
 
+    @api.get("/portal/students/{student_id}/courses")
+    def get_portal_student_courses(student_id: str) -> dict[str, object]:
+        result = repository.get_student_current_courses(student_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        return result
+
     @api.get("/portal/students/{student_id}/academics")
     def get_portal_student_academics(student_id: str) -> dict[str, object]:
-        student = repository.get_student(student_id)
-        if student is None:
-            raise HTTPException(status_code=404, detail="Student not found")
         twin = build_student_twin(repository, student_id)
+        if twin is None:
+            raise HTTPException(status_code=404, detail="Student not found")
         report = repository.get_student_portal_grade_report(student_id)
         records = [_enrich_grade_record(record) for record in report["records"]] if report else []
         return {
-            "student": student.as_dict(),
-            "semester": twin.semester if twin else "",
-            "current_week": twin.current_week if twin else 1,
-            "courses": [course.model_dump() for course in (twin.courses if twin else [])],
+            "student": twin.student.model_dump(),
+            "semester": twin.semester,
+            "current_week": twin.current_week,
+            "courses": [course.model_dump() for course in twin.courses],
             "grades": {
                 "completed_courses": sum(
                     1

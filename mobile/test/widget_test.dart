@@ -1,8 +1,11 @@
 import 'package:advisor_ai_mobile/main.dart';
+import 'package:advisor_ai_mobile/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  setUp(() => appThemeMode.value = ThemeMode.light);
+
   testWidgets('shows the database-backed student login', (tester) async {
     await tester.pumpWidget(const AdvisorAIApp());
 
@@ -18,5 +21,25 @@ void main() {
     await tester.pump();
 
     expect(find.text('Enter your student ID.'), findsOneWidget);
+  });
+
+  testWidgets('switches the complete app between light and dark mode', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const AdvisorAIApp());
+
+    expect(
+      Theme.of(tester.element(find.byType(Scaffold))).brightness,
+      Brightness.light,
+    );
+    await tester.tap(find.byKey(const Key('theme-mode-toggle')));
+    await tester.pumpAndSettle();
+
+    expect(appThemeMode.value, ThemeMode.dark);
+    expect(
+      Theme.of(tester.element(find.byType(Scaffold))).brightness,
+      Brightness.dark,
+    );
+    expect(find.byTooltip('Switch to light mode'), findsOneWidget);
   });
 }

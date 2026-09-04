@@ -76,13 +76,15 @@ void main() {
     expect(find.text('CCS3201'), findsOneWidget);
     expect(find.text('Advanced statistics'), findsOneWidget);
     expect(find.text('A+'), findsOneWidget);
+    final scaffoldContext = tester.element(find.byType(Scaffold));
+    final activeTheme = Theme.of(scaffoldContext);
     expect(
       tester.widget<Scaffold>(find.byType(Scaffold)).backgroundColor,
-      const Color(0xFFF4F8F8),
+      activeTheme.scaffoldBackgroundColor,
     );
     expect(
       tester.widget<AppBar>(find.byType(AppBar)).backgroundColor,
-      Colors.white,
+      activeTheme.colorScheme.surface,
     );
     expect(tester.takeException(), isNull);
   });

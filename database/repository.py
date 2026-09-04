@@ -417,6 +417,57 @@ class StudentRepository:
             "schedule_data_available": bool(schedules),
         }
 
+    def get_student_current_courses(self, student_id: str) -> dict[str, Any] | None:
+        student = self.get_student(student_id)
+        if student is None:
+            return None
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT offering.course_id AS course_code,
+                          offering.course_name, 'Current' AS status,
+                          offering.semester, slot.day_of_week,
+                          slot.start_minute, slot.end_minute, slot.location
+                   FROM courses enrollment
+                   JOIN course_offerings offering
+                     ON offering.course_name = enrollment.course_name
+                   LEFT JOIN course_schedule_slots slot
+                     ON slot.course_id = offering.course_id
+                   WHERE enrollment.student_id = ?
+                   ORDER BY offering.course_name, slot.day_of_week,
+                            slot.start_minute""",
+                (student.student_id,),
+            ).fetchall()
+        courses: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            course_code = str(row["course_code"])
+            course = courses.setdefault(
+                course_code,
+                {
+                    "course_code": course_code,
+                    "course_name": row["course_name"],
+                    "status": row["status"],
+                    "semester": row["semester"],
+                    "schedule": [],
+                },
+            )
+            if row["day_of_week"] is not None:
+                course["schedule"].append(
+                    {
+                        "day_of_week": row["day_of_week"],
+                        "start_minute": row["start_minute"],
+                        "end_minute": row["end_minute"],
+                        "location": row["location"],
+                    }
+                )
+        return {
+            "student": student.as_dict(),
+            "course_count": len(courses),
+            "schedule_published": any(
+                course["schedule"] for course in courses.values()
+            ),
+            "courses": list(courses.values()),
+        }
+
     @staticmethod
     def _seed_portal_gradebook(connection: sqlite3.Connection) -> None:
         if connection.execute("SELECT 1 FROM course_gradebook_entries LIMIT 1").fetchone():

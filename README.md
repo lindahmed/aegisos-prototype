@@ -124,6 +124,9 @@ Then edit `.env` and provide the values you are authorized to use:
 
 ```env
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_neo4j_password
 AEGIS_CURRENT_SEMESTER=...
 AEGIS_CURRENT_WEEK=...
 GEMINI_API_KEY=your_gemini_api_key_here
@@ -215,6 +218,27 @@ curl http://127.0.0.1:8000/student/<STUDENT_ID>
 ```
 
 Do not assume demo IDs from old prototype databases exist in the real database.
+
+## Synchronize the Neo4j academic graph
+
+Neo4j is rebuilt from the PostgreSQL course catalogue and prerequisite tables;
+there is no separate hard-coded curriculum to maintain. Validate the source
+snapshot first:
+
+```bash
+python -m backend.advisor.seed_neo4j --dry-run
+```
+
+Then synchronize Neo4j (this replaces the existing Course, Programme, and
+Student nodes in the academic graph):
+
+```bash
+python -m backend.advisor.seed_neo4j
+```
+
+The synchronization imports every course and prerequisite relationship. When
+available, it also imports department plans, major electives, programmes, and
+student-to-programme enrollment.
 
 ---
 

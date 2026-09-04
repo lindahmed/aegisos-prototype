@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:advisor_ai_mobile/models/advisor_message.dart';
@@ -7,6 +8,78 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('coalesces in-flight reads and reuses a fresh response', () async {
+    var requestCount = 0;
+    final firstResponse = Completer<http.Response>();
+    final response = http.Response(
+      jsonEncode({
+        'student_id': 'STU001',
+        'name': 'Test Student',
+        'major': 'Computer Science',
+        'year': 4,
+        'gpa': 3.55,
+        'courses': <String>[],
+      }),
+      200,
+    );
+    final service = ApiService(
+      client: MockClient((_) {
+        requestCount += 1;
+        return requestCount == 1
+            ? firstResponse.future
+            : Future.value(response);
+      }),
+      baseUrl: 'https://api.example.test',
+    );
+
+    final first = service.getStudent('STU001');
+    final duplicate = service.getStudent('STU001');
+    await Future<void>.delayed(Duration.zero);
+    expect(requestCount, 1);
+
+    firstResponse.complete(response);
+    await Future.wait([first, duplicate]);
+    await service.getStudent('STU001');
+    expect(requestCount, 1);
+
+    await service.getStudent('STU001', forceRefresh: true);
+    expect(requestCount, 2);
+    service.close();
+  });
+
+  test('calendar reuses the dashboard progress response', () async {
+    var requestCount = 0;
+    final service = ApiService(
+      client: MockClient((request) async {
+        requestCount += 1;
+        expect(request.url.path, '/progress/STU001');
+        return http.Response(
+          jsonEncode({
+            'student': {
+              'student_id': 'STU001',
+              'name': 'Test Student',
+              'major': 'Computer Science',
+              'year': 4,
+              'gpa': 3.55,
+              'courses': <String>[],
+            },
+            'semester': 'Current semester',
+            'current_week': 5,
+            'courses': <Object>[],
+          }),
+          200,
+        );
+      }),
+      baseUrl: 'https://api.example.test',
+    );
+
+    await service.getStudentProgress('STU001');
+    await service.getStudentAcademics('STU001');
+
+    expect(requestCount, 1);
+    service.close();
+  });
+
   test('loads a student from the AegisOS API and accepts a null GPA', () async {
     final client = MockClient((request) async {
       expect(
@@ -53,6 +126,27 @@ void main() {
           (error) => error.message,
           'message',
           'Student ID not found.',
+        ),
+      ),
+    );
+    service.close();
+  });
+
+  test('does not misreport a wrong API server as an unknown student', () async {
+    final service = ApiService(
+      client: MockClient(
+        (_) async => http.Response('{"detail":"Not Found"}', 404),
+      ),
+      baseUrl: 'https://wrong-server.example.test',
+    );
+
+    await expectLater(
+      service.getStudent('STU001'),
+      throwsA(
+        isA<ApiException>().having(
+          (error) => error.message,
+          'message',
+          'The configured address is not the AegisOS API. Check the API URL.',
         ),
       ),
     );
@@ -197,6 +291,49 @@ void main() {
     service.close();
   });
 
+  test('loads registered courses with university schedule slots', () async {
+    final service = ApiService(
+      client: MockClient((request) async {
+        expect(
+          request.url.toString(),
+          'https://api.example.test/portal/students/STU001/courses',
+        );
+        return http.Response(
+          jsonEncode({
+            'course_count': 1,
+            'schedule_published': true,
+            'courses': [
+              {
+                'course_code': 'CIS2101',
+                'course_name': 'Database Systems',
+                'status': 'Current',
+                'semester': 'Fall 2026',
+                'schedule': [
+                  {
+                    'day_of_week': 'Sunday',
+                    'start_minute': 600,
+                    'end_minute': 660,
+                    'location': 'Room A12',
+                  },
+                ],
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+      baseUrl: 'https://api.example.test',
+    );
+
+    final report = await service.getStudentCourses('STU001');
+
+    expect(report.courseCount, 1);
+    expect(report.schedulePublished, isTrue);
+    expect(report.courses.single.name, 'Database Systems');
+    expect(report.courses.single.schedule.single.timeLabel, '10:00 AM–11:00 AM');
+    service.close();
+  });
+
   test('updates shared notification read state', () async {
     final client = MockClient((request) async {
       expect(request.method, 'PUT');
@@ -237,6 +374,237 @@ void main() {
     );
 
     expect(notifications.single.read, isTrue);
+    service.close();
+  });
+
+  test('loads the database-backed smart semester plan', () async {
+    final service = ApiService(
+      client: MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(
+          request.url.toString(),
+          'https://api.example.test/portal/students/STU001/semester-plan?max_credits=18',
+        );
+        return http.Response(
+          jsonEncode({
+            'current_semester': 3,
+            'next_semester': 4,
+            'current_gpa': 3.55,
+            'maximum_credit_hours': 18,
+            'recommended_courses': [
+              {
+                'course_id': '21',
+                'course_code': 'CIS2101',
+                'course_name': 'Database Systems',
+                'curriculum_semester': 3,
+                'course_type': 'Required',
+                'credit_hours': 3,
+                'eligibility': 'eligible',
+                'prerequisites': [],
+                'schedule': [],
+              },
+            ],
+            'candidate_courses': [],
+            'credit_policy': {'note': 'Estimated credits'},
+            'conflict_check': {
+              'status': 'unavailable',
+              'note': 'No timetable data',
+            },
+            'gpa_projection': {'completed_credit_hours': 36},
+            'graduation_path': {
+              'remaining_courses': 28,
+              'minimum_semesters_after_current': 5,
+              'planned_semesters': [],
+              'note': 'Prerequisite-valid path',
+            },
+          }),
+          200,
+        );
+      }),
+      baseUrl: 'https://api.example.test',
+    );
+
+    final plan = await service.getSemesterPlan('STU001');
+
+    expect(plan.nextSemester, 4);
+    expect(plan.recommendedCourses.single.code, 'CIS2101');
+    expect(plan.minimumSemesters, 5);
+    service.close();
+  });
+
+  test('parses selectable graduation routes and half-load policy', () async {
+    final service = ApiService(
+      client: MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'current_semester': 6,
+            'next_semester': 7,
+            'maximum_program_semesters': 8,
+            'program_semesters_remaining': 2,
+            'current_gpa': 1.8,
+            'maximum_credit_hours': 9,
+            'recommended_courses': [],
+            'candidate_courses': [],
+            'credit_policy': {'note': 'Half load'},
+            'conflict_check': {'status': 'unavailable', 'note': ''},
+            'gpa_projection': {'completed_credit_hours': 60},
+            'graduation_path': {
+              'remaining_courses': 10,
+              'minimum_semesters_after_current': 2,
+              'fits_standard_program_length': false,
+              'planned_semesters': [],
+              'note': 'Extension required',
+            },
+            'graduation_options': {
+              'half_load': true,
+              'accelerated_allowed': false,
+              'student_status': 'half_load',
+              'best_option_id': 'normal',
+              'fastest_option_id': null,
+              'policy_note': 'GPA below 2.0 requires half load.',
+              'options': [
+                {
+                  'id': 'normal',
+                  'title': 'Half-load route',
+                  'available': true,
+                  'maximum_regular_credits': 9,
+                  'summer_credits': 0,
+                  'regular_semesters': 4,
+                  'summer_terms': 0,
+                  'extension_terms': 2,
+                  'total_terms': 4,
+                  'saves_regular_semesters': 0,
+                  'on_time': false,
+                  'note': 'Reduced load',
+                  'terms': [
+                    {
+                      'label': 'Extension term 1',
+                      'term_type': 'extension',
+                      'semester_number': null,
+                      'credit_hours': 9,
+                      'courses': [],
+                    },
+                  ],
+                },
+                {
+                  'id': 'summer_3',
+                  'title': 'Summer 3',
+                  'available': false,
+                  'summer_after_semester': 6,
+                  'note': 'Unavailable',
+                  'terms': [],
+                },
+              ],
+            },
+          }),
+          200,
+        ),
+      ),
+      baseUrl: 'https://api.example.test',
+    );
+
+    final plan = await service.getSemesterPlan('STU009');
+
+    expect(plan.halfLoad, isTrue);
+    expect(plan.acceleratedAllowed, isFalse);
+    expect(plan.maximumCreditHours, 9);
+    expect(plan.bestOptionId, 'normal');
+    expect(plan.graduationOptions.first.extensionTerms, 2);
+    expect(plan.graduationOptions.first.terms.single.label, 'Extension term 1');
+    expect(plan.graduationOptions.last.available, isFalse);
+    expect(plan.graduationOptions.last.summerAfterSemester, 6);
+    service.close();
+  });
+
+  test('caps a legacy year-four planner response at semester eight', () async {
+    final service = ApiService(
+      client: MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'current_semester': 7,
+            'next_semester': 8,
+            'current_gpa': 3.57,
+            'maximum_credit_hours': 18,
+            'recommended_courses': [
+              {
+                'course_id': 'CCS1101',
+                'course_code': 'CCS1101',
+                'course_name': 'Introduction to Computing',
+                'curriculum_semester': 1,
+                'credit_hours': 3,
+                'eligibility': 'eligible',
+                'prerequisites': [],
+                'schedule': [],
+              },
+            ],
+            'candidate_courses': [
+              {
+                'course_id': 'CCS1101',
+                'course_code': 'CCS1101',
+                'course_name': 'Introduction to Computing',
+                'curriculum_semester': 1,
+                'credit_hours': 3,
+                'eligibility': 'eligible',
+                'prerequisites': [],
+                'schedule': [],
+              },
+              {
+                'course_id': 'CCS4901',
+                'course_code': 'CCS4901',
+                'course_name': 'Project I',
+                'curriculum_semester': 7,
+                'credit_hours': 3,
+                'eligibility': 'eligible',
+                'prerequisites': [],
+                'schedule': [],
+              },
+            ],
+            'credit_policy': {'note': 'Estimated credits'},
+            'conflict_check': {'status': 'unavailable', 'note': ''},
+            'gpa_projection': {'completed_credit_hours': 0},
+            'graduation_path': {
+              'remaining_courses': 51,
+              'minimum_semesters_after_current': 8,
+              'planned_semesters': [
+                {
+                  'semester_number': 8,
+                  'credit_hours': 3,
+                  'courses': [
+                    {
+                      'course_id': 'CCS1101',
+                      'course_code': 'CCS1101',
+                      'course_name': 'Introduction to Computing',
+                      'curriculum_semester': 1,
+                      'credit_hours': 3,
+                      'eligibility': 'eligible',
+                      'prerequisites': [],
+                      'schedule': [],
+                    },
+                  ],
+                },
+                {'semester_number': 9, 'credit_hours': 3, 'courses': []},
+              ],
+              'note': 'Legacy response',
+            },
+          }),
+          200,
+        ),
+      ),
+      baseUrl: 'https://api.example.test',
+    );
+
+    final plan = await service.getSemesterPlan('STU005');
+
+    expect(plan.maximumProgramSemesters, 8);
+    expect(plan.minimumSemesters, 1);
+    expect(plan.candidateCourses.map((course) => course.code), ['CCS4901']);
+    expect(plan.recommendedCourses.map((course) => course.code), ['CCS4901']);
+    expect(
+      plan.path.every(
+        (term) => term.semesterNumber == null || term.semesterNumber! <= 8,
+      ),
+      isTrue,
+    );
     service.close();
   });
 }

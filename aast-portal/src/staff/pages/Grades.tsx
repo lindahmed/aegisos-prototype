@@ -46,7 +46,9 @@ function normalizeRow(row: {
   final_exam_mark: number
 }): GradeRow {
   const total = totalMarks(row.coursework_mark, row.week7_exam_mark, row.week12_exam_mark, row.final_exam_mark)
-  const { grade, gpaPoints } = scoreToGrade(total)
+  const { grade, gpaPoints } = row.final_exam_mark <= 0
+    ? { grade: 'U', gpaPoints: 0 }
+    : scoreToGrade(total)
   return {
     studentId: row.student_id,
     studentName: row.student_name,
@@ -131,7 +133,9 @@ export default function Grades() {
         const sanitizedValue = Number.isFinite(value) ? Math.max(0, Math.min(({ coursework: 10, week7Exam: 30, week12Exam: 20, finalExam: 40 })[field], value)) : 0
         const updated = { ...r, [field]: sanitizedValue }
         const total = totalMarks(updated.coursework, updated.week7Exam, updated.week12Exam, updated.finalExam)
-        const { grade, gpaPoints } = scoreToGrade(total)
+        const { grade, gpaPoints } = updated.finalExam <= 0
+          ? { grade: 'U', gpaPoints: 0 }
+          : scoreToGrade(total)
         return { ...updated, total, grade, gpaPoints }
       })
     )

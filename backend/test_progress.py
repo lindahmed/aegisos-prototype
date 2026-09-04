@@ -85,6 +85,27 @@ def test_student_d_improving_uses_previous_snapshot_without_duplicate_alert(tmp_
     assert not structures.risks
 
 
+def test_student_twin_reuses_one_snapshot_query(tmp_path: Path) -> None:
+    repository = make_repository(tmp_path)
+    original = repository.get_weekly_snapshots
+    calls = 0
+
+    def counted_snapshots(student_id: str):
+        nonlocal calls
+        calls += 1
+        return original(student_id)
+
+    repository.get_weekly_snapshots = counted_snapshots  # type: ignore[method-assign]
+    repository.get_previous_course_snapshot = (  # type: ignore[method-assign]
+        lambda *_: (_ for _ in ()).throw(AssertionError("unexpected N+1 snapshot query"))
+    )
+
+    twin = build_student_twin(repository, "231027906")
+
+    assert twin is not None
+    assert calls == 1
+
+
 def test_real_registered_student_twin_graph_history_and_what_if(tmp_path: Path) -> None:
     repository = make_repository(tmp_path)
     # The repository seed contains a registered student and the graph runs on

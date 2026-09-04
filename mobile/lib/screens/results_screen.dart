@@ -3,14 +3,15 @@ import 'package:flutter/material.dart';
 import '../models/grade_report.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
 
-const _pageBackground = Color(0xFFF4F8F8);
-const _surface = Colors.white;
-const _summarySurface = Color(0xFFE7F2F2);
-const _border = Color(0xFFD3E1E1);
-const _ink = Color(0xFF16373A);
-const _muted = Color(0xFF61787A);
+Color get _surface => appScreenSurface;
+Color get _summarySurface => appScreenSurfaceRaised;
+Color get _border => appScreenBorder;
+Color get _ink => appScreenInk;
+Color get _muted => appScreenMuted;
 const _teal = Color(0xFF0F7780);
+const _gradeInk = Color(0xFF16373A);
 
 class ResultsScreen extends StatefulWidget {
   const ResultsScreen({required this.student, this.apiService, super.key});
@@ -44,11 +45,12 @@ class _ResultsScreenState extends State<ResultsScreen> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool forceRefresh = false}) async {
     if (mounted) setState(() => _loading = true);
     try {
       final report = await _apiService.getStudentGrades(
         widget.student.studentId,
+        forceRefresh: forceRefresh,
       );
       if (!mounted) return;
       setState(() {
@@ -69,24 +71,26 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: _pageBackground,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: _surface,
-        foregroundColor: _ink,
+        backgroundColor: colors.surface,
+        foregroundColor: colors.onSurface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        leading: const BackButton(color: _teal),
+        leading: const BackButton(color: Color(0xFF27BBD3)),
         title: const Text(
           'Results',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
+          const ThemeModeToggleButton(),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: CircleAvatar(
-              backgroundColor: const Color(0xFFD8E1E9),
+              backgroundColor: _summarySurface,
               foregroundColor: _ink,
               child: Text(_initials(widget.student.name)),
             ),
@@ -98,7 +102,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
           : _error != null && _report == null
           ? _ErrorState(message: _error!, onRetry: _load)
           : RefreshIndicator(
-              onRefresh: _load,
+              onRefresh: () => _load(forceRefresh: true),
               color: _teal,
               child: _buildResults(),
             ),
@@ -125,7 +129,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
             borderRadius: const BorderRadius.vertical(
               bottom: Radius.circular(28),
             ),
-            border: const Border(bottom: BorderSide(color: _border)),
+            border: Border(bottom: BorderSide(color: _border)),
             boxShadow: [
               BoxShadow(
                 color: _ink.withValues(alpha: 0.06),
@@ -145,7 +149,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Semesters',
                 style: TextStyle(
                   color: _ink,
@@ -156,7 +160,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
               ),
               const SizedBox(height: 8),
               if (report.semesters.isEmpty)
-                const Text(
+                Text(
                   'No semesters are available yet.',
                   style: TextStyle(color: _muted),
                 )
@@ -176,7 +180,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                             () => _selectedSemester = summary.semester,
                           ),
                           selectedColor: _teal,
-                          backgroundColor: const Color(0xFFE9EEEE),
+                          backgroundColor: _summarySurface,
                           side: BorderSide(color: selected ? _teal : _border),
                           labelStyle: TextStyle(
                             color: selected ? Colors.white : _ink,
@@ -252,7 +256,7 @@ class _SummaryPanel extends StatelessWidget {
                 label: 'Courses Achieved',
               ),
             ),
-            const VerticalDivider(color: _border, width: 1),
+            VerticalDivider(color: _border, width: 1),
             Expanded(
               child: _SummaryMetric(
                 value: gpa?.toStringAsFixed(2) ?? '—',
@@ -281,7 +285,7 @@ class _SummaryMetric extends StatelessWidget {
         children: [
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               color: _ink,
               fontSize: 27,
               fontWeight: FontWeight.w900,
@@ -291,7 +295,7 @@ class _SummaryMetric extends StatelessWidget {
           Text(
             label,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               color: _muted,
               fontSize: 12,
               fontWeight: FontWeight.w700,
@@ -332,7 +336,7 @@ class _GradeCard extends StatelessWidget {
               children: [
                 Text(
                   record.courseCode.toUpperCase(),
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _teal,
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
@@ -343,7 +347,7 @@ class _GradeCard extends StatelessWidget {
                 Text(
                   record.courseName,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _ink,
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
@@ -352,7 +356,7 @@ class _GradeCard extends StatelessWidget {
               ],
             ),
           ),
-          const Divider(height: 1, color: _border),
+          Divider(height: 1, color: _border),
           IntrinsicHeight(
             child: Row(
               children: [
@@ -362,14 +366,14 @@ class _GradeCard extends StatelessWidget {
                     label: '7th Week',
                   ),
                 ),
-                const VerticalDivider(width: 1, color: _border),
+                VerticalDivider(width: 1, color: _border),
                 Expanded(
                   child: _MarkMetric(
                     value: record.week12ExamMark,
                     label: '12th Week',
                   ),
                 ),
-                const VerticalDivider(width: 1, color: _border),
+                VerticalDivider(width: 1, color: _border),
                 Expanded(
                   child: _MarkMetric(
                     value: record.courseworkMark,
@@ -382,12 +386,12 @@ class _GradeCard extends StatelessWidget {
           ),
           Container(
             width: double.infinity,
-            color: const Color(0xFFF2F6F6),
+            color: _summarySurface,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             child: Text(
               _detailLine(record),
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: _muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
@@ -405,6 +409,9 @@ class _GradeCard extends StatelessWidget {
     }
     if (record.gradeSource == 'none') {
       return 'No grade has been posted for this course yet';
+    }
+    if (record.letterGrade == 'U') {
+      return 'Final exam not posted · current marks are provisional';
     }
     final finalMark = record.finalExamMark?.toStringAsFixed(2) ?? '—';
     final total = record.totalScore?.toStringAsFixed(2) ?? '—';
@@ -427,7 +434,7 @@ class _MarkMetric extends StatelessWidget {
         children: [
           Text(
             value?.toStringAsFixed(2) ?? '—',
-            style: const TextStyle(
+            style: TextStyle(
               color: _ink,
               fontSize: 18,
               fontWeight: FontWeight.w900,
@@ -464,7 +471,7 @@ class _GradeTile extends StatelessWidget {
       child: Text(
         grade ?? '—',
         style: const TextStyle(
-          color: _ink,
+          color: _gradeInk,
           fontSize: 31,
           fontWeight: FontWeight.w900,
         ),
@@ -474,6 +481,7 @@ class _GradeTile extends StatelessWidget {
 
   static Color _gradeColor(String? grade) {
     if (grade == null) return const Color(0xFFD7E1E8);
+    if (grade == 'U') return const Color(0xFFD7E1E8);
     if (grade.startsWith('A')) return const Color(0xFFE9F5C8);
     if (grade.startsWith('B')) return const Color(0xFFE6F2FC);
     if (grade.startsWith('C')) return const Color(0xFFF0EEFA);
@@ -486,12 +494,12 @@ class _EmptyResults extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 70),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 70),
       child: Column(
         children: [
           Icon(Icons.school_outlined, color: _muted, size: 46),
-          SizedBox(height: 12),
+          const SizedBox(height: 12),
           Text(
             'No course results are available for this semester.',
             textAlign: TextAlign.center,
@@ -517,12 +525,12 @@ class _ErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_outlined, color: _muted, size: 44),
+            Icon(Icons.cloud_off_outlined, color: _muted, size: 44),
             const SizedBox(height: 14),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: _ink),
+              style: TextStyle(color: _ink),
             ),
             const SizedBox(height: 16),
             FilledButton(onPressed: onRetry, child: const Text('Try again')),

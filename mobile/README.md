@@ -23,7 +23,7 @@ The root `.env` remains the single place where the backend reads `DATABASE_URL`.
 Start FastAPI from the repository root:
 
 ```bash
-python -m uvicorn backend.app:app --host 0.0.0.0 --port 8000
+python -m uvicorn backend.app:app --host 0.0.0.0 --port 8001
 ```
 
 Then start Flutter:
@@ -34,15 +34,15 @@ flutter pub get
 flutter run
 ```
 
-The default API URL is `http://10.0.2.2:8000` for an Android emulator. Override it for
+The default API URL is `http://10.0.2.2:8001` for an Android emulator. Override it for
 other targets without editing source:
 
 ```bash
-flutter run --dart-define=API_BASE_URL=http://192.168.1.50:8000
+flutter run --dart-define=API_BASE_URL=http://192.168.1.50:8001
 ```
 
 For a physical device, replace the example address with the development computer's LAN IP
-and allow port 8000 through the local firewall. Use an HTTPS API URL for production builds.
+and allow port 8001 through the local firewall. Use an HTTPS API URL for production builds.
 
 ## Checks
 

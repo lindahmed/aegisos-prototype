@@ -47,7 +47,7 @@ export default function Grades() {
 
   const records = report?.records.filter((record) => record.semester === semester) ?? []
   const summary = report?.semesters.find((item) => item.semester === semester) ?? null
-  const scoredRecords = records.filter((record) => record.total_score !== null)
+  const scoredRecords = records.filter((record) => record.grade_posted && record.total_score !== null)
   const bestCourse = scoredRecords.reduce(
     (best, record) => ((record.total_score ?? -1) > (best?.total_score ?? -1) ? record : best),
     scoredRecords[0],

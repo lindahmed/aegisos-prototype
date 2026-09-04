@@ -3,13 +3,10 @@ import 'package:flutter/material.dart';
 import '../models/advisor_message.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
 
 class AdvisorScreen extends StatefulWidget {
-  const AdvisorScreen({
-    required this.student,
-    this.apiService,
-    super.key,
-  });
+  const AdvisorScreen({required this.student, this.apiService, super.key});
 
   final Student student;
   final ApiService? apiService;
@@ -70,7 +67,10 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
       if (mounted) setState(() => _errorMessage = error.message);
     } catch (_) {
       if (mounted) {
-        setState(() => _errorMessage = 'Advisor AI could not answer. Please try again.');
+        setState(
+          () =>
+              _errorMessage = 'Advisor AI could not answer. Please try again.',
+        );
       }
     } finally {
       if (mounted) {
@@ -105,6 +105,7 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
       appBar: AppBar(
         title: const Text('Advisor AI'),
         actions: [
+          const ThemeModeToggleButton(),
           PopupMenuButton<String>(
             tooltip: 'Response language',
             initialValue: _language,
@@ -143,7 +144,10 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
               Container(
                 width: double.infinity,
                 color: Theme.of(context).colorScheme.errorContainer,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
                 child: Text(
                   _errorMessage!,
                   key: const Key('advisor-error'),
@@ -190,9 +194,8 @@ class _EmptyAdvisorState extends StatelessWidget {
         Text(
           'How can I help, ${studentName.split(' ').first}?',
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+          style: Theme.of(context).textTheme.headlineSmall
+              ?.copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
         const Text(
@@ -234,7 +237,9 @@ class _MessageBubble extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: isUser ? colors.primaryContainer : colors.surfaceContainerHighest,
+          color: isUser
+              ? colors.primaryContainer
+              : colors.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(18),
         ),
         child: SelectableText(message.content),

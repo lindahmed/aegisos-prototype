@@ -120,6 +120,70 @@ def test_unposted_grades_remain_null_and_do_not_create_false_notifications(
     )
 
 
+def test_missing_final_exam_uses_u_instead_of_f(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    response = client.put(
+        "/portal/courses/ai/grades",
+        json={
+            "semester": "Fall 2026",
+            "rows": [
+                {
+                    "student_id": "231027905",
+                    "coursework_mark": 8,
+                    "week7_exam_mark": 24,
+                    "week12_exam_mark": 17,
+                    "final_exam_mark": 0,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    saved = response.json()["rows"][0]
+    assert saved["total_score"] == 49
+    assert saved["letter_grade"] == "U"
+    assert saved["gpa_points"] is None
+    assert saved["grade_posted"] is False
+
+    notifications = client.get(
+        "/portal/students/231027905/notifications"
+    ).json()["notifications"]
+    assert not any(
+        item["type"] == "grade" and "Artificial Intelligence" in item["title"]
+        for item in notifications
+    )
+
+
+def test_student_courses_endpoint_lists_courses_and_timetable(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    with sqlite3.connect(tmp_path / "aegisos.db") as connection:
+        connection.execute(
+            """INSERT INTO course_schedule_slots
+               (course_id, day_of_week, start_minute, end_minute, location)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("ai", "Sunday", 600, 660, "Room A12"),
+        )
+
+    response = client.get("/portal/students/231027905/courses")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["course_count"] == 3
+    assert data["schedule_published"] is True
+    ai_course = next(
+        course for course in data["courses"] if course["course_code"] == "ai"
+    )
+    assert ai_course["course_name"] == "Artificial Intelligence"
+    assert ai_course["schedule"] == [
+        {
+            "day_of_week": "Sunday",
+            "start_minute": 600,
+            "end_minute": 660,
+            "location": "Room A12",
+        }
+    ]
+
+
 def test_workspace_is_created_for_enrolled_course(tmp_path: Path) -> None:
     response = make_client(tmp_path).post(
         "/workspace/create",
@@ -206,6 +270,21 @@ def test_semester_planner_endpoint_uses_repository_data(tmp_path: Path) -> None:
 
 def test_portal_notifications_use_live_academic_data(tmp_path: Path) -> None:
     client = make_client(tmp_path)
+    client.put(
+        "/portal/courses/ai/grades",
+        json={
+            "semester": "Fall 2026",
+            "rows": [
+                {
+                    "student_id": "231027905",
+                    "coursework_mark": 4,
+                    "week7_exam_mark": 10.5,
+                    "week12_exam_mark": 7,
+                    "final_exam_mark": 12,
+                }
+            ],
+        },
+    )
 
     response = client.get("/portal/students/231027905/notifications")
 

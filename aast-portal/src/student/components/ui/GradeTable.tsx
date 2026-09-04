@@ -1,6 +1,7 @@
 import type { PortalStudentGradeRecord } from '@/lib/portalGrades'
 
 const gradeTone = (grade: string) => {
+  if (grade === 'U') return 'text-text-muted'
   if (grade.startsWith('A')) return 'text-success'
   if (grade.startsWith('B')) return 'text-teal-700'
   if (grade.startsWith('C')) return 'text-warning'

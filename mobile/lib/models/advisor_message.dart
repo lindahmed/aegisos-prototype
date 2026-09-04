@@ -2,18 +2,15 @@ class AdvisorMessage {
   const AdvisorMessage({required this.role, required this.content});
 
   const AdvisorMessage.user(String content)
-      : this(role: 'user', content: content);
+    : this(role: 'user', content: content);
 
   const AdvisorMessage.assistant(String content)
-      : this(role: 'assistant', content: content);
+    : this(role: 'assistant', content: content);
 
   final String role;
   final String content;
 
-  Map<String, String> toJson() => {
-        'role': role,
-        'content': content,
-      };
+  Map<String, String> toJson() => {'role': role, 'content': content};
 }
 
 class AdvisorReply {
