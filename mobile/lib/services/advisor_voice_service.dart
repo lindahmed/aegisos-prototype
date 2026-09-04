@@ -1,16 +1,17 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 
 abstract interface class AdvisorVoiceService {
-  Future<bool> startRecording();
+  Future<bool> startListening({
+    required String language,
+    required void Function(String words) onResult,
+  });
 
-  Future<Uint8List?> stopRecording();
+  Future<String> stopListening();
 
-  Future<void> cancelRecording();
+  Future<void> cancelListening();
 
   Future<void> play(Uint8List audioBytes);
 
@@ -18,49 +19,59 @@ abstract interface class AdvisorVoiceService {
 }
 
 class DeviceAdvisorVoiceService implements AdvisorVoiceService {
-  DeviceAdvisorVoiceService({AudioRecorder? recorder, AudioPlayer? player})
-    : _recorder = recorder ?? AudioRecorder(),
+  DeviceAdvisorVoiceService({SpeechToText? speech, AudioPlayer? player})
+    : _speech = speech ?? SpeechToText(),
       _player = player ?? AudioPlayer();
 
-  final AudioRecorder _recorder;
+  final SpeechToText _speech;
   final AudioPlayer _player;
+  String _recognizedWords = '';
 
   @override
-  Future<bool> startRecording() async {
-    if (!await _recorder.hasPermission()) return false;
+  Future<bool> startListening({
+    required String language,
+    required void Function(String words) onResult,
+  }) async {
+    _recognizedWords = '';
+    final available = await _speech.initialize(
+      options: [SpeechToText.androidNoBluetooth],
+    );
+    if (!available) return false;
+    final localePrefix = language == 'arabic' ? 'ar' : 'en';
+    final locales = await _speech.locales();
+    String? localeId;
+    for (final locale in locales) {
+      if (locale.localeId.toLowerCase().startsWith(localePrefix)) {
+        localeId = locale.localeId;
+        break;
+      }
+    }
 
-    final directory = await getTemporaryDirectory();
-    final path =
-        '${directory.path}/advisor_voice_${DateTime.now().microsecondsSinceEpoch}.wav';
-    await _recorder.start(
-      const RecordConfig(
-        encoder: AudioEncoder.wav,
-        sampleRate: 16000,
-        numChannels: 1,
-        autoGain: true,
-        echoCancel: true,
-        noiseSuppress: true,
+    await _speech.listen(
+      onResult: (result) {
+        _recognizedWords = result.recognizedWords.trim();
+        onResult(_recognizedWords);
+      },
+      listenOptions: SpeechListenOptions(
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 4),
+        localeId: localeId,
+        listenMode: ListenMode.confirmation,
+        partialResults: true,
+        cancelOnError: false,
       ),
-      path: path,
     );
     return true;
   }
 
   @override
-  Future<Uint8List?> stopRecording() async {
-    final path = await _recorder.stop();
-    if (path == null) return null;
-
-    final file = File(path);
-    try {
-      return await file.readAsBytes();
-    } finally {
-      if (await file.exists()) await file.delete();
-    }
+  Future<String> stopListening() async {
+    await _speech.stop();
+    return _recognizedWords;
   }
 
   @override
-  Future<void> cancelRecording() => _recorder.cancel();
+  Future<void> cancelListening() => _speech.cancel();
 
   @override
   Future<void> play(Uint8List audioBytes) async {
@@ -70,7 +81,7 @@ class DeviceAdvisorVoiceService implements AdvisorVoiceService {
 
   @override
   Future<void> dispose() async {
-    await _recorder.dispose();
+    await _speech.cancel();
     await _player.dispose();
   }
 }

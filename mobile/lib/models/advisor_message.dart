@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 class AdvisorMessage {
   const AdvisorMessage({required this.role, required this.content});
 
@@ -13,19 +11,6 @@ class AdvisorMessage {
   final String content;
 
   Map<String, String> toJson() => {'role': role, 'content': content};
-}
-
-class AdvisorVoiceReply extends AdvisorReply {
-  const AdvisorVoiceReply({
-    required super.intent,
-    required super.response,
-    required super.language,
-    required this.transcript,
-    required this.audioBytes,
-  });
-
-  final String transcript;
-  final Uint8List audioBytes;
 }
 
 class AdvisorReply {

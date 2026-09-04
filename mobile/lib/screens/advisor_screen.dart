@@ -58,17 +58,25 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
 
     if (!_isRecording) {
       try {
-        final started = await _voiceService.startRecording();
+        _messageController.clear();
+        final started = await _voiceService.startListening(
+          language: _language,
+          onResult: (words) {
+            if (!mounted) return;
+            _messageController.value = TextEditingValue(
+              text: words,
+              selection: TextSelection.collapsed(offset: words.length),
+            );
+          },
+        );
         if (!mounted) return;
         setState(() {
           _isRecording = started;
-          _errorMessage = started
-              ? null
-              : 'Microphone permission is required for Advisor voice.';
+          _errorMessage = started ? null : 'Speech recognition is unavailable. Check microphone permission.';
         });
       } catch (_) {
         if (mounted) {
-          setState(() => _errorMessage = 'Could not start the microphone.');
+          setState(() => _errorMessage = 'Could not start speech recognition.');
         }
       }
       return;
@@ -76,43 +84,32 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
 
     setState(() {
       _isRecording = false;
-      _isSending = true;
       _errorMessage = null;
     });
 
     try {
-      final audioBytes = await _voiceService.stopRecording();
-      if (audioBytes == null || audioBytes.isEmpty) {
-        throw const ApiException('No voice recording was captured.');
+      final transcript = await _voiceService.stopListening();
+      if (transcript.trim().isEmpty) {
+        if (mounted) {
+          setState(
+            () => _errorMessage =
+                'I did not hear any words. Tap the microphone and speak again.',
+          );
+        }
+        return;
       }
-      final reply = await _apiService.askAdvisorVoice(
-        studentId: widget.student.studentId,
-        audioBytes: audioBytes,
-        language: _language,
-      );
-      if (!mounted) return;
-      setState(() {
-        _messages.add(AdvisorMessage.user(reply.transcript));
-        _messages.add(AdvisorMessage.assistant(reply.response));
-      });
-      await _voiceService.play(reply.audioBytes);
-    } on ApiException catch (error) {
-      if (mounted) setState(() => _errorMessage = error.message);
+      await _sendMessage(transcript, true);
     } catch (_) {
       if (mounted) {
-        setState(
-          () => _errorMessage = 'Advisor voice could not complete the request.',
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isSending = false);
-        _scrollToBottom();
+        setState(() => _errorMessage = 'Could not finish speech recognition.');
       }
     }
   }
 
-  Future<void> _sendMessage([String? suggestedMessage]) async {
+  Future<void> _sendMessage([
+    String? suggestedMessage,
+    bool speakReply = false,
+  ]) async {
     final message = (suggestedMessage ?? _messageController.text).trim();
     if (message.isEmpty || _isSending || _isRecording) return;
 
@@ -136,6 +133,22 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
       setState(() {
         _messages.add(AdvisorMessage.assistant(reply.response));
       });
+      if (speakReply) {
+        try {
+          final audioBytes = await _apiService.speakAdvisor(
+            text: reply.response,
+            language: _language,
+          );
+          await _voiceService.play(audioBytes);
+        } on Exception {
+          if (mounted) {
+            setState(
+              () => _errorMessage =
+                  'The answer is ready, but its audio could not play.',
+            );
+          }
+        }
+      }
     } on ApiException catch (error) {
       if (mounted) setState(() => _errorMessage = error.message);
     } catch (_) {
@@ -168,7 +181,7 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
-    if (_isRecording) unawaited(_voiceService.cancelRecording());
+    if (_isRecording) unawaited(_voiceService.cancelListening());
     if (_ownsVoiceService) unawaited(_voiceService.dispose());
     if (_ownsApiService) _apiService.close();
     super.dispose();
@@ -229,7 +242,7 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
                   children: [
                     Icon(Icons.mic, color: Colors.red),
                     SizedBox(width: 8),
-                    Text('Listening… Tap the microphone again to send'),
+                    Text('Listening… Speak, then tap stop to send'),
                   ],
                 ),
               ),

@@ -14,17 +14,22 @@ class FakeAdvisorVoiceService implements AdvisorVoiceService {
   int startCalls = 0;
   int stopCalls = 0;
   Uint8List? playedAudio;
+  String recognizedWords = 'What should I study next?';
 
   @override
-  Future<bool> startRecording() async {
+  Future<bool> startListening({
+    required String language,
+    required void Function(String words) onResult,
+  }) async {
     startCalls += 1;
+    onResult(recognizedWords);
     return true;
   }
 
   @override
-  Future<Uint8List?> stopRecording() async {
+  Future<String> stopListening() async {
     stopCalls += 1;
-    return Uint8List.fromList([1, 2, 3]);
+    return recognizedWords;
   }
 
   @override
@@ -33,7 +38,7 @@ class FakeAdvisorVoiceService implements AdvisorVoiceService {
   }
 
   @override
-  Future<void> cancelRecording() async {}
+  Future<void> cancelListening() async {}
 
   @override
   Future<void> dispose() async {}
@@ -92,7 +97,7 @@ void main() {
     service.close();
   });
 
-  testWidgets('records a voice question and plays the Advisor response', (
+  testWidgets('recognizes a voice question and plays the Advisor response', (
     tester,
   ) async {
     final voiceService = FakeAdvisorVoiceService();
@@ -100,23 +105,27 @@ void main() {
       baseUrl: 'https://api.example.test',
       client: MockClient((request) async {
         expect(request.method, 'POST');
+        if (request.url.path == '/advisor') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['student_id'], student.studentId);
+          expect(body['message'], 'What should I study next?');
+          return http.Response(
+            jsonEncode({
+              'intent': 'semester_planning',
+              'response': 'Start with your required major courses.',
+              'language': 'english',
+            }),
+            200,
+          );
+        }
+        expect(request.url.path, '/advisor/speak');
         expect(
-          request.url.toString(),
-          'https://api.example.test/advisor/voice',
+          request.url.queryParameters['text'],
+          'Start with your required major courses.',
         );
-        expect(
-          request.headers['content-type'],
-          startsWith('multipart/form-data'),
-        );
-        expect(request.body, contains('231027905'));
-        expect(request.body, contains('english'));
-        expect(request.body, contains('advisor_voice.wav'));
+        expect(request.url.queryParameters['language'], 'english');
         return http.Response(
           jsonEncode({
-            'student_id': student.studentId,
-            'transcript': 'What should I study next?',
-            'intent': 'semester_planning',
-            'response': 'Start with your required major courses.',
             'language': 'english',
             'audio_base64': base64Encode([4, 5, 6]),
           }),

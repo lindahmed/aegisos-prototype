@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -315,13 +316,13 @@ class ApiService {
     }
   }
 
-  Future<AdvisorVoiceReply> askAdvisorVoice({
-    required String studentId,
-    required List<int> audioBytes,
+  Future<Uint8List> speakAdvisor({
+    required String text,
     String language = 'english',
   }) async {
-    if (audioBytes.isEmpty) {
-      throw const ApiException('No voice recording was captured.');
+    final normalizedText = text.trim();
+    if (normalizedText.isEmpty) {
+      throw const ApiException('There is no Advisor response to speak.');
     }
 
     final parsedBaseUrl = Uri.parse(baseUrl);
@@ -329,29 +330,17 @@ class ApiService {
       pathSegments: [
         ...parsedBaseUrl.pathSegments.where((segment) => segment.isNotEmpty),
         'advisor',
-        'voice',
+        'speak',
       ],
+      queryParameters: {'text': normalizedText, 'language': language},
     );
-    final request = http.MultipartRequest('POST', uri)
-      ..fields['student_id'] = studentId
-      ..fields['language'] = language
-      ..files.add(
-        http.MultipartFile.fromBytes(
-          'audio',
-          audioBytes,
-          filename: 'advisor_voice.wav',
-        ),
-      );
 
     late http.Response response;
     try {
-      final streamed = await _client
-          .send(request)
-          .timeout(const Duration(seconds: 120));
-      response = await http.Response.fromStream(streamed);
+      response = await _client.post(uri).timeout(const Duration(seconds: 60));
     } on Exception {
       throw const ApiException(
-        'Could not reach Advisor voice. Check your connection and try again.',
+        'Could not load the Advisor voice response. Try again.',
       );
     }
 
@@ -359,22 +348,16 @@ class ApiService {
       throw ApiException(
         _errorDetail(
           response,
-          'Advisor voice could not complete the request (${response.statusCode}).',
+          'Advisor voice could not speak the response (${response.statusCode}).',
         ),
       );
     }
 
     try {
       final payload = jsonDecode(response.body) as Map<String, dynamic>;
-      return AdvisorVoiceReply(
-        intent: payload['intent'] as String,
-        response: payload['response'] as String,
-        language: payload['language'] as String? ?? language,
-        transcript: payload['transcript'] as String,
-        audioBytes: base64Decode(payload['audio_base64'] as String),
-      );
+      return base64Decode(payload['audio_base64'] as String);
     } on Exception {
-      throw const ApiException('Advisor voice returned an invalid response.');
+      throw const ApiException('Advisor voice returned invalid audio.');
     }
   }
 
