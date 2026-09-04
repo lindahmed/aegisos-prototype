@@ -1,4 +1,5 @@
 from __future__ import annotations
+#test
 
 from backend.advisor.knowledge_graph import AcademicKnowledgeGraph, InMemoryAcademicGraph
 from backend.progress.models import CourseTwin, StudentTwin
