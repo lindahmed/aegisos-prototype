@@ -1,7 +1,9 @@
-# AegisOS Advisor mobile app
+# UNI Track mobile app
 
-Flutter client for the AegisOS student experience. It validates a student ID with the
-AegisOS FastAPI backend and displays the student's profile and current courses from the
+**Guide. Track. Evolve.**
+
+Flutter client for the UNI Track student experience. It validates a student ID with the
+project FastAPI backend and displays the student's profile and current courses from the
 same PostgreSQL/Supabase database used by the rest of the project. Its Advisor AI chat
 supports career guidance, semester planning, course questions, and academic progress.
 

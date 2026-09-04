@@ -62,6 +62,8 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final brandInk = dark ? const Color(0xFFB8E5FF) : uniTrackNavy;
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
@@ -78,49 +80,44 @@ class _LoginScreenState extends State<LoginScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Center(
-                      child: Container(
-                        width: 78,
-                        height: 78,
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF38BCD5), Color(0xFF5965F2)],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(24),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF5965F2)
-                                  .withValues(alpha: 0.2),
-                              blurRadius: 24,
-                              offset: const Offset(0, 10),
-                            ),
-                          ],
-                        ),
-                        child: const Icon(
-                          Icons.shield_rounded,
-                          size: 42,
-                          color: Colors.white,
-                        ),
+                      child: Image.asset(
+                        'assets/branding/uni_track_mark.png',
+                        width: 116,
+                        height: 116,
+                        fit: BoxFit.contain,
+                        semanticLabel: 'UNI Track logo',
                       ),
                     ),
-                    const SizedBox(height: 28),
-                    Text(
-                      'Welcome to AegisOS',
+                    const SizedBox(height: 18),
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: 'UNI ',
+                            style: TextStyle(color: brandInk),
+                          ),
+                          TextSpan(
+                            text: 'TRACK',
+                            style: TextStyle(color: uniTrackBlue),
+                          ),
+                        ],
+                      ),
                       textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineMedium
+                      style: Theme.of(context).textTheme.headlineLarge
                           ?.copyWith(
-                            color: colors.onSurface,
-                            fontWeight: FontWeight.w900,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.4,
                           ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 5),
                     Text(
-                      'Your intelligent academic command center',
+                      'Guide. Track. Evolve.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: colors.onSurfaceVariant,
-                        fontSize: 16,
+                        color: brandInk,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.2,
                       ),
                     ),
                     const SizedBox(height: 34),
@@ -192,7 +189,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             child: FilledButton.icon(
                               onPressed: isLoading ? null : login,
                               style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF5965F2),
+                                backgroundColor: uniTrackBlue,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(17),
                                 ),
@@ -226,7 +223,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          'Secure connection to AegisOS',
+                          'Secure connection to UNI Track',
                           style: TextStyle(color: colors.onSurfaceVariant),
                         ),
                       ],

@@ -146,7 +146,7 @@ void main() {
         isA<ApiException>().having(
           (error) => error.message,
           'message',
-          'The configured address is not the AegisOS API. Check the API URL.',
+          'The configured address is not the UNI Track service. Check the API URL.',
         ),
       ),
     );
@@ -330,7 +330,10 @@ void main() {
     expect(report.courseCount, 1);
     expect(report.schedulePublished, isTrue);
     expect(report.courses.single.name, 'Database Systems');
-    expect(report.courses.single.schedule.single.timeLabel, '10:00 AM–11:00 AM');
+    expect(
+      report.courses.single.schedule.single.timeLabel,
+      '10:00 AM–11:00 AM',
+    );
     service.close();
   });
 

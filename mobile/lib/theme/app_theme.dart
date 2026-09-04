@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+const uniTrackNavy = Color(0xFF073B67);
+const uniTrackBlue = Color(0xFF168DD1);
+const uniTrackSky = Color(0xFF38B8E8);
+
 final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.light);
 
 bool get isDarkModeEnabled => appThemeMode.value == ThemeMode.dark;

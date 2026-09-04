@@ -15,14 +15,14 @@ The Android app should talk to the FastAPI backend, not directly to the database
 
 ---
 
-# For users who only want to install the Android app
+# Install the UNI Track Android app
 
 If you only want to use the app and do not want to edit the source code:
 
-1. Download `app-release.apk` from the project's GitHub **Releases** page.
+1. Download `uni-track-mobile-v1.1.0.apk` from the project's GitHub **Releases** page.
 2. Open the downloaded APK on an Android phone.
 3. If Android asks for permission to install apps from this source, enable **Install unknown apps** for the browser/file manager you used.
-4. Install and open the app.
+4. Install and open **UNI Track**.
 5. Keep the phone connected to the internet because the app uses the online backend.
 
 > The APK is for Android. iPhone/iOS distribution requires a separate iOS build and Apple signing process.

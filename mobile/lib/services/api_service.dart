@@ -105,7 +105,7 @@ class ApiService {
       );
     } on Exception {
       throw const ApiException(
-        'Could not reach AegisOS. Check that the backend is running and the API URL is correct.',
+        'Could not reach UNI Track. Check that the service is running and the API URL is correct.',
       );
     }
 
@@ -129,7 +129,7 @@ class ApiService {
         throw const ApiException('Student ID not found.');
       }
       throw const ApiException(
-        'The configured address is not the AegisOS API. Check the API URL.',
+        'The configured address is not the UNI Track service. Check the API URL.',
       );
     }
 

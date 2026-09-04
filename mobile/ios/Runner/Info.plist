@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Advisor Ai Mobile</string>
+	<string>UNI Track</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>advisor_ai_mobile</string>
+	<string>UNI Track</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -27,9 +27,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>AegisOS uses the microphone so you can speak with Advisor AI.</string>
+	<string>UNI Track uses the microphone so you can speak with Advisor AI.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>AegisOS converts your speech into an Advisor AI question.</string>
+	<string>UNI Track converts your speech into an Advisor AI question.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

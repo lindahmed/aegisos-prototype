@@ -4,11 +4,11 @@ import 'screens/login_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() {
-  runApp(const AdvisorAIApp());
+  runApp(const UniTrackApp());
 }
 
-class AdvisorAIApp extends StatelessWidget {
-  const AdvisorAIApp({super.key});
+class UniTrackApp extends StatelessWidget {
+  const UniTrackApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -16,7 +16,7 @@ class AdvisorAIApp extends StatelessWidget {
       valueListenable: appThemeMode,
       builder: (context, themeMode, _) => MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'AegisOS Advisor',
+        title: 'UNI Track',
         themeMode: themeMode,
         theme: _buildTheme(Brightness.light),
         darkTheme: _buildTheme(Brightness.dark),
@@ -28,7 +28,7 @@ class AdvisorAIApp extends StatelessWidget {
   ThemeData _buildTheme(Brightness brightness) {
     final dark = brightness == Brightness.dark;
     final colors = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF5965F2),
+      seedColor: uniTrackBlue,
       brightness: brightness,
       surface: dark ? const Color(0xFF151C2F) : Colors.white,
     );
@@ -42,8 +42,8 @@ class AdvisorAIApp extends StatelessWidget {
                   : Typography.material2021().black)
               .apply(fontFamily: 'Roboto'),
       scaffoldBackgroundColor: dark
-          ? const Color(0xFF091221)
-          : const Color(0xFFF4F7FB),
+          ? const Color(0xFF071421)
+          : const Color(0xFFF3F8FC),
       appBarTheme: AppBarTheme(
         backgroundColor: dark ? const Color(0xFF091221) : Colors.white,
         foregroundColor: colors.onSurface,

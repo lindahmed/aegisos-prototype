@@ -24,8 +24,8 @@ Color get _dashboardHeroEnd =>
     isDarkModeEnabled ? const Color(0xFF12313D) : const Color(0xFFE7F7FA);
 Color get _dashboardTrack =>
     isDarkModeEnabled ? const Color(0xFF2A3952) : const Color(0xFFE4EDF3);
-const _dashboardIndigo = Color(0xFF5965F2);
-const _dashboardCyan = Color(0xFF27BBD3);
+const _dashboardIndigo = uniTrackNavy;
+const _dashboardCyan = uniTrackBlue;
 const _dashboardCoral = Color(0xFFFF647C);
 
 class StudentHomeScreen extends StatefulWidget {
@@ -366,7 +366,8 @@ class _HomeDashboard extends StatelessWidget {
               key: const Key('open-courses'),
               icon: Icons.menu_book_outlined,
               color: _dashboardIndigo,
-              value: '${courses.isEmpty ? student.courses.length : courses.length}',
+              value:
+                  '${courses.isEmpty ? student.courses.length : courses.length}',
               title: 'Courses',
               subtitle: 'Tap for courses & schedule',
               onTap: onCourses,
@@ -942,7 +943,7 @@ class _AcademicsDashboard extends StatelessWidget {
               SizedBox(width: 14),
               Expanded(
                 child: Text(
-                  'Assessment marks and due weeks come directly from AegisOS.',
+                  'Assessment marks and due weeks come directly from UNI Track.',
                   style: TextStyle(color: _dashboardInk, height: 1.4),
                 ),
               ),
@@ -1253,7 +1254,7 @@ class _GradientAction extends StatelessWidget {
       child: Ink(
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [_dashboardIndigo, Color(0xFF8252E9)],
+            colors: [_dashboardIndigo, uniTrackBlue],
           ),
           borderRadius: BorderRadius.circular(22),
         ),
