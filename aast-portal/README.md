@@ -61,9 +61,8 @@ npm run preview  # preview the production build
 
 The portal grade pages now read and write through the existing FastAPI backend instead of local mock grade data.
 
-- Development backend base URL: `http://127.0.0.1:8001`
-- Production backend base URL: `https://web-production-3a6ad.up.railway.app`
-- Override with `VITE_API_BASE_URL` if the API runs elsewhere. The retired
+- Default backend base URL: `https://web-production-3a6ad.up.railway.app`
+- Override with `VITE_API_BASE_URL` to use a local backend or another API. The retired
   `backend-production-6069` Railway URL is automatically replaced in production.
 - Demo student portal login `220104417` is linked to academic student record `231027905` in the backend seed data.
 
