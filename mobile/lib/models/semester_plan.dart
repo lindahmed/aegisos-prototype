@@ -140,11 +140,10 @@ class GraduationOption {
         id: json['id']?.toString() ?? 'normal',
         title: json['title']?.toString() ?? 'Normal route',
         available: json['available'] as bool? ?? true,
-        maximumRegularCredits:
-            (json['maximum_regular_credits'] as num?)?.toInt(),
+        maximumRegularCredits: (json['maximum_regular_credits'] as num?)
+            ?.toInt(),
         summerCredits: (json['summer_credits'] as num?)?.toInt() ?? 0,
-        summerAfterSemester:
-            (json['summer_after_semester'] as num?)?.toInt(),
+        summerAfterSemester: (json['summer_after_semester'] as num?)?.toInt(),
         regularSemesters: (json['regular_semesters'] as num?)?.toInt() ?? 0,
         summerTerms: (json['summer_terms'] as num?)?.toInt() ?? 0,
         extensionTerms: (json['extension_terms'] as num?)?.toInt() ?? 0,
@@ -368,8 +367,7 @@ class SemesterPlan {
                   graduationChoices['fastest_option_id'] ??
                   'normal')
               .toString(),
-      graduationPolicyNote:
-          graduationChoices['policy_note']?.toString() ?? '',
+      graduationPolicyNote: graduationChoices['policy_note']?.toString() ?? '',
       graduationOptions: graduationOptions,
     );
   }

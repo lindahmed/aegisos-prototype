@@ -136,9 +136,8 @@ class _SemesterPlannerScreenState extends State<SemesterPlannerScreen> {
       final message = plan.halfLoad
           ? 'Half-load limit: GPA below 2.0 allows up to 9 credits, usually 3 courses.'
           : 'This selection would exceed the ${plan.maximumCreditHours}-credit maximum.';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
       return;
     }
     setState(() {
@@ -305,11 +304,11 @@ class _SemesterPlannerScreenState extends State<SemesterPlannerScreen> {
           )
         else
           ...selectedRoute.terms.map(
-          (term) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _PathTermCard(term: term),
+            (term) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _PathTermCard(term: term),
+            ),
           ),
-        ),
         const SizedBox(height: 4),
         Text(
           plan.graduationPolicyNote.isEmpty
@@ -1049,7 +1048,11 @@ class _GraduationOptionCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 option.note,
-                style: TextStyle(color: appScreenMuted, fontSize: 12, height: 1.4),
+                style: TextStyle(
+                  color: appScreenMuted,
+                  fontSize: 12,
+                  height: 1.4,
+                ),
               ),
             ],
           ),
@@ -1072,12 +1075,13 @@ class _PathTermCard extends StatelessWidget {
     clipBehavior: Clip.antiAlias,
     child: ExpansionTile(
       leading: CircleAvatar(
-        backgroundColor: (term.termType == 'summer'
-                ? _plannerAmber
-                : term.termType == 'extension'
-                ? _plannerCyan
-                : _plannerIndigo)
-            .withValues(alpha: 0.12),
+        backgroundColor:
+            (term.termType == 'summer'
+                    ? _plannerAmber
+                    : term.termType == 'extension'
+                    ? _plannerCyan
+                    : _plannerIndigo)
+                .withValues(alpha: 0.12),
         foregroundColor: term.termType == 'summer'
             ? _plannerAmber
             : term.termType == 'extension'
