@@ -6,6 +6,7 @@ import {
   Users,
   ClipboardCheck,
   GraduationCap,
+  GraduationCap as Crest,
   FolderOpen,
   CalendarDays,
   CalendarRange,
@@ -29,7 +30,7 @@ import {
   UserCog,
   KeyRound,
   Settings,
-  GraduationCap as Crest,
+  ShieldAlert,
 } from 'lucide-react'
 import { staff } from '@staff/data/mockData'
 
@@ -73,6 +74,7 @@ const navGroups = [
       { to: '/students', label: 'Student Information', icon: UserSearch },
       { to: '/students', label: 'Academic Record', icon: FileText },
       { to: '/requests?origin=student', label: 'Student Requests', icon: MessageSquareWarning },
+      { to: '/case-management', label: 'Case Management', icon: ShieldAlert },
     ],
   },
   {

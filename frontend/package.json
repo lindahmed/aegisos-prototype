@@ -1,7 +1,7 @@
 {
-  "name": "aegisos-edu-launcher",
+  "name": "uni-track-desktop",
   "version": "1.0.0",
-  "description": "Student-facing launcher for the AegisOS EDU prototype",
+  "description": "Student-facing launcher for the Uni Track prototype",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -9,7 +9,7 @@
     "check": "node --check main.js && node --check preload.js && node --check renderer.js"
   },
   "keywords": [],
-  "author": "AegisOS EDU team",
+  "author": "Uni Track team",
   "license": "ISC",
   "type": "commonjs",
   "engines": {

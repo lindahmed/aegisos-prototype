@@ -5,19 +5,20 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AUTOSTART_FILE="$HOME/.config/autostart/aegisos.desktop"
-DESKTOP_FILE="$HOME/Desktop/AegisOS.desktop"
+DESKTOP_FILE="$HOME/Desktop/Uni Track.desktop"
 WALLPAPER="$HOME/.local/share/backgrounds/aegisos-wallpaper.svg"
 
 sudo apt update
 sudo apt install -y xfce4 xfce4-goodies
 
 install -Dm644 "$SCRIPT_DIR/assets/aegisos-wallpaper.svg" "$WALLPAPER"
-install -Dm644 "$SCRIPT_DIR/assets/aegisos-logo.svg" "$HOME/.local/share/icons/aegisos-logo.svg"
+install -Dm644 "$SCRIPT_DIR/assets/unitrack-logo.jpeg" "$HOME/.local/share/backgrounds/unitrack-logo.jpeg"
+install -Dm644 "$SCRIPT_DIR/assets/unitrack-logo.jpeg" "$HOME/.local/share/icons/unitrack-logo.jpeg"
 
 render_launcher() {
     local destination="$1"
     mkdir -p "$(dirname "$destination")"
-    sed "s|__START_SCRIPT__|$PROJECT_ROOT/desktop/start-aegis.sh|g; s|__ICON__|$HOME/.local/share/icons/aegisos-logo.svg|g" \
+    sed "s|__START_SCRIPT__|$PROJECT_ROOT/desktop/start-aegis.sh|g; s|__ICON__|$HOME/.local/share/icons/unitrack-logo.jpeg|g" \
         "$SCRIPT_DIR/templates/aegisos.desktop.in" >"$destination"
     chmod +x "$destination"
 }
@@ -38,6 +39,6 @@ else
     echo "Log into an Xfce Session to apply the wallpaper automatically."
 fi
 
-echo "AegisOS desktop launcher installed at: $DESKTOP_FILE"
-echo "AegisOS XFCE autostart installed at: $AUTOSTART_FILE"
+echo "Uni Track desktop launcher installed at: $DESKTOP_FILE"
+echo "Uni Track XFCE autostart installed at: $AUTOSTART_FILE"
 echo "Log out and choose 'Xfce Session', or run desktop/start-aegis.sh now."

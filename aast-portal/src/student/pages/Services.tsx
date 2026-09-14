@@ -54,7 +54,7 @@ export default function Services() {
                 <h2 className="font-display text-lg font-semibold text-text-primary">{group.category}</h2>
                 <span className="text-xs text-text-muted">{group.items.length} services</span>
               </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
                 {group.items.map((s) => (
                   <ServiceCard key={s.id} service={s} />
                 ))}

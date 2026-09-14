@@ -76,8 +76,16 @@ export interface ExamRecord {
 export interface Announcement {
   id: string
   title: string
-  category: 'Academic' | 'Financial' | 'Events' | 'General'
-  date: string
+  type: 'Cancelled' | 'Rescheduled' | 'Location Changed' | 'General'
+  publishedAt: string
+  courseName?: string
+  instructor?: string
+  originalDate?: string
+  originalTime?: string
+  newDate?: string
+  newTime?: string
+  originalLocation?: string
+  newLocation?: string
   body: string
   read: boolean
 }
@@ -97,6 +105,7 @@ export interface Invoice {
   semester: string
   amount: number
   paid: number
+  invoiceDate: string
   dueDate: string
   status: 'Paid' | 'Partially Paid' | 'Unpaid' | 'Overdue'
 }

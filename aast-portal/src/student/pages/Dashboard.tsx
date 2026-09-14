@@ -1,9 +1,5 @@
 import { Link } from 'react-router-dom'
 import {
-  GraduationCap,
-  BookOpenCheck,
-  Wallet,
-  TrendingUp,
   Clock,
   MapPin,
   ClipboardList,
@@ -15,9 +11,8 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@student/context/AuthContext'
 import { useStudentAcademics } from '@student/context/StudentAcademicsContext'
-import { exams, announcements, scheduleSlots, invoices } from '@student/data/mockData'
+import { exams, announcements, scheduleSlots } from '@student/data/mockData'
 import PageHeader from '@student/components/layout/PageHeader'
-import StatCard from '@student/components/ui/StatCard'
 import Card from '@student/components/ui/Card'
 import StatusBadge from '@student/components/ui/StatusBadge'
 import EmptyState from '@student/components/ui/EmptyState'
@@ -39,27 +34,23 @@ export default function Dashboard() {
   const { academics, loading, error } = useStudentAcademics()
 
   const upcomingExams = exams.filter((e) => e.status === 'Upcoming').slice(0, 3)
-  const unpaidInvoice = invoices.find((i) => i.status === 'Unpaid' || i.status === 'Overdue')
-  const progressPct = student ? Math.round((student.courses.length / 40) * 100) : 0
 
   const today = new Date()
   const todayLabel = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][today.getDay()]
   const todaysClasses = scheduleSlots.filter((s) => s.day === todayLabel)
 
   const displayName = student?.name ?? 'Student'
-  const displayGpa = student?.gpa ?? 0
   const displayProgram = student?.major ?? 'Program'
   const registeredCourses = academics?.courses ?? []
-  const totalCredits = registeredCourses.length * 3
+  const recentAnnouncements = [...announcements]
+    .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+    .slice(0, 3)
 
   if (loading) {
     return (
       <div>
         <PageHeader title="Welcome back" description="Loading your academic data…" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton />
-        </div>
-        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="lg:col-span-2 space-y-6">
             <Card padded={false}><TableSkeleton rows={3} cols={3} /></Card>
             <Card padded={false}><TableSkeleton rows={3} cols={3} /></Card>
@@ -100,39 +91,7 @@ export default function Dashboard() {
         }
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Current GPA"
-          value={displayGpa.toFixed(2)}
-          sublabel={`Major: ${displayProgram}`}
-          icon={<GraduationCap className="h-5 w-5" />}
-          accent="teal"
-          trend={{ value: 'Live from academic database', positive: true }}
-        />
-        <StatCard
-          label="Registered Credits"
-          value={`${totalCredits} CH`}
-          sublabel={`${registeredCourses.length} courses this term`}
-          icon={<BookOpenCheck className="h-5 w-5" />}
-          accent="ink"
-        />
-        <StatCard
-          label="Degree Progress"
-          value={`${progressPct}%`}
-          sublabel={`${student?.courses.length ?? 0} / 40 courses`}
-          icon={<TrendingUp className="h-5 w-5" />}
-          accent="teal"
-        />
-        <StatCard
-          label="Outstanding Balance"
-          value={unpaidInvoice ? `EGP ${unpaidInvoice.amount.toLocaleString()}` : 'EGP 0'}
-          sublabel={unpaidInvoice ? `Due ${new Date(unpaidInvoice.dueDate).toLocaleDateString()}` : 'All paid'}
-          icon={<Wallet className="h-5 w-5" />}
-          accent="coral"
-        />
-      </div>
-
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Card padded={false}>
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
@@ -228,19 +187,53 @@ export default function Dashboard() {
                 All <ArrowRight className="h-3 w-3" />
               </Link>
             </div>
-            <div className="divide-y divide-border">
-              {announcements.slice(0, 3).map((a) => (
-                <div key={a.id} className="px-5 py-3.5">
-                  <div className="flex items-center gap-2">
-                    {!a.read && <span className="h-1.5 w-1.5 rounded-full bg-coral-500" />}
-                    <p className="text-sm font-medium text-text-primary">{a.title}</p>
+            {recentAnnouncements.length > 0 ? (
+              <div className="divide-y divide-border">
+                {recentAnnouncements.map((announcement) => (
+                  <div key={announcement.id} className="px-5 py-3.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          {!announcement.read && (
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-coral-500" />
+                          )}
+                          <p className="text-sm font-medium text-text-primary">{announcement.title}</p>
+                        </div>
+                        {announcement.courseName && (
+                          <p className="mt-0.5 truncate text-xs text-text-secondary">
+                            {announcement.courseName}
+                          </p>
+                        )}
+                      </div>
+                      <StatusBadge
+                        label={announcement.type}
+                        tone={
+                          announcement.type === 'Cancelled'
+                            ? 'error'
+                            : announcement.type === 'Location Changed'
+                              ? 'warning'
+                              : announcement.type === 'Rescheduled'
+                                ? 'info'
+                                : 'neutral'
+                        }
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-text-muted">
+                      {new Date(announcement.publishedAt).toLocaleString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </p>
                   </div>
-                  <p className="mt-0.5 text-xs text-text-muted">
-                    {new Date(a.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                  </p>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <p className="px-5 py-8 text-center text-sm text-text-secondary">
+                No new announcements.
+              </p>
+            )}
           </Card>
 
           <Card>

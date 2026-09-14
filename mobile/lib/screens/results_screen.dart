@@ -357,7 +357,7 @@ class _GradeCard extends StatelessWidget {
             ),
           ),
           Divider(height: 1, color: _border),
-          IntrinsicHeight(
+                    IntrinsicHeight(
             child: Row(
               children: [
                 Expanded(
@@ -384,38 +384,20 @@ class _GradeCard extends StatelessWidget {
               ],
             ),
           ),
-          Container(
-            width: double.infinity,
-            color: _summarySurface,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            child: Text(
-              _detailLine(record),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: _muted,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
         ],
       ),
     );
   }
+}
 
-  static String _detailLine(StudentGradeRecord record) {
+   static String _detailLine(StudentGradeRecord record) {
     if (record.gradeSource == 'transcript') {
       return 'Stored transcript grade · component marks are not available';
     }
     if (record.gradeSource == 'none') {
       return 'No grade has been posted for this course yet';
     }
-    if (record.letterGrade == 'U') {
-      return 'Final exam not posted · current marks are provisional';
-    }
-    final finalMark = record.finalExamMark?.toStringAsFixed(2) ?? '—';
-    final total = record.totalScore?.toStringAsFixed(2) ?? '—';
-    return 'Final exam $finalMark / 40   ·   Total $total / 100';
+    return 'Final grade posted';
   }
 }
 

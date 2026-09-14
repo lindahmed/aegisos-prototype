@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8">
     <meta
@@ -7,15 +7,19 @@
       content="default-src 'self'; connect-src http://127.0.0.1:8000 https://backend-production-6069.up.railway.app; img-src 'self' data:; media-src 'self' data: blob:; style-src 'self'; script-src 'self'"
     >
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AegisOS EDU</title>
+    <title>Uni Track</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <main class="app-shell">
       <aside class="brand-panel">
-        <img class="brand-mark" src="../desktop/assets/aegisos-logo.svg" alt="">
+        <button class="theme-toggle brand-theme-toggle" type="button" data-theme-toggle>
+          <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">&#9728;</span>
+          <span data-theme-label>Light mode</span>
+        </button>
+        <img class="brand-mark" src="assets/unitrack-logo.jpeg" alt="Uni Track logo">
         <p class="eyebrow">Personal student environment</p>
-        <h1>AegisOS <span>EDU</span></h1>
+        <h1>Uni Track</h1>
         <p class="brand-copy">
           One focused place for your courses, local workspaces, development tools, and AI advising.
         </p>
@@ -55,6 +59,10 @@
               <h2 id="welcome-title">Welcome</h2>
             </div>
             <div class="header-actions">
+              <button class="theme-toggle" type="button" data-theme-toggle>
+                <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">&#9728;</span>
+                <span data-theme-label>Light mode</span>
+              </button>
               <div class="notif-wrap">
                 <button id="notif-button" class="icon-button" type="button" aria-label="Notifications" aria-expanded="false">
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -97,7 +105,7 @@
             </button>
           </nav>
 
-          <section id="workspace-panel">
+          <section id="workspace-panel" class="dashboard-page workspace-panel">
             <section class="course-section" aria-labelledby="courses-title">
               <div class="section-heading">
                 <div>
@@ -122,7 +130,10 @@
             <p id="action-status" class="message" role="status" aria-live="polite"></p>
           </section>
 
-          <section id="advisor-panel" class="advisor-panel" hidden>
+          <section id="advisor-panel" class="dashboard-page advisor-panel" hidden>
+            <button class="page-back-button" type="button" data-dashboard-home>
+              <span aria-hidden="true">&#8592;</span> Back to dashboard
+            </button>
             <div class="advisor-heading">
               <div>
                 <p class="eyebrow">LangGraph + Gemini</p>
@@ -160,7 +171,10 @@
             <p id="advisor-status" class="message" role="status" aria-live="polite"></p>
           </section>
 
-          <section id="progress-panel" class="progress-panel" hidden>
+          <section id="progress-panel" class="dashboard-page progress-panel" hidden>
+            <button class="page-back-button" type="button" data-dashboard-home>
+              <span aria-hidden="true">&#8592;</span> Back to dashboard
+            </button>
             <div class="advisor-heading">
               <div>
                 <p class="eyebrow">Student Digital Twin</p>
@@ -176,7 +190,10 @@
             <p id="progress-status" class="message" role="status" aria-live="polite"></p>
           </section>
 
-          <section id="calendar-panel" class="calendar-panel" hidden>
+          <section id="calendar-panel" class="dashboard-page calendar-panel" hidden>
+            <button class="page-back-button" type="button" data-dashboard-home>
+              <span aria-hidden="true">&#8592;</span> Back to dashboard
+            </button>
             <div class="calendar-heading">
               <div>
                 <p class="eyebrow">Academic + personal planner</p>

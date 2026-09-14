@@ -1,4 +1,4 @@
-name: advisor_ai_mobile
+name: uni_track_mobile
 description: "UNI Track student guidance and academic progress mobile app."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.

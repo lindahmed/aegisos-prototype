@@ -1,5 +1,5 @@
-import 'package:advisor_ai_mobile/main.dart';
-import 'package:advisor_ai_mobile/theme/app_theme.dart';
+import 'package:uni_track_mobile/main.dart';
+import 'package:uni_track_mobile/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

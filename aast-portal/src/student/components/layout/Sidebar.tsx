@@ -6,12 +6,13 @@ import {
   BookOpen,
   CalendarDays,
   GraduationCap,
+  GraduationCap as Crest,
   FileClock,
   Wallet,
   Megaphone,
   FileText,
   LayoutGrid,
-  GraduationCap as Crest,
+  Contact,
 } from 'lucide-react'
 import { useAuth } from '@student/context/AuthContext'
 
@@ -31,6 +32,7 @@ const navGroups = [
       { to: '/schedule', label: 'Calendar', icon: CalendarDays },
       { to: '/grades', label: 'Grades', icon: GraduationCap },
       { to: '/exams', label: 'Exams', icon: FileClock },
+      { to: '/advisors', label: 'Advisors', icon: Contact },
     ],
   },
   {

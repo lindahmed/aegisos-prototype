@@ -17,6 +17,7 @@ import Notifications from '@student/pages/Notifications'
 import Documents from '@student/pages/Documents'
 import Services from '@student/pages/Services'
 import ServiceDetail from '@student/pages/ServiceDetail'
+import Advisors from '@student/pages/Advisors'
 
 export default function StudentRoutes() {
   return (
@@ -33,6 +34,7 @@ export default function StudentRoutes() {
               <Route path="/schedule" element={<Schedule />} />
               <Route path="/grades" element={<Grades />} />
               <Route path="/exams" element={<Exams />} />
+              <Route path="/advisors" element={<Advisors />} />
               <Route path="/fees" element={<Fees />} />
               <Route path="/announcements" element={<Announcements />} />
               <Route path="/notifications" element={<Notifications />} />

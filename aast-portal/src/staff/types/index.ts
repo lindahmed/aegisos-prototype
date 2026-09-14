@@ -157,3 +157,35 @@ export interface StaffService {
   fields?: ServiceFormField[]
   records?: ServiceRecord[]
 }
+
+/* ---------------------------------------------------------------------- */
+/* Advisor / Staff Case Management                                         */
+/* ---------------------------------------------------------------------- */
+
+export type InterventionStatus = 'Open' | 'Follow-up Scheduled' | 'Resolved'
+export type InterventionOutcome = 'Improved' | 'No Change' | 'Declined' | 'Pending'
+
+export interface Intervention {
+  id: string
+  studentId: string
+  note: string
+  createdBy: string
+  createdDate: string
+  followUpDate: string
+  assignedAdvisor: string
+  status: InterventionStatus
+  /** Snapshot of the student's metrics at the time this intervention was logged, used to measure impact later. */
+  baselineAttendancePct: number
+  baselineAvgScore: number
+}
+
+export type TimelineEventKind = 'grade' | 'attendance' | 'request' | 'intervention'
+
+export interface TimelineEvent {
+  id: string
+  date: string
+  kind: TimelineEventKind
+  title: string
+  description: string
+  tone: 'success' | 'warning' | 'error' | 'info' | 'neutral'
+}

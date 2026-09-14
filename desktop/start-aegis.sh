@@ -21,18 +21,18 @@ if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
 fi
 
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-    echo "AegisOS requires Node.js 22 and npm. Run vm/setup.sh first." >&2
+    echo "Uni Track requires Node.js 22 and npm. Run vm/setup.sh first." >&2
     exit 1
 fi
 
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 if [[ "$NODE_MAJOR" != "22" ]]; then
-    echo "AegisOS requires Node.js 22; found $(node --version). Run vm/setup.sh first." >&2
+    echo "Uni Track requires Node.js 22; found $(node --version). Run vm/setup.sh first." >&2
     exit 1
 fi
 
 if [[ ! -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
-    echo "AegisOS Python environment is missing. Run vm/setup.sh first." >&2
+    echo "Uni Track Python environment is missing. Run vm/setup.sh first." >&2
     exit 1
 fi
 
@@ -70,7 +70,7 @@ if ! curl --silent --fail "$API_URL/health" >/dev/null 2>&1; then
             break
         fi
         if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
-            echo "AegisOS backend failed to start. See $BACKEND_LOG" >&2
+            echo "Uni Track backend failed to start. See $BACKEND_LOG" >&2
             exit 1
         fi
         sleep 0.5
@@ -78,10 +78,10 @@ if ! curl --silent --fail "$API_URL/health" >/dev/null 2>&1; then
 fi
 
 if ! curl --silent --fail "$API_URL/health" >/dev/null 2>&1; then
-    echo "AegisOS backend did not become ready. See $BACKEND_LOG" >&2
+    echo "Uni Track backend did not become ready. See $BACKEND_LOG" >&2
     exit 1
 fi
 
-echo "Starting AegisOS EDU..."
+echo "Starting Uni Track EDU..."
 cd "$FRONTEND_DIR"
 AEGIS_API_URL="$API_URL" npm start

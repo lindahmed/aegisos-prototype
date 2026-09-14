@@ -1,5 +1,43 @@
 const apiBaseUrl = window.aegis.apiBaseUrl;
 const academicApiBaseUrl = window.aegis.academicApiBaseUrl || apiBaseUrl;
+const themeToggleButtons = document.querySelectorAll('[data-theme-toggle]');
+const dashboardHomeButtons = document.querySelectorAll('[data-dashboard-home]');
+
+const THEME_STORAGE_KEY = 'aegisos-theme';
+
+
+function preferredTheme() {
+  const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+  if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme;
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+
+function applyTheme(theme, persist = false) {
+  const isLight = theme === 'light';
+  document.documentElement.dataset.theme = isLight ? 'light' : 'dark';
+  if (persist) localStorage.setItem(THEME_STORAGE_KEY, isLight ? 'light' : 'dark');
+
+  for (const button of themeToggleButtons) {
+    const nextTheme = isLight ? 'dark' : 'light';
+    button.setAttribute('aria-label', `Switch to ${nextTheme} mode`);
+    button.setAttribute('title', `Switch to ${nextTheme} mode`);
+    button.querySelector('[data-theme-icon]').textContent = isLight ? '\u263E' : '\u2600';
+    button.querySelector('[data-theme-label]').textContent =
+      `${nextTheme[0].toUpperCase()}${nextTheme.slice(1)} mode`;
+  }
+}
+
+
+applyTheme(preferredTheme());
+
+for (const button of themeToggleButtons) {
+  button.addEventListener('click', () => {
+    const nextTheme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    applyTheme(nextTheme, true);
+  });
+}
+
 
 const loginView = document.querySelector('#login-view');
 const dashboardView = document.querySelector('#dashboard-view');
@@ -61,7 +99,7 @@ async function apiRequest(path, options = {}) {
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     });
   } catch (_error) {
-    throw new Error('AegisOS backend is unavailable. Start the app with desktop/start-aegis.sh.');
+    throw new Error('Uni Track backend is unavailable. Start the app with desktop/start-aegis.sh.');
   }
 
   const payload = await response.json().catch(() => ({}));
@@ -128,6 +166,7 @@ function showDashboardSection(section) {
   advisorPanel.hidden = !showAdvisor;
   progressPanel.hidden = !showProgress;
   calendarPanel.hidden = !showCalendar;
+  dashboardView.dataset.section = section;
   workspaceTab.setAttribute('aria-pressed', String(!showAdvisor && !showProgress && !showCalendar));
   advisorTab.setAttribute('aria-pressed', String(showAdvisor));
   progressTab.setAttribute('aria-pressed', String(showProgress));
@@ -786,6 +825,7 @@ function renderStudent(student) {
 
   loginView.hidden = true;
   dashboardView.hidden = false;
+  document.body.classList.add('is-authenticated');
   showDashboardSection('workspace');
   renderCalendar();
   resetAdvisor();
@@ -859,6 +899,10 @@ workspaceTab.addEventListener('click', () => showDashboardSection('workspace'));
 advisorTab.addEventListener('click', () => showDashboardSection('advisor'));
 progressTab.addEventListener('click', () => showDashboardSection('progress'));
 calendarTab.addEventListener('click', () => showDashboardSection('calendar'));
+
+for (const button of dashboardHomeButtons) {
+  button.addEventListener('click', () => showDashboardSection('workspace'));
+}
 
 document.querySelector('#calendar-previous-button').addEventListener('click', () => {
   calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1);
@@ -1142,6 +1186,7 @@ document.querySelector('#sign-out-button').addEventListener('click', () => {
   advisorMessages.replaceChildren();
   dashboardView.hidden = true;
   loginView.hidden = false;
+  document.body.classList.remove('is-authenticated');
   setMessage(actionStatus, '');
   setMessage(advisorStatus, '');
   studentIdInput.focus();

@@ -1,11 +1,14 @@
 import { Routes, Route } from 'react-router-dom'
 import AppShell from '@staff/components/layout/AppShell'
 import { ToastProvider } from '@staff/components/ui/Toast'
+import { CaseManagementProvider } from '@staff/context/CaseManagementContext'
 import Dashboard from '@staff/pages/Dashboard'
 import MyCourses from '@staff/pages/MyCourses'
 import CourseDetail from '@staff/pages/CourseDetail'
 import StudentList from '@staff/pages/StudentList'
 import StudentDetail from '@staff/pages/StudentDetail'
+import CaseManagement from '@staff/pages/CaseManagement'
+import CaseDetail from '@staff/pages/CaseDetail'
 import Attendance from '@staff/pages/Attendance'
 import Grades from '@staff/pages/Grades'
 import Schedule from '@staff/pages/Schedule'
@@ -25,6 +28,7 @@ import Settings from '@staff/pages/Settings'
 export default function StaffRoutes() {
   return (
     <ToastProvider>
+      <CaseManagementProvider>
       <Routes>
       <Route
         element={<AppShell />}
@@ -34,6 +38,8 @@ export default function StaffRoutes() {
         <Route path="/courses/:id" element={<CourseDetail />} />
         <Route path="/students" element={<StudentList />} />
         <Route path="/students/:id" element={<StudentDetail />} />
+        <Route path="/case-management" element={<CaseManagement />} />
+        <Route path="/case-management/:id" element={<CaseDetail />} />
         <Route path="/attendance" element={<Attendance />} />
         <Route path="/grades" element={<Grades />} />
         <Route path="/schedule" element={<Schedule />} />
@@ -51,6 +57,7 @@ export default function StaffRoutes() {
         <Route path="/settings" element={<Settings />} />
       </Route>
       </Routes>
+      </CaseManagementProvider>
     </ToastProvider>
   )
 }

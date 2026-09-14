@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=AegisOS EDU
-Comment=Open the personalized AegisOS student workspace
+Name=Uni Track
+Comment=Open the personalized Uni Track student workspace
 Exec=__START_SCRIPT__
 Icon=__ICON__
 Terminal=false

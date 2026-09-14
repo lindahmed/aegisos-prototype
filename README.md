@@ -1,6 +1,6 @@
-# AegisOS
+# Uni Track
 
-AegisOS is a multi-client educational platform with a shared backend and database. The repository contains the FastAPI backend, PostgreSQL/Supabase data layer, Flutter mobile app, web/student portal, desktop components, and supporting scripts.
+Uni Track is a multi-client educational platform with a shared backend and database. The repository contains the FastAPI backend, PostgreSQL/Supabase data layer, Flutter mobile app, web/student portal, desktop components, and supporting scripts.
 
 ## Architecture
 

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { FileText, Link2, Presentation, Clock, MapPin, Users, ArrowLeft, BookOpen } from 'lucide-react'
+import { FileText, Link2, Presentation, Clock, MapPin, Users, ArrowLeft, BookOpen, Video, ExternalLink, Library } from 'lucide-react'
 import { useStudentAcademics } from '@student/context/StudentAcademicsContext'
+import { getCourseResources } from '@student/data/courseResourcesData'
 import PageHeader from '@student/components/layout/PageHeader'
 import Card from '@student/components/ui/Card'
 import StatusBadge from '@student/components/ui/StatusBadge'
@@ -11,7 +12,7 @@ import { CardSkeleton } from '@student/components/ui/LoadingState'
 
 const materialIcon: Record<string, React.ElementType> = { PDF: FileText, Slides: Presentation, Link: Link2 }
 
-const tabs = ['Overview', 'Materials', 'Assignments', 'Lectures']
+const tabs = ['Overview', 'Materials', 'Assignments', 'Lectures', 'Resources']
 
 export default function CourseDetail() {
   const { id } = useParams()
@@ -19,6 +20,7 @@ export default function CourseDetail() {
   const { academics, loading } = useStudentAcademics()
 
   const course = useMemo(() => academics?.courses.find((c) => c.course_id === id), [academics, id])
+  const resources = useMemo(() => getCourseResources(id ?? ''), [id])
 
   if (loading) {
     return (
@@ -162,6 +164,41 @@ export default function CourseDetail() {
                     <EmptyState icon={<FileText className="h-5 w-5" />} title="No lectures posted yet" />
                   )}
                 </>
+              )}
+
+              {activeTab === 'Resources' && (
+                <div className="space-y-2">
+                  <p className="mb-1 text-xs text-text-muted">
+                    Suggested books and videos to help with this course. These are general study aids, not official course materials.
+                  </p>
+                  <div className="divide-y divide-border">
+                    {resources.map((r, i) => {
+                      const Icon = r.type === 'book' ? Library : Video
+                      const content = (
+                        <div className="flex items-start gap-3 py-3 first:pt-0">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-teal-50 text-teal-600">
+                            <Icon className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
+                              {r.title}
+                              {r.url && <ExternalLink className="h-3.5 w-3.5 shrink-0 text-text-muted" />}
+                            </p>
+                            {r.author && <p className="text-xs text-text-secondary">{r.author}</p>}
+                            {r.note && <p className="mt-0.5 text-xs text-text-muted">{r.note}</p>}
+                          </div>
+                        </div>
+                      )
+                      return r.url ? (
+                        <a key={i} href={r.url} target="_blank" rel="noreferrer" className="block rounded-md hover:bg-surface-sunk">
+                          {content}
+                        </a>
+                      ) : (
+                        <div key={i}>{content}</div>
+                      )
+                    })}
+                  </div>
+                </div>
               )}
             </div>
           </Card>

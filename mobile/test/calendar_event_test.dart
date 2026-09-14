@@ -1,4 +1,4 @@
-import 'package:advisor_ai_mobile/models/calendar_event.dart';
+import 'package:uni_track_mobile/models/calendar_event.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

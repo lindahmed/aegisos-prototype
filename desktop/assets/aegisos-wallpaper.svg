@@ -1,15 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title">
-  <title id="title">AegisOS EDU desktop wallpaper</title>
+  <title id="title">Uni Track desktop wallpaper</title>
   <defs>
     <radialGradient id="glow" cx="50%" cy="44%" r="64%">
       <stop offset="0" stop-color="#183c70"/>
       <stop offset="0.48" stop-color="#101b35"/>
       <stop offset="1" stop-color="#070b16"/>
     </radialGradient>
-    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#7dd3fc"/>
-      <stop offset="1" stop-color="#2563eb"/>
-    </linearGradient>
   </defs>
   <rect width="1920" height="1080" fill="url(#glow)"/>
   <g opacity="0.16" stroke="#7dd3fc" fill="none">
@@ -17,8 +13,7 @@
     <circle cx="960" cy="490" r="420"/>
     <path d="M0 820 520 520l440 310 460-390 500 310"/>
   </g>
-  <path d="M960 236 1110 290v110c0 100-57 168-150 205-93-37-150-105-150-205V290z" fill="url(#mark)"/>
-  <path d="m960 310 84 202h-49l-17-44h-76l-17 44h-49l84-202zm0 62-27 70h54z" fill="#f8fafc"/>
-  <text x="960" y="715" text-anchor="middle" fill="#f8fafc" font-family="sans-serif" font-size="72" font-weight="700" letter-spacing="8">AEGISOS EDU</text>
+  <image href="unitrack-logo.jpeg" x="710" y="180" width="500" height="389" preserveAspectRatio="xMidYMid meet"/>
+  <text x="960" y="715" text-anchor="middle" fill="#f8fafc" font-family="sans-serif" font-size="72" font-weight="700" letter-spacing="8">UNI TRACK</text>
   <text x="960" y="770" text-anchor="middle" fill="#bae6fd" font-family="sans-serif" font-size="28" letter-spacing="4">LEARN • BUILD • ADVANCE</text>
 </svg>

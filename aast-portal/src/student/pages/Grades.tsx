@@ -1,15 +1,48 @@
 import { useEffect, useState } from 'react'
-import { GraduationCap, TrendingUp, Award, RefreshCw, AlertTriangle } from 'lucide-react'
-import { getPortalStudentGrades, type PortalStudentGradeReport } from '@/lib/portalGrades'
+import { GraduationCap, TrendingUp, Award, RefreshCw, AlertTriangle, Download } from 'lucide-react'
+import { getPortalStudentGrades, type PortalStudentGradeReport, type PortalStudentGradeRecord } from '@/lib/portalGrades'
 import { useAuth } from '@student/context/AuthContext'
 import PageHeader from '@student/components/layout/PageHeader'
 import Card from '@student/components/ui/Card'
 import GradeTable from '@student/components/ui/GradeTable'
 import Dropdown from '@student/components/ui/Dropdown'
+import Button from '@student/components/ui/Button'
 import StatCard from '@student/components/ui/StatCard'
 import StatusBadge from '@student/components/ui/StatusBadge'
 import EmptyState from '@student/components/ui/EmptyState'
 import { CardSkeleton, TableSkeleton } from '@student/components/ui/LoadingState'
+
+const CSV_COLUMNS = [
+  { header: 'Course Code', get: (r: PortalStudentGradeRecord) => r.course_code },
+  { header: 'Course Name', get: (r: PortalStudentGradeRecord) => r.course_name },
+  { header: 'Coursework Mark', get: (r: PortalStudentGradeRecord) => r.coursework_mark },
+  { header: 'Week 7 Exam', get: (r: PortalStudentGradeRecord) => r.week7_exam_mark },
+  { header: 'Week 12 Exam', get: (r: PortalStudentGradeRecord) => r.week12_exam_mark },
+  { header: 'Final Exam', get: (r: PortalStudentGradeRecord) => r.final_exam_mark },
+  { header: 'Total Score', get: (r: PortalStudentGradeRecord) => r.total_score },
+  { header: 'Letter Grade', get: (r: PortalStudentGradeRecord) => r.letter_grade },
+  { header: 'GPA Points', get: (r: PortalStudentGradeRecord) => r.gpa_points },
+]
+
+function escapeCsvCell(value: string | number | null): string {
+  const text = value === null || value === undefined ? '' : String(value)
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+function downloadGradesCsv(semester: string, records: PortalStudentGradeRecord[]) {
+  const header = CSV_COLUMNS.map((c) => c.header).join(',')
+  const rows = records.map((r) => CSV_COLUMNS.map((c) => escapeCsvCell(c.get(r))).join(','))
+  const csv = [header, ...rows].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `grades-${semester.replace(/\s+/g, '-').toLowerCase() || 'export'}.csv`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
 
 export default function Grades() {
   const { academicStudentId } = useAuth()
@@ -60,12 +93,23 @@ export default function Grades() {
         crumbs={[{ label: 'Grades' }]}
         description="Review your live semester grades from the shared academic database."
         actions={
-          <Dropdown
-            label="Select semester"
-            value={semester}
-            onSelect={setSemester}
-            options={(report?.semesters ?? []).map((item) => ({ label: item.semester, value: item.semester }))}
-          />
+          <>
+            <Dropdown
+              label="Select semester"
+              value={semester}
+              onSelect={setSemester}
+              options={(report?.semesters ?? []).map((item) => ({ label: item.semester, value: item.semester }))}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Download className="h-3.5 w-3.5" />}
+              disabled={records.length === 0}
+              onClick={() => downloadGradesCsv(semester, records)}
+            >
+              Export CSV
+            </Button>
+          </>
         }
       />
 

@@ -9,8 +9,8 @@ function createWindow() {
     minWidth: 900,
     minHeight: 640,
     backgroundColor: '#08111f',
-    title: 'AegisOS EDU',
-    icon: path.join(__dirname, '..', 'desktop', 'assets', 'aegisos-logo.svg'),
+    title: 'Uni Track',
+    icon: path.join(__dirname, 'assets', 'unitrack-logo.jpeg'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

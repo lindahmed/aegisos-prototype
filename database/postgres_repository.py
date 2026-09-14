@@ -70,26 +70,49 @@ class PostgresStudentRepository:
                     )
         return self._pool
 
+    @staticmethod
+    def _checkout_connection(pool):
+        """Return a live pooled connection, replacing sockets closed while idle."""
+        connection = pool.getconn()
+        if connection.closed:
+            pool.putconn(connection, close=True)
+            return pool.getconn()
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+            connection.rollback()
+        except Exception:
+            pool.putconn(connection, close=True)
+            connection = pool.getconn()
+        return connection
+
     @contextmanager
     def _connect(self):
-        """Borrow a reusable connection instead of negotiating TLS per query."""
+        """Borrow a verified connection and evict it if the socket breaks."""
         pool = self._connection_pool()
         self._pool_slots.acquire()
         connection = None
+        discard_connection = False
         try:
-            connection = pool.getconn()
-            if connection.closed:
-                pool.putconn(connection, close=True)
-                connection = pool.getconn()
+            connection = self._checkout_connection(pool)
             yield connection
             connection.commit()
         except Exception:
-            if connection is not None and not connection.closed:
-                connection.rollback()
+            if connection is not None:
+                discard_connection = bool(connection.closed)
+                if not discard_connection:
+                    try:
+                        connection.rollback()
+                    except Exception:
+                        discard_connection = True
             raise
         finally:
             if connection is not None:
-                pool.putconn(connection, close=bool(connection.closed))
+                pool.putconn(
+                    connection,
+                    close=discard_connection or bool(connection.closed),
+                )
             self._pool_slots.release()
 
     def close(self) -> None:
@@ -493,7 +516,7 @@ class PostgresStudentRepository:
                    ELSE 2
                  END, entry.updated_at DESC
                  LIMIT 1
-               ) g ON sc.status = 'Current'
+               ) g ON TRUE
                WHERE sc.student_id::text = %s
                ORDER BY CASE WHEN sc.status = 'Current' THEN 0 ELSE 1 END,
                         sc.semester_id DESC, c.course_title""",
