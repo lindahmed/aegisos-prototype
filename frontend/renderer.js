@@ -354,6 +354,16 @@ function semesterStart(currentWeek) {
   return currentWeekSaturday;
 }
 
+
+function resizeAdvisorInput() {
+  advisorInput.style.height = 'auto';
+  const inputStyle = window.getComputedStyle(advisorInput);
+  const minHeight = Number.parseFloat(inputStyle.minHeight) || 74;
+  const maxHeight = Number.parseFloat(inputStyle.maxHeight) || 220;
+  const nextHeight = Math.max(minHeight, Math.min(advisorInput.scrollHeight, maxHeight));
+  advisorInput.style.height = `${nextHeight}px`;
+}
+
 function academicCalendarEvents() {
   if (!currentTwin) return [];
   const startOfSemester = semesterStart(currentTwin.current_week);
@@ -986,6 +996,7 @@ advisorForm.addEventListener('submit', async (event) => {
   advisorHistory.push({ role: 'user', content: message });
   addAdvisorMessage('user', message);
   advisorInput.value = '';
+  resizeAdvisorInput();
   setAdvisorBusy(true);
   advisorIntent.textContent = 'Thinking';
   setMessage(advisorStatus, 'Advisor AI is processing your request...');
@@ -1016,6 +1027,9 @@ advisorForm.addEventListener('submit', async (event) => {
     advisorInput.focus();
   }
 });
+
+advisorInput.addEventListener('input', resizeAdvisorInput);
+resizeAdvisorInput();
 
 
 function encodeWAV(samples, sampleRate = 16000) {

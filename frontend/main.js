@@ -4,10 +4,10 @@ const path = require('path');
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
-    width: 1120,
-    height: 760,
+    width: 1280,
+    height: 840,
     minWidth: 900,
-    minHeight: 640,
+    minHeight: 680,
     backgroundColor: '#071426',
     title: 'Uni Track',
     icon: path.join(__dirname, 'assets', 'unitrack-logo.jpeg'),

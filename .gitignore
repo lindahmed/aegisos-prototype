@@ -13,5 +13,8 @@ workspace/materials/
 .DS_Store
 Advisor_db.zip
 
+# Compiled mobile releases belong in GitHub Releases, not source control.
+*.apk
+
 .Rhistory
 test_flutter_app/
