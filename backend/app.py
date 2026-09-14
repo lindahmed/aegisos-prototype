@@ -3,12 +3,15 @@ from __future__ import annotations
 
 
 
+import json
 import os
+from datetime import date
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(PROJECT_ROOT / ".env", override=False)
@@ -75,6 +78,16 @@ class PortalGradebookUpdateRequest(BaseModel):
 class PortalNotificationReadRequest(BaseModel):
     notification_ids: list[str] = Field(max_length=200)
     read: bool = True
+
+
+class PortalAttendanceRowRequest(BaseModel):
+    student_id: str = Field(min_length=1, max_length=64)
+    status: Literal["Present", "Absent", "Excused", "Late"]
+
+
+class PortalAttendanceUpdateRequest(BaseModel):
+    session_date: date
+    rows: list[PortalAttendanceRowRequest] = Field(min_length=1)
 
 
 GRADE_SCALE = [
@@ -201,6 +214,39 @@ def _portal_notifications(
 
     read_ids = repository.get_read_notification_ids(student_id)
     items: list[dict[str, object]] = []
+    for alert in repository.get_attendance_alerts(student_id):
+        absence_count = int(alert["absence_count"])
+        dropped = bool(alert["automatically_dropped"])
+        notification_id = (
+            f"attendance:{'drop' if dropped else 'warning'}:"
+            f"{alert['course_id']}:{alert['semester']}"
+        )
+        items.append(
+            {
+                "id": notification_id,
+                "type": "attendance",
+                "category": "Registration",
+                "title": (
+                    f"Course dropped: {alert['course_name']}"
+                    if dropped
+                    else f"Attendance warning: {alert['course_name']}"
+                ),
+                "body": (
+                    "This course was automatically dropped after your fourth "
+                    "recorded absence."
+                    if dropped
+                    else (
+                        "You have missed 3 lectures. One more absence will "
+                        "automatically drop this course."
+                        if absence_count == 3
+                        else f"You have {absence_count} recorded absences. The "
+                        "attendance limit has been reached."
+                    )
+                ),
+                "timestamp": str(alert["semester"]),
+                "read": notification_id in read_ids,
+            }
+        )
     twin = build_student_twin(repository, student_id)
     if twin is not None:
         for course in twin.courses:
@@ -252,7 +298,10 @@ def _portal_notifications(
             for assessment in course.assessments:
                 if assessment.assessment_type not in exam_types:
                     continue
-                if assessment.mark is not None:
+                if (
+                    assessment.mark is not None
+                    and assessment.due_week <= twin.current_week
+                ):
                     continue
                 if not twin.current_week <= assessment.due_week <= twin.current_week + 2:
                     continue
@@ -264,15 +313,20 @@ def _portal_notifications(
                     if weeks_left == 1
                     else f"in {weeks_left} weeks"
                 )
-                notification_id = f"exam:{assessment.assessment_id}"
+                notification_id = (
+                    f"exam-preparation:{assessment.assessment_id}:week-{twin.current_week}"
+                )
                 items.append(
                     {
                         "id": notification_id,
                         "type": "exam",
                         "category": "Registration",
-                        "title": f"Upcoming {assessment.assessment_type}: {assessment.name}",
-                        "body": f"{course.course_name} · week {assessment.due_week} ({when})",
-                        "timestamp": f"Week {assessment.due_week}",
+                        "title": f"Start studying for {assessment.name}",
+                        "body": (
+                            f"Prepare now for {course.course_name}. The exam is in "
+                            f"week {assessment.due_week} ({when})."
+                        ),
+                        "timestamp": f"Week {twin.current_week} reminder",
                         "read": notification_id in read_ids,
                     }
                 )
@@ -287,10 +341,32 @@ def _enrolled_course(student: Student, requested_course: str) -> str:
     raise HTTPException(status_code=400, detail="Course is not enrolled for this student")
 
 
+def _public_material(document: dict[str, object], student_id: str) -> dict[str, object]:
+    result = {
+        key: value
+        for key, value in document.items()
+        if key not in {"source_archive_path", "storage_path"}
+    }
+    for field in ("learning_objectives_json", "keywords_json"):
+        value = result.get(field)
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                value = []
+        result[field.removesuffix("_json")] = value or []
+        result.pop(field, None)
+    result["download_url"] = (
+        f"/portal/students/{student_id}/materials/{document['document_id']}"
+    )
+    return result
+
+
 def create_app(
     *,
     db_path: Path | None = None,
     workspace_root: Path | None = None,
+    material_storage_root: Path | None = None,
     launcher: Callable[[Path], None] | None = None,
 ) -> FastAPI:
     student_workspace_root = workspace_root or Path(
@@ -298,6 +374,15 @@ def create_app(
             "AEGIS_WORKSPACE_ROOT", PROJECT_ROOT / "workspace" / "students"
         )
     )
+    material_storage_root = (
+        material_storage_root
+        or Path(
+            os.environ.get(
+                "AEGIS_MATERIAL_STORAGE_ROOT",
+                PROJECT_ROOT / "workspace" / "materials",
+            )
+        )
+    ).resolve()
     database_url = os.environ.get("DATABASE_URL")
     if database_url and db_path is None:
         # The Database branch's normalized PostgreSQL/Supabase schema is the
@@ -355,6 +440,48 @@ def create_app(
             "rows": rows,
         }
 
+    @api.get("/portal/courses/{course_id}/attendance")
+    def get_portal_course_attendance(
+        course_id: str, session_date: date
+    ) -> dict[str, object]:
+        try:
+            attendance = repository.get_portal_course_attendance(
+                course_id, session_date
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        if attendance is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Course or semester not found for this attendance date",
+            )
+        return attendance
+
+    @api.put("/portal/courses/{course_id}/attendance")
+    def save_portal_course_attendance(
+        course_id: str, request: PortalAttendanceUpdateRequest
+    ) -> dict[str, object]:
+        student_ids = [row.student_id for row in request.rows]
+        if len(student_ids) != len(set(student_ids)):
+            raise HTTPException(
+                status_code=400,
+                detail="Each student may appear only once in an attendance session",
+            )
+        try:
+            attendance = repository.save_portal_course_attendance(
+                course_id,
+                request.session_date,
+                [row.model_dump() for row in request.rows],
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        if attendance is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Course or semester not found for this attendance date",
+            )
+        return attendance
+
     @api.put("/portal/courses/{course_id}/grades")
     def save_portal_course_gradebook(
         course_id: str, request: PortalGradebookUpdateRequest
@@ -410,6 +537,66 @@ def create_app(
         if result is None:
             raise HTTPException(status_code=404, detail="Student not found")
         return result
+
+    @api.get("/portal/students/{student_id}/materials")
+    def get_portal_student_materials(
+        student_id: str, course_id: str | None = None
+    ) -> dict[str, object]:
+        if repository.get_student(student_id) is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        documents = repository.list_student_materials(student_id, course_id)
+        return {
+            "student_id": student_id,
+            "documents": [
+                _public_material(document, student_id) for document in documents
+            ],
+        }
+
+    @api.get("/portal/students/{student_id}/materials/search")
+    def search_portal_student_materials(
+        student_id: str,
+        q: str,
+        course_id: str | None = None,
+        limit: int = 8,
+    ) -> dict[str, object]:
+        if repository.get_student(student_id) is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        if not q.strip():
+            raise HTTPException(status_code=400, detail="Search query is required")
+        results = repository.search_student_materials(
+            student_id,
+            q,
+            course_id=course_id,
+            limit=max(1, min(limit, 20)),
+        )
+        for result in results:
+            result.pop("storage_path", None)
+            result["download_url"] = (
+                f"/portal/students/{student_id}/materials/{result['document_id']}"
+            )
+        return {"student_id": student_id, "query": q, "results": results}
+
+    @api.get("/portal/students/{student_id}/materials/{document_id}")
+    def download_portal_student_material(
+        student_id: str, document_id: str
+    ) -> FileResponse:
+        if repository.get_student(student_id) is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        allowed = {
+            str(document["document_id"]): document
+            for document in repository.list_student_materials(student_id)
+        }
+        document = allowed.get(document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="Material not found")
+        source = (material_storage_root / str(document["storage_path"])).resolve()
+        if not source.is_relative_to(material_storage_root) or not source.is_file():
+            raise HTTPException(status_code=404, detail="Material file is unavailable")
+        return FileResponse(
+            source,
+            media_type=str(document["mime_type"]),
+            filename=str(document["original_filename"]),
+        )
 
     @api.get("/portal/students/{student_id}/academics")
     def get_portal_student_academics(student_id: str) -> dict[str, object]:

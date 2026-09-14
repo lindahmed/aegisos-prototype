@@ -37,6 +37,19 @@ def fetch_student_context(
     if mentioned_course:
         eligibility = graph.get_course_eligibility(student_id, mentioned_course)
 
+    material_sources = repository.search_student_materials(
+        student_id,
+        message,
+        course_id=mentioned_course,
+        limit=8,
+    ) if message.strip() else []
+    if mentioned_course and not material_sources:
+        material_sources = repository.search_student_materials(
+            student_id,
+            message,
+            limit=8,
+        )
+
     return {
         "student_id": student_id,
         "student": twin.student.model_dump(),
@@ -50,6 +63,7 @@ def fetch_student_context(
         "recommended_next_courses": recommended,
         "course_eligibility": eligibility,
         "mentioned_course_code": mentioned_course,
+        "material_sources": material_sources,
     }
 
 

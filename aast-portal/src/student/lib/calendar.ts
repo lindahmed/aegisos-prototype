@@ -20,12 +20,14 @@ const storageKey = (studentId: string) => `aegisos-calendar:${studentId}`
 const examTypes = new Set(['midterm', 'final', 'exam'])
 
 function semesterStart(currentWeek: number): Date {
-  const currentWeekMonday = new Date()
-  currentWeekMonday.setHours(0, 0, 0, 0)
-  const daysSinceMonday = (currentWeekMonday.getDay() + 6) % 7
-  currentWeekMonday.setDate(currentWeekMonday.getDate() - daysSinceMonday)
-  currentWeekMonday.setDate(currentWeekMonday.getDate() - (currentWeek - 1) * 7)
-  return currentWeekMonday
+  const currentWeekSaturday = new Date()
+  currentWeekSaturday.setHours(0, 0, 0, 0)
+  const daysSinceSaturday = (currentWeekSaturday.getDay() + 1) % 7
+  currentWeekSaturday.setDate(currentWeekSaturday.getDate() - daysSinceSaturday)
+  currentWeekSaturday.setDate(currentWeekSaturday.getDate() - (currentWeek - 1) * 7)
+  // Calendar events retain the established Monday-Sunday placement grid.
+  currentWeekSaturday.setDate(currentWeekSaturday.getDate() + 2)
+  return currentWeekSaturday
 }
 
 function academicDate(currentWeek: number, dueWeek: number, dayOffset: number, hour: number) {

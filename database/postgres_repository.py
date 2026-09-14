@@ -12,7 +12,7 @@ import json
 import os
 import threading
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 try:
@@ -23,6 +23,7 @@ except ImportError:  # permits SQLite-only development and test runs
     psycopg2 = None
     ThreadedConnectionPool = None
 
+from .academic_calendar import FALL_2026_START_DATE, academic_week
 from .repository import Student
 
 
@@ -40,6 +41,15 @@ class PostgresStudentRepository:
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
         self.semester = os.getenv("AEGIS_CURRENT_SEMESTER", "Current semester")
+        start_date_value = os.getenv(
+            "AEGIS_SEMESTER_START_DATE", FALL_2026_START_DATE.isoformat()
+        )
+        try:
+            self.semester_start_date = date.fromisoformat(start_date_value)
+        except ValueError as error:
+            raise ValueError(
+                "AEGIS_SEMESTER_START_DATE must use YYYY-MM-DD format"
+            ) from error
         try:
             self._pool_size = max(1, int(os.getenv("AEGIS_DB_POOL_SIZE", "8")))
         except ValueError as error:
@@ -47,10 +57,11 @@ class PostgresStudentRepository:
         self._pool = None
         self._pool_lock = threading.Lock()
         self._pool_slots = threading.BoundedSemaphore(self._pool_size)
-        try:
-            self.current_week = max(1, int(os.getenv("AEGIS_CURRENT_WEEK", "5")))
-        except ValueError as error:
-            raise ValueError("AEGIS_CURRENT_WEEK must be a positive integer") from error
+
+    @property
+    def current_week(self) -> int:
+        """One shared week number that advances with the real calendar."""
+        return academic_week(self.semester_start_date)
 
     def _connection_pool(self):
         if psycopg2 is None or ThreadedConnectionPool is None:
@@ -128,6 +139,7 @@ class PostgresStudentRepository:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
+                    CREATE EXTENSION IF NOT EXISTS vector;
                     CREATE TABLE IF NOT EXISTS weekly_progress_snapshots (
                         snapshot_id BIGSERIAL PRIMARY KEY,
                         student_id TEXT NOT NULL,
@@ -215,6 +227,13 @@ class PostgresStudentRepository:
                         read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         PRIMARY KEY (student_id, notification_id)
                     );
+                    CREATE TABLE IF NOT EXISTS attendance_auto_drops (
+                        student_id TEXT NOT NULL,
+                        course_code TEXT NOT NULL,
+                        semester_id INTEGER NOT NULL,
+                        dropped_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY (student_id, course_code, semester_id)
+                    );
                     CREATE TABLE IF NOT EXISTS course_schedule_slots (
                         schedule_slot_id BIGSERIAL PRIMARY KEY,
                         course_id TEXT NOT NULL REFERENCES courses(course_code),
@@ -224,6 +243,69 @@ class PostgresStudentRepository:
                         location TEXT,
                         CHECK(end_minute > start_minute)
                     );
+                    CREATE TABLE IF NOT EXISTS material_documents (
+                        document_id TEXT PRIMARY KEY,
+                        course_id TEXT NOT NULL REFERENCES courses(course_code),
+                        course_name TEXT NOT NULL,
+                        major_code TEXT NOT NULL,
+                        program_semester INTEGER NOT NULL,
+                        title TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        week_number INTEGER,
+                        original_filename TEXT NOT NULL,
+                        source_archive_path TEXT NOT NULL,
+                        storage_provider TEXT NOT NULL,
+                        storage_path TEXT NOT NULL,
+                        mime_type TEXT NOT NULL,
+                        checksum TEXT NOT NULL,
+                        size_bytes BIGINT NOT NULL,
+                        page_count INTEGER,
+                        visibility TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL,
+                        UNIQUE(course_id, checksum)
+                    );
+                    CREATE TABLE IF NOT EXISTS material_chunks (
+                        chunk_id TEXT PRIMARY KEY,
+                        document_id TEXT NOT NULL REFERENCES material_documents(document_id)
+                            ON DELETE CASCADE,
+                        chunk_index INTEGER NOT NULL,
+                        content TEXT NOT NULL,
+                        page_start INTEGER,
+                        page_end INTEGER,
+                        token_count INTEGER NOT NULL,
+                        embedding vector(768) NOT NULL,
+                        search_document TSVECTOR GENERATED ALWAYS AS (
+                            to_tsvector('english', content)
+                        ) STORED,
+                        UNIQUE(document_id, chunk_index)
+                    );
+                    CREATE TABLE IF NOT EXISTS material_summaries (
+                        document_id TEXT PRIMARY KEY REFERENCES material_documents(document_id)
+                            ON DELETE CASCADE,
+                        summary TEXT NOT NULL,
+                        learning_objectives_json JSONB NOT NULL,
+                        keywords_json JSONB NOT NULL,
+                        generator TEXT NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS material_ingestion_jobs (
+                        job_id TEXT PRIMARY KEY,
+                        source TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        report_json JSONB NOT NULL,
+                        started_at TIMESTAMPTZ NOT NULL,
+                        finished_at TIMESTAMPTZ
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_material_documents_scope
+                        ON material_documents(major_code, program_semester, course_id, category);
+                    CREATE INDEX IF NOT EXISTS idx_material_chunks_document
+                        ON material_chunks(document_id, chunk_index);
+                    CREATE INDEX IF NOT EXISTS idx_material_chunks_search
+                        ON material_chunks USING GIN(search_document);
+                    CREATE INDEX IF NOT EXISTS idx_material_chunks_embedding
+                        ON material_chunks USING hnsw (embedding vector_cosine_ops);
                     DO $$
                     BEGIN
                         IF EXISTS (
@@ -403,6 +485,183 @@ class PostgresStudentRepository:
             "courses": list(courses.values()),
         }
 
+    def upsert_material_document(self, document: dict[str, Any]) -> None:
+        fields = (
+            "document_id", "course_id", "course_name", "major_code",
+            "program_semester", "title", "category", "week_number",
+            "original_filename", "source_archive_path", "storage_provider",
+            "storage_path", "mime_type", "checksum", "size_bytes",
+            "page_count", "visibility", "status", "created_at", "updated_at",
+        )
+        values = tuple(document.get(field) for field in fields)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"""INSERT INTO material_documents ({', '.join(fields)})
+                        VALUES ({', '.join('%s' for _ in fields)})
+                        ON CONFLICT(document_id) DO UPDATE SET
+                          course_id=EXCLUDED.course_id,
+                          course_name=EXCLUDED.course_name,
+                          major_code=EXCLUDED.major_code,
+                          program_semester=EXCLUDED.program_semester,
+                          title=EXCLUDED.title,
+                          category=EXCLUDED.category,
+                          week_number=EXCLUDED.week_number,
+                          original_filename=EXCLUDED.original_filename,
+                          source_archive_path=EXCLUDED.source_archive_path,
+                          storage_provider=EXCLUDED.storage_provider,
+                          storage_path=EXCLUDED.storage_path,
+                          mime_type=EXCLUDED.mime_type,
+                          checksum=EXCLUDED.checksum,
+                          size_bytes=EXCLUDED.size_bytes,
+                          page_count=EXCLUDED.page_count,
+                          visibility=EXCLUDED.visibility,
+                          status=EXCLUDED.status,
+                          updated_at=EXCLUDED.updated_at""",
+                    values,
+                )
+
+    @staticmethod
+    def _vector_literal(values: list[float]) -> str:
+        return "[" + ",".join(f"{value:.9g}" for value in values) + "]"
+
+    def replace_material_chunks(
+        self, document_id: str, chunks: list[dict[str, Any]]
+    ) -> None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM material_chunks WHERE document_id = %s",
+                    (document_id,),
+                )
+                psycopg2.extras.execute_batch(
+                    cursor,
+                    """INSERT INTO material_chunks
+                       (chunk_id, document_id, chunk_index, content, page_start,
+                        page_end, token_count, embedding)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)""",
+                    (
+                        (
+                            chunk["chunk_id"], document_id, chunk["chunk_index"],
+                            chunk["content"], chunk.get("page_start"),
+                            chunk.get("page_end"), chunk["token_count"],
+                            self._vector_literal(chunk["embedding"]),
+                        )
+                        for chunk in chunks
+                    ),
+                    page_size=100,
+                )
+
+    def upsert_material_summary(
+        self, document_id: str, summary: dict[str, Any]
+    ) -> None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO material_summaries
+                       (document_id, summary, learning_objectives_json,
+                        keywords_json, generator, updated_at)
+                       VALUES (%s, %s, %s::jsonb, %s::jsonb, %s, NOW())
+                       ON CONFLICT(document_id) DO UPDATE SET
+                         summary=EXCLUDED.summary,
+                         learning_objectives_json=EXCLUDED.learning_objectives_json,
+                         keywords_json=EXCLUDED.keywords_json,
+                         generator=EXCLUDED.generator,
+                         updated_at=EXCLUDED.updated_at""",
+                    (
+                        document_id,
+                        summary.get("summary", ""),
+                        json.dumps(summary.get("learning_objectives", [])),
+                        json.dumps(summary.get("keywords", [])),
+                        summary.get("generator", "unknown"),
+                    ),
+                )
+
+    def save_material_ingestion_job(self, job: dict[str, Any]) -> None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO material_ingestion_jobs
+                       (job_id, source, status, report_json, started_at, finished_at)
+                       VALUES (%s, %s, %s, %s::jsonb, %s, %s)
+                       ON CONFLICT(job_id) DO UPDATE SET
+                         status=EXCLUDED.status,
+                         report_json=EXCLUDED.report_json,
+                         finished_at=EXCLUDED.finished_at""",
+                    (
+                        job["job_id"], job["source"], job["status"],
+                        json.dumps(job, ensure_ascii=False), job["started_at"],
+                        job.get("finished_at"),
+                    ),
+                )
+
+    def list_student_materials(
+        self, student_id: str, course_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        course_clause = ""
+        parameters: list[Any] = [student_id]
+        if course_id:
+            course_clause = " AND document.course_id = %s"
+            parameters.append(course_id)
+        return self._fetch_all(
+            f"""SELECT document.*, summary.summary,
+                       summary.learning_objectives_json,
+                       summary.keywords_json
+                FROM material_documents document
+                JOIN students student ON student.student_id::text = %s
+                JOIN majors major ON major.program_id = student.program_id
+                LEFT JOIN material_summaries summary
+                  ON summary.document_id = document.document_id
+                WHERE upper(document.major_code) = upper(major.major_code)
+                  AND document.program_semester = student.current_semester
+                  AND document.visibility IN ('student', 'student_practice')
+                  {course_clause}
+                ORDER BY document.course_name, document.week_number,
+                         document.category, document.title""",
+            tuple(parameters),
+        )
+
+    def search_student_materials(
+        self,
+        student_id: str,
+        query: str,
+        *,
+        course_id: str | None = None,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        from backend.materials.retrieval import embed_text
+
+        vector = self._vector_literal(embed_text(query))
+        course_clause = ""
+        parameters: list[Any] = [query, vector, student_id]
+        if course_id:
+            course_clause = " AND document.course_id = %s"
+            parameters.append(course_id)
+        parameters.append(max(1, min(limit, 20)))
+        return self._fetch_all(
+            f"""SELECT chunk.chunk_id, chunk.document_id,
+                       document.course_id, document.course_name, document.title,
+                       document.category, document.week_number,
+                       chunk.page_start, chunk.page_end, chunk.content,
+                       document.storage_path,
+                       ROUND((
+                         ts_rank_cd(chunk.search_document, plainto_tsquery('english', %s)) * 0.65
+                         + GREATEST(0, 1 - (chunk.embedding <=> %s::vector)) * 0.35
+                       )::numeric, 6)::double precision AS score
+                FROM material_chunks chunk
+                JOIN material_documents document
+                  ON document.document_id = chunk.document_id
+                JOIN students student ON student.student_id::text = %s
+                JOIN majors major ON major.program_id = student.program_id
+                WHERE upper(document.major_code) = upper(major.major_code)
+                  AND document.program_semester = student.current_semester
+                  AND document.visibility IN ('student', 'student_practice')
+                  {course_clause}
+                ORDER BY score DESC, document.course_name, document.title
+                LIMIT %s""",
+            tuple(parameters),
+        )
+
     def list_portal_courses(self) -> list[dict[str, Any]]:
         return self._fetch_all(
             """SELECT c.course_code AS course_id, c.course_title AS course_name,
@@ -524,6 +783,197 @@ class PostgresStudentRepository:
         )
         return {"student": student.as_dict(), "records": records}
 
+    def get_portal_course_attendance(
+        self, course_id: str, session_date: date
+    ) -> dict[str, Any] | None:
+        course = self._fetch_one(
+            """SELECT c.course_code AS course_id, c.course_title AS course_name,
+                      sem.id AS semester_id, sem.name AS semester,
+                      sem.start_date, sem.end_date
+               FROM courses c
+               JOIN semesters sem ON %s BETWEEN sem.start_date AND sem.end_date
+               WHERE c.course_code = %s
+               ORDER BY sem.is_current DESC, sem.start_date DESC
+               LIMIT 1""",
+            (session_date, course_id),
+        )
+        if course is None:
+            return None
+        week_number = ((session_date - course["start_date"]).days // 7) + 1
+        if week_number < 1 or week_number > 16:
+            raise ValueError("Attendance date must fall within the 16 teaching weeks")
+
+        rows = self._fetch_all(
+            """SELECT s.student_id::text AS student_id,
+                      s.full_name AS student_name,
+                      COALESCE(record.status, 'Present') AS status,
+                      sc.status AS enrollment_status,
+                      (
+                        SELECT COUNT(*) FROM attendance history
+                        WHERE history.student_id = s.student_id::text
+                          AND history.course_code = sc.course_code
+                          AND history.semester_id = sc.semester_id
+                          AND history.status = 'Absent'
+                      ) AS absence_count
+               FROM student_courses sc
+               JOIN students s ON s.student_id = sc.student_id
+               LEFT JOIN attendance record
+                 ON record.student_id = s.student_id::text
+                AND record.course_code = sc.course_code
+                AND record.semester_id = sc.semester_id
+                AND record.week_number = %s
+               WHERE sc.course_code = %s AND sc.semester_id = %s
+                 AND (sc.status = 'Current' OR record.attendance_id IS NOT NULL)
+               ORDER BY s.full_name""",
+            (week_number, course_id, course["semester_id"]),
+        )
+        return {
+            "course": {
+                "course_id": course["course_id"],
+                "course_name": course["course_name"],
+                "semester": course["semester"],
+            },
+            "session_date": session_date.isoformat(),
+            "week_number": week_number,
+            "rows": rows,
+        }
+
+    def save_portal_course_attendance(
+        self, course_id: str, session_date: date, rows: list[dict[str, Any]]
+    ) -> dict[str, Any] | None:
+        attendance = self.get_portal_course_attendance(course_id, session_date)
+        if attendance is None:
+            return None
+        valid_student_ids = {str(row["student_id"]) for row in attendance["rows"]}
+        unknown = sorted(
+            str(row["student_id"])
+            for row in rows
+            if str(row["student_id"]) not in valid_student_ids
+        )
+        if unknown:
+            raise ValueError(f"Unknown or unenrolled students: {', '.join(unknown)}")
+
+        semester = self._fetch_one(
+            """SELECT id FROM semesters
+               WHERE name = %s AND %s BETWEEN start_date AND end_date""",
+            (attendance["course"]["semester"], session_date),
+        )
+        assert semester is not None
+        semester_id = int(semester["id"])
+        week_number = int(attendance["week_number"])
+        dropped_student_ids: list[str] = []
+        restored_student_ids: list[str] = []
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                # Serialize attendance updates for these enrollments so two
+                # simultaneous session saves cannot both miss the threshold.
+                cursor.execute(
+                    """SELECT student_course_id FROM student_courses
+                       WHERE course_code = %s AND semester_id = %s
+                         AND student_id::text = ANY(%s)
+                       FOR UPDATE""",
+                    (
+                        course_id,
+                        semester_id,
+                        [str(row["student_id"]) for row in rows],
+                    ),
+                )
+                psycopg2.extras.execute_batch(
+                    cursor,
+                    """INSERT INTO attendance
+                       (student_id, course_code, semester_id, week_number,
+                        session_date, status)
+                       VALUES (%s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (student_id, course_code, semester_id, week_number)
+                       DO UPDATE SET session_date=EXCLUDED.session_date,
+                                     status=EXCLUDED.status""",
+                    (
+                        (
+                            str(row["student_id"]), course_id, semester_id,
+                            week_number, session_date, str(row["status"]),
+                        )
+                        for row in rows
+                    ),
+                )
+                for row in rows:
+                    student_id = str(row["student_id"])
+                    cursor.execute(
+                        """SELECT COUNT(*) AS absence_count FROM attendance
+                           WHERE student_id = %s AND course_code = %s
+                             AND semester_id = %s AND status = 'Absent'""",
+                        (student_id, course_id, semester_id),
+                    )
+                    absence_count = int(cursor.fetchone()["absence_count"])
+                    cursor.execute(
+                        """SELECT 1 FROM attendance_auto_drops
+                           WHERE student_id = %s AND course_code = %s
+                             AND semester_id = %s""",
+                        (student_id, course_id, semester_id),
+                    )
+                    tracked = cursor.fetchone() is not None
+                    if absence_count >= 4:
+                        cursor.execute(
+                            """INSERT INTO attendance_auto_drops
+                               (student_id, course_code, semester_id)
+                               VALUES (%s, %s, %s)
+                               ON CONFLICT (student_id, course_code, semester_id)
+                               DO NOTHING""",
+                            (student_id, course_id, semester_id),
+                        )
+                        cursor.execute(
+                            """UPDATE student_courses SET status = 'Withdrawn'
+                               WHERE student_id::text = %s AND course_code = %s
+                                 AND semester_id = %s AND status = 'Current'""",
+                            (student_id, course_id, semester_id),
+                        )
+                        if cursor.rowcount:
+                            dropped_student_ids.append(student_id)
+                    elif tracked:
+                        cursor.execute(
+                            """DELETE FROM attendance_auto_drops
+                               WHERE student_id = %s AND course_code = %s
+                                 AND semester_id = %s""",
+                            (student_id, course_id, semester_id),
+                        )
+                        cursor.execute(
+                            """UPDATE student_courses SET status = 'Current'
+                               WHERE student_id::text = %s AND course_code = %s
+                                 AND semester_id = %s AND status = 'Withdrawn'""",
+                            (student_id, course_id, semester_id),
+                        )
+                        if cursor.rowcount:
+                            restored_student_ids.append(student_id)
+
+        refreshed = self.get_portal_course_attendance(course_id, session_date)
+        assert refreshed is not None
+        return {
+            **refreshed,
+            "dropped_student_ids": dropped_student_ids,
+            "restored_student_ids": restored_student_ids,
+        }
+
+    def get_attendance_alerts(self, student_id: str) -> list[dict[str, Any]]:
+        return self._fetch_all(
+            """SELECT record.course_code AS course_id,
+                      course.course_title AS course_name,
+                      semester.name AS semester,
+                      COUNT(*) AS absence_count,
+                      (auto_drop.student_id IS NOT NULL) AS automatically_dropped
+               FROM attendance record
+               JOIN courses course ON course.course_code = record.course_code
+               JOIN semesters semester ON semester.id = record.semester_id
+               LEFT JOIN attendance_auto_drops auto_drop
+                 ON auto_drop.student_id = record.student_id
+                AND auto_drop.course_code = record.course_code
+                AND auto_drop.semester_id = record.semester_id
+               WHERE record.student_id = %s AND record.status = 'Absent'
+               GROUP BY record.course_code, course.course_title,
+                        record.semester_id, semester.name, auto_drop.student_id
+               HAVING COUNT(*) >= 3
+               ORDER BY record.semester_id DESC, course.course_title""",
+            (student_id,),
+        )
+
     def get_read_notification_ids(self, student_id: str) -> set[str]:
         rows = self._fetch_all(
             "SELECT notification_id FROM portal_notification_reads WHERE student_id = %s",
@@ -599,18 +1049,16 @@ class PostgresStudentRepository:
         for row in course_rows:
             course_id = row["course_id"]
             grades = row if row["gradebook_student_id"] is not None else None
-            assessments: list[dict[str, Any]] = []
-            if grades is not None:
-                coursework_mark = grades["coursework_mark"]
-                week7_mark = grades["week7_exam_mark"]
-                week12_mark = grades["week12_exam_mark"]
-                final_mark = grades["final_exam_mark"]
-                assessments = [
-                    {"assessment_id": f"{course_id}-coursework", "name": "Coursework", "assessment_type": "assignment", "weight": 10.0, "due_week": 5, "covered_lecture_ids": "[]", "percentage": coursework_mark * 10 if coursework_mark is not None else None},
-                    {"assessment_id": f"{course_id}-week7", "name": "Week 7 exam", "assessment_type": "midterm", "weight": 30.0, "due_week": 7, "covered_lecture_ids": "[]", "percentage": week7_mark * (100/30) if week7_mark is not None and self.current_week >= 7 else None},
-                    {"assessment_id": f"{course_id}-week12", "name": "Week 12 exam", "assessment_type": "midterm", "weight": 20.0, "due_week": 12, "covered_lecture_ids": "[]", "percentage": week12_mark * 5 if week12_mark is not None and self.current_week >= 12 else None},
-                    {"assessment_id": f"{course_id}-final", "name": "Final exam", "assessment_type": "final", "weight": 40.0, "due_week": 16, "covered_lecture_ids": "[]", "percentage": final_mark * 2.5 if final_mark is not None and self.current_week >= 16 else None},
-                ]
+            coursework_mark = grades["coursework_mark"] if grades is not None else None
+            week7_mark = grades["week7_exam_mark"] if grades is not None else None
+            week12_mark = grades["week12_exam_mark"] if grades is not None else None
+            final_mark = grades["final_exam_mark"] if grades is not None else None
+            assessments: list[dict[str, Any]] = [
+                {"assessment_id": f"{course_id}-coursework", "name": "Coursework", "assessment_type": "assignment", "weight": 10.0, "due_week": 5, "covered_lecture_ids": "[]", "percentage": coursework_mark * 10 if coursework_mark is not None else None},
+                {"assessment_id": f"{course_id}-week7", "name": "Week 7 exam", "assessment_type": "midterm", "weight": 30.0, "due_week": 7, "covered_lecture_ids": "[]", "percentage": week7_mark * (100/30) if week7_mark is not None and self.current_week >= 7 else None},
+                {"assessment_id": f"{course_id}-week12", "name": "Week 12 exam", "assessment_type": "midterm", "weight": 20.0, "due_week": 12, "covered_lecture_ids": "[]", "percentage": week12_mark * 5 if week12_mark is not None and self.current_week >= 12 else None},
+                {"assessment_id": f"{course_id}-final", "name": "Final exam", "assessment_type": "final", "weight": 40.0, "due_week": 16, "covered_lecture_ids": "[]", "percentage": final_mark * 2.5 if final_mark is not None and self.current_week >= 16 else None},
+            ]
             courses.append({
                 "course_id": course_id,
                 "course_name": row["course_name"],

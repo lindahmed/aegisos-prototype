@@ -82,6 +82,34 @@ export interface PortalGradebookUpdateRow {
   final_exam_mark: number
 }
 
+export type PortalAttendanceStatus = 'Present' | 'Absent' | 'Excused' | 'Late'
+
+export interface PortalAttendanceRow {
+  student_id: string
+  student_name: string
+  status: PortalAttendanceStatus
+  enrollment_status: string
+  absence_count: number
+}
+
+export interface PortalCourseAttendance {
+  course: {
+    course_id: string
+    course_name: string
+    semester: string
+  }
+  session_date: string
+  week_number: number
+  rows: PortalAttendanceRow[]
+  dropped_student_ids?: string[]
+  restored_student_ids?: string[]
+}
+
+export interface PortalAttendanceUpdateRow {
+  student_id: string
+  status: PortalAttendanceStatus
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
@@ -108,6 +136,27 @@ export function savePortalCourseGradebook(courseId: string, semester: string, ro
     method: 'PUT',
     body: JSON.stringify({ semester, rows }),
   })
+}
+
+export function getPortalCourseAttendance(courseId: string, sessionDate: string) {
+  const search = new URLSearchParams({ session_date: sessionDate }).toString()
+  return request<PortalCourseAttendance>(
+    `/portal/courses/${encodeURIComponent(courseId)}/attendance?${search}`,
+  )
+}
+
+export function savePortalCourseAttendance(
+  courseId: string,
+  sessionDate: string,
+  rows: PortalAttendanceUpdateRow[],
+) {
+  return request<PortalCourseAttendance>(
+    `/portal/courses/${encodeURIComponent(courseId)}/attendance`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ session_date: sessionDate, rows }),
+    },
+  )
 }
 
 export function getPortalStudentGrades(studentId: string) {
@@ -194,7 +243,7 @@ export function getPortalStudentAcademics(studentId: string) {
 
 export interface PortalNotification {
   id: string
-  type: 'grade' | 'exam'
+  type: 'grade' | 'exam' | 'risk' | 'attendance'
   category: 'Grades' | 'Registration' | 'Financial' | 'System'
   title: string
   body: string

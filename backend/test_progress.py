@@ -283,7 +283,7 @@ def test_validate_intervention_falls_back_to_action_templates(tmp_path: Path) ->
     result = build_progress_graph(repository, empty_recommendation).invoke({"student_id": "231027905"})
     intervention = next(item for course, item in result["validated_interventions"] if course.course_id == "ai")
     assert intervention.recommended_actions
-    assert any("midterm" in action.lower() for action in intervention.recommended_actions)
+    assert any("week 7 exam" in action.lower() for action in intervention.recommended_actions)
 
 
 def test_detect_risks_deadline_cluster() -> None:

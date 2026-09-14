@@ -1,9 +1,11 @@
-from pathlib import Path
 import sqlite3
+from datetime import date
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
+from database.academic_calendar import FALL_2026_START_DATE, academic_week
 
 
 def make_client(tmp_path: Path, launcher=None) -> TestClient:
@@ -19,6 +21,36 @@ def test_health(tmp_path: Path) -> None:
     response = make_client(tmp_path).get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_shared_calendar_is_week_6_now_and_advances_weekly() -> None:
+    assert academic_week(FALL_2026_START_DATE, date(2026, 9, 14)) == 6
+    assert academic_week(FALL_2026_START_DATE, date(2026, 9, 18)) == 6
+    assert academic_week(FALL_2026_START_DATE, date(2026, 9, 19)) == 7
+
+
+def test_all_students_receive_week_7_exam_preparation_reminders(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+
+    for student_id in ("231027905", "231027906", "231027907"):
+        progress = client.get(f"/progress/{student_id}").json()
+        assert progress["current_week"] == 6
+        assert all(course["current_week"] == 6 for course in progress["courses"])
+
+        notifications = client.get(
+            f"/portal/students/{student_id}/notifications"
+        ).json()["notifications"]
+        exam_reminders = [item for item in notifications if item["type"] == "exam"]
+        assert len(exam_reminders) == len(progress["courses"])
+        assert all(item["read"] is False for item in exam_reminders)
+        assert all(
+            item["title"].startswith("Start studying for Week 7 exam")
+            for item in exam_reminders
+        )
+        assert all("Prepare now" in item["body"] for item in exam_reminders)
+        assert all(item["timestamp"] == "Week 6 reminder" for item in exam_reminders)
 
 
 def test_valid_student_comes_from_sqlite_seed(tmp_path: Path) -> None:
@@ -182,6 +214,106 @@ def test_student_courses_endpoint_lists_courses_and_timetable(tmp_path: Path) ->
             "location": "Room A12",
         }
     ]
+
+
+def test_third_absence_warns_and_fourth_drops_course(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    student_id = "231027905"
+    dates = ["2026-09-02", "2026-09-09", "2026-09-16", "2026-09-23"]
+
+    for session_date in dates[:3]:
+        response = client.put(
+            "/portal/courses/ai/attendance",
+            json={
+                "session_date": session_date,
+                "rows": [{"student_id": student_id, "status": "Absent"}],
+            },
+        )
+        assert response.status_code == 200
+
+    third = response.json()
+    row = next(item for item in third["rows"] if item["student_id"] == student_id)
+    assert row["absence_count"] == 3
+    assert third["dropped_student_ids"] == []
+    warning = next(
+        item
+        for item in client.get(
+            f"/portal/students/{student_id}/notifications"
+        ).json()["notifications"]
+        if item["type"] == "attendance"
+    )
+    assert warning["title"] == "Attendance warning: Artificial Intelligence"
+    assert "One more absence" in warning["body"]
+
+    fourth = client.put(
+        "/portal/courses/ai/attendance",
+        json={
+            "session_date": dates[3],
+            "rows": [{"student_id": student_id, "status": "Absent"}],
+        },
+    )
+    assert fourth.status_code == 200
+    assert fourth.json()["dropped_student_ids"] == [student_id]
+    current_courses = client.get(
+        f"/portal/students/{student_id}/courses"
+    ).json()["courses"]
+    assert all(course["course_code"] != "ai" for course in current_courses)
+    dropped_notice = next(
+        item
+        for item in client.get(
+            f"/portal/students/{student_id}/notifications"
+        ).json()["notifications"]
+        if item["type"] == "attendance"
+    )
+    assert dropped_notice["title"] == "Course dropped: Artificial Intelligence"
+    assert "fourth recorded absence" in dropped_notice["body"]
+
+
+def test_correcting_fourth_absence_restores_automatic_drop(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    student_id = "231027905"
+    dates = ["2026-09-02", "2026-09-09", "2026-09-16", "2026-09-23"]
+    for session_date in dates:
+        client.put(
+            "/portal/courses/ai/attendance",
+            json={
+                "session_date": session_date,
+                "rows": [{"student_id": student_id, "status": "Absent"}],
+            },
+        )
+
+    correction = client.put(
+        "/portal/courses/ai/attendance",
+        json={
+            "session_date": dates[3],
+            "rows": [{"student_id": student_id, "status": "Present"}],
+        },
+    )
+
+    assert correction.status_code == 200
+    assert correction.json()["restored_student_ids"] == [student_id]
+    current_courses = client.get(
+        f"/portal/students/{student_id}/courses"
+    ).json()["courses"]
+    assert any(course["course_code"] == "ai" for course in current_courses)
+    notifications = client.get(
+        f"/portal/students/{student_id}/notifications"
+    ).json()["notifications"]
+    attendance_notice = next(
+        item for item in notifications if item["type"] == "attendance"
+    )
+    assert attendance_notice["title"].startswith("Attendance warning:")
+
+
+def test_attendance_rejects_invalid_status(tmp_path: Path) -> None:
+    response = make_client(tmp_path).put(
+        "/portal/courses/ai/attendance",
+        json={
+            "session_date": "2026-09-02",
+            "rows": [{"student_id": "231027905", "status": "Missing"}],
+        },
+    )
+    assert response.status_code == 422
 
 
 def test_workspace_is_created_for_enrolled_course(tmp_path: Path) -> None:

@@ -345,11 +345,13 @@ function saveCalendarEvents() {
 }
 
 function semesterStart(currentWeek) {
-  const monday = new Date();
-  monday.setHours(0, 0, 0, 0);
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-  monday.setDate(monday.getDate() - (Number(currentWeek) - 1) * 7);
-  return monday;
+  const currentWeekSaturday = new Date();
+  currentWeekSaturday.setHours(0, 0, 0, 0);
+  currentWeekSaturday.setDate(currentWeekSaturday.getDate() - ((currentWeekSaturday.getDay() + 1) % 7));
+  currentWeekSaturday.setDate(currentWeekSaturday.getDate() - (Number(currentWeek) - 1) * 7);
+  // Calendar events retain the established Monday-Sunday placement grid.
+  currentWeekSaturday.setDate(currentWeekSaturday.getDate() + 2);
+  return currentWeekSaturday;
 }
 
 function academicCalendarEvents() {

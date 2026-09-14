@@ -388,7 +388,6 @@ class _GradeCard extends StatelessWidget {
       ),
     );
   }
-}
 
    static String _detailLine(StudentGradeRecord record) {
     if (record.gradeSource == 'transcript') {

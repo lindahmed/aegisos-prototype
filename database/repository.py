@@ -4,9 +4,11 @@ import csv
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
+
+from .academic_calendar import FALL_2026_START_DATE, academic_week
 
 
 DATASET_PATH = Path(__file__).with_name("students.csv")
@@ -57,12 +59,16 @@ class StudentRepository:
                 CREATE TABLE IF NOT EXISTS courses (
                     student_id TEXT NOT NULL,
                     course_name TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'Current'
+                        CHECK(status IN ('Current', 'Completed', 'Withdrawn', 'Failed')),
                     PRIMARY KEY (student_id, course_name),
                     FOREIGN KEY (student_id) REFERENCES students(student_id)
                 );
                 CREATE TABLE IF NOT EXISTS semester_calendar (
                     semester TEXT PRIMARY KEY,
-                    current_week INTEGER NOT NULL CHECK(current_week >= 1)
+                    current_week INTEGER NOT NULL CHECK(current_week >= 1),
+                    start_date TEXT,
+                    end_date TEXT
                 );
                 CREATE TABLE IF NOT EXISTS course_offerings (
                     course_id TEXT PRIMARY KEY,
@@ -115,6 +121,71 @@ class StudentRepository:
                     source_url TEXT,
                     FOREIGN KEY (course_id) REFERENCES course_offerings(course_id),
                     FOREIGN KEY (lecture_id) REFERENCES lectures(lecture_id)
+                );
+                CREATE TABLE IF NOT EXISTS material_documents (
+                    document_id TEXT PRIMARY KEY,
+                    course_id TEXT NOT NULL,
+                    course_name TEXT NOT NULL,
+                    major_code TEXT NOT NULL,
+                    program_semester INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    week_number INTEGER,
+                    original_filename TEXT NOT NULL,
+                    source_archive_path TEXT NOT NULL,
+                    storage_provider TEXT NOT NULL,
+                    storage_path TEXT NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    checksum TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    page_count INTEGER,
+                    visibility TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(course_id, checksum)
+                );
+                CREATE TABLE IF NOT EXISTS material_chunks (
+                    chunk_id TEXT PRIMARY KEY,
+                    document_id TEXT NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    page_start INTEGER,
+                    page_end INTEGER,
+                    token_count INTEGER NOT NULL,
+                    embedding_json TEXT NOT NULL,
+                    FOREIGN KEY (document_id) REFERENCES material_documents(document_id)
+                        ON DELETE CASCADE,
+                    UNIQUE(document_id, chunk_index)
+                );
+                CREATE TABLE IF NOT EXISTS material_summaries (
+                    document_id TEXT PRIMARY KEY,
+                    summary TEXT NOT NULL,
+                    learning_objectives_json TEXT NOT NULL,
+                    keywords_json TEXT NOT NULL,
+                    generator TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (document_id) REFERENCES material_documents(document_id)
+                        ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS material_ingestion_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    source TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    report_json TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_material_documents_scope
+                    ON material_documents(major_code, program_semester, course_id, category);
+                CREATE INDEX IF NOT EXISTS idx_material_chunks_document
+                    ON material_chunks(document_id, chunk_index);
+                CREATE VIRTUAL TABLE IF NOT EXISTS material_chunks_fts USING fts5(
+                    chunk_id UNINDEXED,
+                    content,
+                    title,
+                    course_name,
+                    tokenize='unicode61'
                 );
                 CREATE TABLE IF NOT EXISTS weekly_progress_snapshots (
                     snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -194,6 +265,27 @@ class StudentRepository:
                     PRIMARY KEY (student_id, notification_id),
                     FOREIGN KEY (student_id) REFERENCES students(student_id)
                 );
+                CREATE TABLE IF NOT EXISTS attendance (
+                    attendance_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    student_id TEXT NOT NULL,
+                    course_code TEXT NOT NULL,
+                    semester_id TEXT NOT NULL,
+                    week_number INTEGER NOT NULL CHECK(week_number BETWEEN 1 AND 16),
+                    session_date TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('Present', 'Absent', 'Excused', 'Late')),
+                    created_at TEXT NOT NULL,
+                    UNIQUE(student_id, course_code, semester_id, week_number),
+                    FOREIGN KEY (student_id) REFERENCES students(student_id),
+                    FOREIGN KEY (course_code) REFERENCES course_offerings(course_id),
+                    FOREIGN KEY (semester_id) REFERENCES semester_calendar(semester)
+                );
+                CREATE TABLE IF NOT EXISTS attendance_auto_drops (
+                    student_id TEXT NOT NULL,
+                    course_code TEXT NOT NULL,
+                    semester_id TEXT NOT NULL,
+                    dropped_at TEXT NOT NULL,
+                    PRIMARY KEY (student_id, course_code, semester_id)
+                );
                 CREATE TABLE IF NOT EXISTS course_schedule_slots (
                     schedule_slot_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     course_id TEXT NOT NULL,
@@ -206,6 +298,22 @@ class StudentRepository:
                 );
                 """
             )
+            course_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(courses)")
+            }
+            if "status" not in course_columns:
+                connection.execute(
+                    "ALTER TABLE courses ADD COLUMN status TEXT NOT NULL DEFAULT 'Current'"
+                )
+            semester_columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(semester_calendar)")
+            }
+            for name in ("start_date", "end_date"):
+                if name not in semester_columns:
+                    connection.execute(
+                        f"ALTER TABLE semester_calendar ADD COLUMN {name} TEXT"
+                    )
             gradebook_columns = {row[1] for row in connection.execute("PRAGMA table_info(course_gradebook_entries)")}
             for name, definition in {
                 "coursework_mark": "REAL CHECK(coursework_mark BETWEEN 0 AND 10)",
@@ -241,19 +349,32 @@ class StudentRepository:
                             float(row["gpa"]),
                         ),
                     )
-                    connection.execute(
-                        "DELETE FROM courses WHERE student_id = ?", (student_id,)
-                    )
                     courses = [
                         course.strip()
                         for course in row["courses"].split("|")
                         if course.strip()
                     ]
                     connection.executemany(
-                        "INSERT INTO courses (student_id, course_name) VALUES (?, ?)",
+                        """INSERT INTO courses (student_id, course_name)
+                           VALUES (?, ?)
+                           ON CONFLICT(student_id, course_name) DO NOTHING""",
                         ((student_id, course) for course in courses),
                     )
             self._seed_prototype_academic_data(connection)
+            current_week = academic_week(FALL_2026_START_DATE)
+            connection.execute(
+                """UPDATE semester_calendar
+                   SET current_week=?,
+                       start_date=?,
+                       end_date=COALESCE(end_date, '2027-01-31')
+                   WHERE semester='Fall 2026'""",
+                (current_week, FALL_2026_START_DATE.isoformat()),
+            )
+            connection.execute(
+                """UPDATE assessments
+                   SET name='Week 7 exam', weight=30, due_week=7
+                   WHERE assessment_id LIKE '%-mid'"""
+            )
             self._seed_portal_gradebook(connection)
 
     @staticmethod
@@ -302,7 +423,7 @@ class StudentRepository:
                     (f"{course_id}-a1", course_id, "Assignment 1", "assignment", 15, 3, "[\"%s-l1\", \"%s-l2\"]" % (course_id, course_id)),
                     (f"{course_id}-a2", course_id, "Assignment 2", "assignment", 15, 5, "[\"%s-l3\", \"%s-l4\"]" % (course_id, course_id)),
                     (f"{course_id}-lab1", course_id, "Lab 1", "lab", 10, 4, "[\"%s-l2\", \"%s-l3\"]" % (course_id, course_id)),
-                    (f"{course_id}-mid", course_id, "Midterm", "midterm", 25, 6, json.dumps([f"{course_id}-l{number}" for number in range(1, 7)])),
+                    (f"{course_id}-mid", course_id, "Week 7 exam", "midterm", 30, 7, json.dumps([f"{course_id}-l{number}" for number in range(1, 7)])),
                     (f"{course_id}-final", course_id, "Final", "final", 35, 12, json.dumps([f"{course_id}-l{number}" for number in range(1, 7)])),
                 ]
             )
@@ -357,7 +478,8 @@ class StudentRepository:
             if row is None:
                 return None
             course_rows = connection.execute(
-                "SELECT course_name FROM courses WHERE student_id = ? ORDER BY rowid",
+                """SELECT course_name FROM courses
+                   WHERE student_id = ? AND status = 'Current' ORDER BY rowid""",
                 (normalized_id,),
             ).fetchall()
         return Student(
@@ -384,7 +506,8 @@ class StudentRepository:
                 """SELECT offering.course_id, offering.course_name
                    FROM courses enrollment
                    JOIN course_offerings offering ON offering.course_name = enrollment.course_name
-                   WHERE enrollment.student_id = ? ORDER BY enrollment.rowid""",
+                   WHERE enrollment.student_id = ? AND enrollment.status = 'Current'
+                   ORDER BY enrollment.rowid""",
                 (student_id,),
             ).fetchall()
             schedules = connection.execute(
@@ -432,7 +555,7 @@ class StudentRepository:
                      ON offering.course_name = enrollment.course_name
                    LEFT JOIN course_schedule_slots slot
                      ON slot.course_id = offering.course_id
-                   WHERE enrollment.student_id = ?
+                   WHERE enrollment.student_id = ? AND enrollment.status = 'Current'
                    ORDER BY offering.course_name, slot.day_of_week,
                             slot.start_minute""",
                 (student.student_id,),
@@ -468,6 +591,220 @@ class StudentRepository:
             "courses": list(courses.values()),
         }
 
+    def upsert_material_document(self, document: dict[str, Any]) -> None:
+        fields = (
+            "document_id", "course_id", "course_name", "major_code",
+            "program_semester", "title", "category", "week_number",
+            "original_filename", "source_archive_path", "storage_provider",
+            "storage_path", "mime_type", "checksum", "size_bytes",
+            "page_count", "visibility", "status", "created_at", "updated_at",
+        )
+        with self._connect() as connection:
+            connection.execute(
+                f"""INSERT INTO material_documents ({', '.join(fields)})
+                    VALUES ({', '.join('?' for _ in fields)})
+                    ON CONFLICT(document_id) DO UPDATE SET
+                      course_id=excluded.course_id,
+                      course_name=excluded.course_name,
+                      major_code=excluded.major_code,
+                      program_semester=excluded.program_semester,
+                      title=excluded.title,
+                      category=excluded.category,
+                      week_number=excluded.week_number,
+                      original_filename=excluded.original_filename,
+                      source_archive_path=excluded.source_archive_path,
+                      storage_provider=excluded.storage_provider,
+                      storage_path=excluded.storage_path,
+                      mime_type=excluded.mime_type,
+                      checksum=excluded.checksum,
+                      size_bytes=excluded.size_bytes,
+                      page_count=excluded.page_count,
+                      visibility=excluded.visibility,
+                      status=excluded.status,
+                      updated_at=excluded.updated_at""",
+                tuple(document.get(field) for field in fields),
+            )
+
+    def replace_material_chunks(
+        self, document_id: str, chunks: list[dict[str, Any]]
+    ) -> None:
+        with self._connect() as connection:
+            old_ids = [
+                row["chunk_id"]
+                for row in connection.execute(
+                    "SELECT chunk_id FROM material_chunks WHERE document_id = ?",
+                    (document_id,),
+                )
+            ]
+            connection.executemany(
+                "DELETE FROM material_chunks_fts WHERE chunk_id = ?",
+                ((chunk_id,) for chunk_id in old_ids),
+            )
+            connection.execute(
+                "DELETE FROM material_chunks WHERE document_id = ?", (document_id,)
+            )
+            document = connection.execute(
+                "SELECT title, course_name FROM material_documents WHERE document_id = ?",
+                (document_id,),
+            ).fetchone()
+            if document is None:
+                raise ValueError(f"Unknown material document: {document_id}")
+            connection.executemany(
+                """INSERT INTO material_chunks
+                   (chunk_id, document_id, chunk_index, content, page_start,
+                    page_end, token_count, embedding_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    (
+                        chunk["chunk_id"], document_id, chunk["chunk_index"],
+                        chunk["content"], chunk.get("page_start"),
+                        chunk.get("page_end"), chunk["token_count"],
+                        json.dumps(chunk["embedding"], separators=(",", ":")),
+                    )
+                    for chunk in chunks
+                ),
+            )
+            connection.executemany(
+                """INSERT INTO material_chunks_fts
+                   (chunk_id, content, title, course_name) VALUES (?, ?, ?, ?)""",
+                (
+                    (
+                        chunk["chunk_id"], chunk["content"],
+                        document["title"], document["course_name"],
+                    )
+                    for chunk in chunks
+                ),
+            )
+
+    def upsert_material_summary(
+        self, document_id: str, summary: dict[str, Any]
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO material_summaries
+                   (document_id, summary, learning_objectives_json,
+                    keywords_json, generator, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(document_id) DO UPDATE SET
+                     summary=excluded.summary,
+                     learning_objectives_json=excluded.learning_objectives_json,
+                     keywords_json=excluded.keywords_json,
+                     generator=excluded.generator,
+                     updated_at=excluded.updated_at""",
+                (
+                    document_id,
+                    summary.get("summary", ""),
+                    json.dumps(summary.get("learning_objectives", [])),
+                    json.dumps(summary.get("keywords", [])),
+                    summary.get("generator", "unknown"),
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+
+    def save_material_ingestion_job(self, job: dict[str, Any]) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO material_ingestion_jobs
+                   (job_id, source, status, report_json, started_at, finished_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(job_id) DO UPDATE SET
+                     status=excluded.status,
+                     report_json=excluded.report_json,
+                     finished_at=excluded.finished_at""",
+                (
+                    job["job_id"], job["source"], job["status"],
+                    json.dumps(job, ensure_ascii=False), job["started_at"],
+                    job.get("finished_at"),
+                ),
+            )
+
+    def list_student_materials(
+        self, student_id: str, course_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        student = self.get_student(student_id)
+        if student is None:
+            return []
+        current_semester = max(1, student.year * 2 - 1)
+        parameters: list[Any] = [student.major.casefold(), current_semester]
+        course_filter = ""
+        if course_id:
+            course_filter = " AND document.course_id = ?"
+            parameters.append(course_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""SELECT document.*, summary.summary,
+                           summary.learning_objectives_json,
+                           summary.keywords_json
+                    FROM material_documents document
+                    LEFT JOIN material_summaries summary
+                      ON summary.document_id = document.document_id
+                    WHERE lower(document.major_code) IN ('cs', 'computer science')
+                      AND ? IN ('computer science', 'cs')
+                      AND document.program_semester = ?
+                      AND document.visibility IN ('student', 'student_practice')
+                      {course_filter}
+                    ORDER BY document.course_name, document.week_number,
+                             document.category, document.title""",
+                parameters,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def search_student_materials(
+        self,
+        student_id: str,
+        query: str,
+        *,
+        course_id: str | None = None,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        from backend.materials.retrieval import cosine_similarity, embed_text, search_terms
+
+        documents = self.list_student_materials(student_id, course_id)
+        if not documents:
+            return []
+        document_ids = {str(document["document_id"]) for document in documents}
+        metadata = {str(document["document_id"]): document for document in documents}
+        placeholders = ", ".join("?" for _ in document_ids)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""SELECT * FROM material_chunks
+                    WHERE document_id IN ({placeholders})""",
+                tuple(document_ids),
+            ).fetchall()
+        query_terms = set(search_terms(query))
+        query_embedding = embed_text(query)
+        ranked: list[tuple[float, dict[str, Any]]] = []
+        for row in rows:
+            item = dict(row)
+            content_terms = set(search_terms(str(item["content"])))
+            lexical = len(query_terms & content_terms) / max(1, len(query_terms))
+            semantic = cosine_similarity(
+                query_embedding, json.loads(str(item["embedding_json"]))
+            )
+            score = lexical * 0.65 + max(0.0, semantic) * 0.35
+            document = metadata[str(item["document_id"])]
+            ranked.append(
+                (
+                    score,
+                    {
+                        "chunk_id": item["chunk_id"],
+                        "document_id": item["document_id"],
+                        "course_id": document["course_id"],
+                        "course_name": document["course_name"],
+                        "title": document["title"],
+                        "category": document["category"],
+                        "week_number": document["week_number"],
+                        "page_start": item["page_start"],
+                        "page_end": item["page_end"],
+                        "content": item["content"],
+                        "storage_path": document["storage_path"],
+                        "score": round(score, 6),
+                    },
+                )
+            )
+        ranked.sort(key=lambda value: (-value[0], value[1]["course_name"], value[1]["title"]))
+        return [item for score, item in ranked[:limit] if score > 0]
+
     @staticmethod
     def _seed_portal_gradebook(connection: sqlite3.Connection) -> None:
         if connection.execute("SELECT 1 FROM course_gradebook_entries LIMIT 1").fetchone():
@@ -477,6 +814,7 @@ class StudentRepository:
             """SELECT enrollment.student_id, offering.course_id, offering.semester
                FROM courses enrollment
                JOIN course_offerings offering ON offering.course_name = enrollment.course_name
+               WHERE enrollment.status = 'Current'
                ORDER BY enrollment.student_id, offering.course_name"""
         ).fetchall()
         now = datetime.now(UTC).isoformat()
@@ -531,7 +869,9 @@ class StudentRepository:
                 """SELECT offering.course_id, offering.course_name, offering.semester,
                           COUNT(enrollment.student_id) AS student_count
                    FROM course_offerings offering
-                   LEFT JOIN courses enrollment ON enrollment.course_name = offering.course_name
+                   LEFT JOIN courses enrollment
+                     ON enrollment.course_name = offering.course_name
+                    AND enrollment.status = 'Current'
                    GROUP BY offering.course_id, offering.course_name, offering.semester
                    ORDER BY offering.semester DESC, offering.course_name"""
             ).fetchall()
@@ -574,6 +914,7 @@ class StudentRepository:
                     AND grade.course_id = offering.course_id
                     AND grade.semester = offering.semester
                    WHERE offering.course_id = ? AND offering.semester = ?
+                     AND enrollment.status = 'Current'
                    ORDER BY student.name""",
                 (course["course_id"], course["semester"]),
             ).fetchall()
@@ -634,7 +975,7 @@ class StudentRepository:
             rows = connection.execute(
                 """SELECT offering.course_id, offering.course_id AS course_code,
                           offering.course_name, offering.semester,
-                          'Current' AS enrollment_status,
+                          enrollment.status AS enrollment_status,
                           NULL AS stored_letter_grade,
                           CASE WHEN grade.student_id IS NULL THEN 'none' ELSE 'gradebook' END AS grade_source,
                           grade.coursework_mark,
@@ -653,6 +994,182 @@ class StudentRepository:
                 (student_id,),
             ).fetchall()
         return {"student": student.as_dict(), "records": [dict(row) for row in rows]}
+
+    def get_portal_course_attendance(
+        self, course_id: str, session_date: date
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            course = connection.execute(
+                """SELECT offering.course_id, offering.course_name,
+                          offering.semester, calendar.current_week,
+                          calendar.start_date, calendar.end_date
+                   FROM course_offerings offering
+                   JOIN semester_calendar calendar
+                     ON calendar.semester = offering.semester
+                   WHERE offering.course_id = ?""",
+                (course_id,),
+            ).fetchone()
+            if course is None:
+                return None
+
+            if course["start_date"]:
+                start_date = date.fromisoformat(str(course["start_date"]))
+                week_number = ((session_date - start_date).days // 7) + 1
+            else:
+                week_number = int(course["current_week"])
+            if week_number < 1 or week_number > 16:
+                raise ValueError("Attendance date must fall within the 16 teaching weeks")
+
+            rows = connection.execute(
+                """SELECT student.student_id, student.name AS student_name,
+                          COALESCE(record.status, 'Present') AS status,
+                          enrollment.status AS enrollment_status,
+                          (
+                            SELECT COUNT(*) FROM attendance history
+                            WHERE history.student_id = student.student_id
+                              AND history.course_code = offering.course_id
+                              AND history.semester_id = offering.semester
+                              AND history.status = 'Absent'
+                          ) AS absence_count
+                   FROM courses enrollment
+                   JOIN students student ON student.student_id = enrollment.student_id
+                   JOIN course_offerings offering
+                     ON offering.course_name = enrollment.course_name
+                   LEFT JOIN attendance record
+                     ON record.student_id = student.student_id
+                    AND record.course_code = offering.course_id
+                    AND record.semester_id = offering.semester
+                    AND record.week_number = ?
+                   WHERE offering.course_id = ?
+                     AND (enrollment.status = 'Current' OR record.attendance_id IS NOT NULL)
+                   ORDER BY student.name""",
+                (week_number, course_id),
+            ).fetchall()
+
+        return {
+            "course": {
+                "course_id": course["course_id"],
+                "course_name": course["course_name"],
+                "semester": course["semester"],
+            },
+            "session_date": session_date.isoformat(),
+            "week_number": week_number,
+            "rows": [dict(row) for row in rows],
+        }
+
+    def save_portal_course_attendance(
+        self, course_id: str, session_date: date, rows: list[dict[str, Any]]
+    ) -> dict[str, Any] | None:
+        attendance = self.get_portal_course_attendance(course_id, session_date)
+        if attendance is None:
+            return None
+        valid_student_ids = {str(row["student_id"]) for row in attendance["rows"]}
+        unknown = sorted(
+            str(row["student_id"])
+            for row in rows
+            if str(row["student_id"]) not in valid_student_ids
+        )
+        if unknown:
+            raise ValueError(f"Unknown or unenrolled students: {', '.join(unknown)}")
+
+        semester = str(attendance["course"]["semester"])
+        week_number = int(attendance["week_number"])
+        now = datetime.now(UTC).isoformat()
+        dropped_student_ids: list[str] = []
+        restored_student_ids: list[str] = []
+        with self._connect() as connection:
+            connection.executemany(
+                """INSERT INTO attendance
+                   (student_id, course_code, semester_id, week_number,
+                    session_date, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(student_id, course_code, semester_id, week_number)
+                   DO UPDATE SET session_date=excluded.session_date,
+                                 status=excluded.status""",
+                (
+                    (
+                        str(row["student_id"]), course_id, semester, week_number,
+                        session_date.isoformat(), str(row["status"]), now,
+                    )
+                    for row in rows
+                ),
+            )
+            course_name = str(attendance["course"]["course_name"])
+            for row in rows:
+                student_id = str(row["student_id"])
+                absence_count = int(
+                    connection.execute(
+                        """SELECT COUNT(*) FROM attendance
+                           WHERE student_id = ? AND course_code = ?
+                             AND semester_id = ? AND status = 'Absent'""",
+                        (student_id, course_id, semester),
+                    ).fetchone()[0]
+                )
+                tracked = connection.execute(
+                    """SELECT 1 FROM attendance_auto_drops
+                       WHERE student_id = ? AND course_code = ? AND semester_id = ?""",
+                    (student_id, course_id, semester),
+                ).fetchone()
+                if absence_count >= 4:
+                    connection.execute(
+                        """INSERT INTO attendance_auto_drops
+                           (student_id, course_code, semester_id, dropped_at)
+                           VALUES (?, ?, ?, ?)
+                           ON CONFLICT(student_id, course_code, semester_id) DO NOTHING""",
+                        (student_id, course_id, semester, now),
+                    )
+                    changed = connection.execute(
+                        """UPDATE courses SET status = 'Withdrawn'
+                           WHERE student_id = ? AND course_name = ? AND status = 'Current'""",
+                        (student_id, course_name),
+                    ).rowcount
+                    if changed:
+                        dropped_student_ids.append(student_id)
+                elif tracked is not None:
+                    connection.execute(
+                        """DELETE FROM attendance_auto_drops
+                           WHERE student_id = ? AND course_code = ? AND semester_id = ?""",
+                        (student_id, course_id, semester),
+                    )
+                    changed = connection.execute(
+                        """UPDATE courses SET status = 'Current'
+                           WHERE student_id = ? AND course_name = ? AND status = 'Withdrawn'""",
+                        (student_id, course_name),
+                    ).rowcount
+                    if changed:
+                        restored_student_ids.append(student_id)
+
+        refreshed = self.get_portal_course_attendance(course_id, session_date)
+        assert refreshed is not None
+        return {
+            **refreshed,
+            "dropped_student_ids": dropped_student_ids,
+            "restored_student_ids": restored_student_ids,
+        }
+
+    def get_attendance_alerts(self, student_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT record.course_code AS course_id,
+                          offering.course_name, record.semester_id AS semester,
+                          COUNT(*) AS absence_count,
+                          CASE WHEN auto_drop.student_id IS NULL THEN 0 ELSE 1 END
+                            AS automatically_dropped
+                   FROM attendance record
+                   JOIN course_offerings offering
+                     ON offering.course_id = record.course_code
+                   LEFT JOIN attendance_auto_drops auto_drop
+                     ON auto_drop.student_id = record.student_id
+                    AND auto_drop.course_code = record.course_code
+                    AND auto_drop.semester_id = record.semester_id
+                   WHERE record.student_id = ? AND record.status = 'Absent'
+                   GROUP BY record.course_code, offering.course_name,
+                            record.semester_id, auto_drop.student_id
+                   HAVING COUNT(*) >= 3
+                   ORDER BY record.semester_id DESC, offering.course_name""",
+                (student_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def get_read_notification_ids(self, student_id: str) -> set[str]:
         with self._connect() as connection:
@@ -693,16 +1210,22 @@ class StudentRepository:
         with self._connect() as connection:
             course_rows = connection.execute(
                 """SELECT offering.course_id, offering.course_name, offering.semester,
-                          calendar.current_week
+                          calendar.current_week, calendar.start_date
                    FROM courses enrollment
                    JOIN course_offerings offering ON offering.course_name = enrollment.course_name
                    JOIN semester_calendar calendar ON calendar.semester = offering.semester
-                   WHERE enrollment.student_id = ? ORDER BY enrollment.rowid""",
+                   WHERE enrollment.student_id = ? AND enrollment.status = 'Current'
+                   ORDER BY enrollment.rowid""",
                 (student.student_id,),
             ).fetchall()
             courses: list[dict[str, Any]] = []
             for course in course_rows:
                 course_id = course["course_id"]
+                current_week = (
+                    academic_week(date.fromisoformat(str(course["start_date"])))
+                    if course["start_date"]
+                    else int(course["current_week"])
+                )
                 assessments = [dict(row) for row in connection.execute(
                     """SELECT assessment.assessment_id, assessment.name, assessment.assessment_type,
                               assessment.weight, assessment.due_week, assessment.covered_lecture_ids,
@@ -726,7 +1249,10 @@ class StudentRepository:
                     "SELECT material_id, title, material_type, lecture_id, source_url FROM course_materials WHERE course_id = ? ORDER BY title",
                     (course_id,),
                 )]
-                courses.append({**dict(course), "assessments": assessments, "lectures": lectures, "materials": materials})
+                course_record = dict(course)
+                course_record.pop("start_date", None)
+                course_record["current_week"] = current_week
+                courses.append({**course_record, "assessments": assessments, "lectures": lectures, "materials": materials})
         return {"student": student.as_dict(), "courses": courses}
 
     def get_previous_course_snapshot(self, student_id: str, course_id: str, week_number: int) -> dict[str, Any] | None:

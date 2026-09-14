@@ -53,6 +53,8 @@ export interface AttendanceRecord {
   studentId: string
   studentName: string
   status: AttendanceStatus
+  absenceCount?: number
+  enrollmentStatus?: string
 }
 
 export interface GradeRow {

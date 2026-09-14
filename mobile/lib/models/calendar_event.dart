@@ -209,8 +209,14 @@ class StudentCalendarBuilder {
 
   static DateTime _semesterStart(DateTime now, int currentWeek) {
     final today = DateTime(now.year, now.month, now.day);
-    final monday = today.subtract(Duration(days: today.weekday - 1));
-    return monday.subtract(Duration(days: (currentWeek - 1) * 7));
+    final daysSinceSaturday = (today.weekday + 1) % 7;
+    final currentWeekSaturday = today.subtract(
+      Duration(days: daysSinceSaturday),
+    );
+    // Calendar events retain the established Monday-Sunday placement grid.
+    return currentWeekSaturday
+        .subtract(Duration(days: (currentWeek - 1) * 7))
+        .add(const Duration(days: 2));
   }
 
   static DateTime _nextStudySlot(

@@ -128,7 +128,7 @@ NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your_neo4j_password
 AEGIS_CURRENT_SEMESTER=...
-AEGIS_CURRENT_WEEK=...
+AEGIS_SEMESTER_START_DATE=2026-08-08
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-3.5-flash
 GEMINI_FALLBACK_MODELS=gemini-3.5-flash-lite
@@ -241,6 +241,42 @@ python -m backend.advisor.seed_neo4j
 The synchronization imports every course and prerequisite relationship. When
 available, it also imports department plans, major electives, programmes, and
 student-to-programme enrollment.
+
+## Semester course-material library
+
+The material pipeline maps files to official course codes, removes exact
+duplicates, excludes system metadata and named student submissions, preserves
+private originals, extracts page/slide text, creates citable chunks and
+summaries, and publishes a hybrid full-text/vector index. Exam papers and model
+answers are labeled `exam_practice` and are never presented as predictions of a
+future exam.
+
+Import an approved archive into the private local library and SQLite index:
+
+```bash
+python scripts/ingest_semester_materials.py \
+  --archive "/path/to/Semester 5.zip" \
+  --database database/aegisos.db \
+  --storage-root workspace/materials
+```
+
+Publish the resulting metadata, summaries, and vectors to PostgreSQL:
+
+```bash
+python scripts/sync_materials_to_postgres.py --database database/aegisos.db
+```
+
+Students can browse `/portal/students/{student_id}/materials`, search
+`/portal/students/{student_id}/materials/search?q=...`, download authorized
+source files, or ask Advisor AI for a cited summary or explanation. Access is
+restricted by the student's major and current programme semester. Files marked
+`needs_ocr` remain downloadable but are not used as text evidence until an OCR
+worker processes them.
+
+An optional `scripts/ocr_materials.py` worker can transcribe scanned PDFs with
+the configured Gemini service while preserving page numbers. This sends each
+selected PDF to that external service and must only be run when the material
+owner has explicitly approved that transfer.
 
 ---
 

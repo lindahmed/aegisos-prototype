@@ -21,6 +21,7 @@ export default function AttendanceTable({ records, onChange }: AttendanceTablePr
         <thead>
           <tr className="border-b border-border bg-surface-raised text-xs font-semibold uppercase tracking-wide text-text-muted">
             <th className="px-4 py-3">Student</th>
+            <th className="px-4 py-3">Course absences</th>
             <th className="px-4 py-3">Attendance Status</th>
           </tr>
         </thead>
@@ -30,6 +31,14 @@ export default function AttendanceTable({ records, onChange }: AttendanceTablePr
               <td className="px-4 py-3.5">
                 <p className="font-medium text-text-primary">{r.studentName}</p>
                 <p className="font-mono text-xs text-text-muted">{r.studentId}</p>
+              </td>
+              <td className="px-4 py-3.5">
+                <span className={r.absenceCount && r.absenceCount >= 3 ? 'font-semibold text-error' : 'text-text-secondary'}>
+                  {r.absenceCount ?? 0}
+                </span>
+                {r.enrollmentStatus === 'Withdrawn' && (
+                  <p className="mt-1 text-xs font-semibold text-error">Automatically dropped</p>
+                )}
               </td>
               <td className="px-4 py-3.5">
                 <div className="flex flex-wrap gap-1.5">
