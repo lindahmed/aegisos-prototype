@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src http://127.0.0.1:8000 https://backend-production-6069.up.railway.app; img-src 'self' data:; media-src 'self' data: blob:; style-src 'self'; script-src 'self'"
+    >
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Uni Track</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="brand-panel">
+        <button class="theme-toggle brand-theme-toggle" type="button" data-theme-toggle>
+          <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">&#9728;</span>
+          <span data-theme-label>Light mode</span>
+        </button>
+        <img class="brand-mark" src="assets/unitrack-logo.jpeg" alt="Uni Track logo">
+        <p class="eyebrow">Personal student environment</p>
+        <h1>Uni Track</h1>
+        <p class="brand-copy">
+          One focused place for your courses, local workspaces, development tools, and AI advising.
+        </p>
+        <div class="runtime-status">
+          <span class="status-dot" aria-hidden="true"></span>
+          Ubuntu + XFCE workspace
+        </div>
+      </aside>
+
+      <section class="content-panel">
+        <section id="login-view" class="view login-view" aria-labelledby="login-title">
+          <p class="eyebrow">Student access</p>
+          <h2 id="login-title">Open your workspace</h2>
+          <p class="intro">Enter a prototype student ID to load the matching SQLite profile.</p>
+          <form id="login-form">
+            <label for="student-id">Student ID</label>
+            <input
+              id="student-id"
+              name="student-id"
+              inputmode="numeric"
+              autocomplete="off"
+              value="231027905"
+              required
+            >
+            <p class="field-hint">Demo IDs: 231027905, 231027906, 231027907</p>
+            <button id="login-button" class="primary-button" type="submit">
+              Load student dashboard
+            </button>
+          </form>
+          <p id="login-status" class="message" role="status" aria-live="polite"></p>
+        </section>
+
+        <section id="dashboard-view" class="view dashboard-view" aria-labelledby="welcome-title" hidden>
+          <header class="dashboard-header">
+            <div>
+              <p class="eyebrow">Student dashboard</p>
+              <h2 id="welcome-title">Welcome</h2>
+            </div>
+            <div class="header-actions">
+              <button class="theme-toggle" type="button" data-theme-toggle>
+                <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">&#9728;</span>
+                <span data-theme-label>Light mode</span>
+              </button>
+              <div class="notif-wrap">
+                <button id="notif-button" class="icon-button" type="button" aria-label="Notifications" aria-expanded="false">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"></path>
+                    <path d="M13.7 21a2 2 0 0 1-3.4 0"></path>
+                  </svg>
+                  <span id="notif-badge" class="notif-badge" hidden>0</span>
+                </button>
+                <section id="notif-panel" class="notif-panel" hidden aria-label="Notifications">
+                  <div class="notif-panel-header">
+                    <h3>Notifications</h3>
+                    <button id="notif-clear-button" class="text-button" type="button">Mark all read</button>
+                  </div>
+                  <div id="notif-list" class="notif-list"></div>
+                  <p id="notif-empty" class="notif-empty">You are all caught up.</p>
+                </section>
+              </div>
+              <button id="sign-out-button" class="text-button" type="button">Change student</button>
+            </div>
+          </header>
+
+          <dl class="student-stats">
+            <div><dt>Major</dt><dd id="student-major">-</dd></div>
+            <div><dt>Year</dt><dd id="student-year">-</dd></div>
+            <div><dt>GPA</dt><dd id="student-gpa">-</dd></div>
+          </dl>
+
+          <nav class="dashboard-tabs" aria-label="Dashboard sections">
+            <button id="workspace-tab" class="tab-button" type="button" aria-pressed="true">
+              Workspace
+            </button>
+            <button id="advisor-tab" class="tab-button" type="button" aria-pressed="false">
+              Advisor AI
+            </button>
+            <button id="progress-tab" class="tab-button" type="button" aria-pressed="false">
+              Progress
+            </button>
+            <button id="calendar-tab" class="tab-button" type="button" aria-pressed="false">
+              Calendar
+            </button>
+          </nav>
+
+          <section id="workspace-panel" class="dashboard-page workspace-panel">
+            <section class="course-section" aria-labelledby="courses-title">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Enrolled courses</p>
+                  <h3 id="courses-title">Choose a course workspace</h3>
+                </div>
+                <span id="course-count" class="count-badge"></span>
+              </div>
+              <div id="course-list" class="course-list"></div>
+            </section>
+
+            <div class="action-grid">
+              <button id="create-workspace-button" class="secondary-button" type="button">
+                <span>Create / open folder</span>
+                <small>Prepare assignments and labs</small>
+              </button>
+              <button id="open-vscode-button" class="primary-button" type="button">
+                <span>Open in VS Code</span>
+                <small>Launch the selected course</small>
+              </button>
+            </div>
+            <p id="action-status" class="message" role="status" aria-live="polite"></p>
+          </section>
+
+          <section id="advisor-panel" class="dashboard-page advisor-panel" hidden>
+            <button class="page-back-button" type="button" data-dashboard-home>
+              <span aria-hidden="true">&#8592;</span> Back to dashboard
+            </button>
+            <div class="advisor-heading">
+              <div>
+                <p class="eyebrow">LangGraph + Gemini</p>
+                <h3>Advisor AI</h3>
+              </div>
+              <div class="advisor-controls">
+                <label for="advisor-language" class="sr-only">Language</label>
+                <select id="advisor-language" class="language-select" aria-label="Advisor language">
+                  <option value="english" selected>English</option>
+                  <option value="arabic">العربية</option>
+                </select>
+                <span id="advisor-intent" class="count-badge">Ready</span>
+              </div>
+            </div>
+
+            <div id="advisor-messages" class="advisor-messages" aria-live="polite"></div>
+
+            <form id="advisor-form" class="advisor-form">
+              <label for="advisor-input">Ask about your studies or career</label>
+              <div class="advisor-compose">
+                <textarea
+                  id="advisor-input"
+                  rows="2"
+                  maxlength="2000"
+                  placeholder="Example: What should I focus on next semester?"
+                  required
+                ></textarea>
+                <button id="advisor-voice-button" class="secondary-button voice-button" type="button" aria-label="Record voice message" title="Record voice message">
+                  <span class="mic-icon">Mic</span>
+                  <span class="recording-indicator" hidden>REC</span>
+                </button>
+                <button id="advisor-send-button" class="primary-button" type="submit">Send</button>
+              </div>
+            </form>
+            <p id="advisor-status" class="message" role="status" aria-live="polite"></p>
+          </section>
+
+          <section id="progress-panel" class="dashboard-page progress-panel" hidden>
+            <button class="page-back-button" type="button" data-dashboard-home>
+              <span aria-hidden="true">&#8592;</span> Back to dashboard
+            </button>
+            <div class="advisor-heading">
+              <div>
+                <p class="eyebrow">Student Digital Twin</p>
+                <h3>Semester progress</h3>
+              </div>
+              <span id="progress-week" class="count-badge">Loading</span>
+            </div>
+            <div class="progress-summary">
+              <div><span>Academic health</span><strong id="overall-health">-</strong></div>
+              <div><span>Current recommendation</span><p id="current-intervention">No intervention recorded yet.</p></div>
+            </div>
+            <div id="progress-course-list" class="progress-course-list"></div>
+            <p id="progress-status" class="message" role="status" aria-live="polite"></p>
+          </section>
+
+          <section id="calendar-panel" class="dashboard-page calendar-panel" hidden>
+            <button class="page-back-button" type="button" data-dashboard-home>
+              <span aria-hidden="true">&#8592;</span> Back to dashboard
+            </button>
+            <div class="calendar-heading">
+              <div>
+                <p class="eyebrow">Academic + personal planner</p>
+                <h3>My calendar</h3>
+              </div>
+              <div class="calendar-actions">
+                <button id="calendar-ai-button" class="secondary-button" type="button">Plan with AI</button>
+                <button id="calendar-add-button" class="primary-button" type="button">Add event</button>
+              </div>
+            </div>
+
+            <p class="calendar-note">
+              Exams are placed on Monday at 9:00 AM and assignment deadlines on Sunday at 10:00 PM of their academic week because the academic system provides week numbers rather than exact dates.
+            </p>
+
+            <div class="calendar-toolbar">
+              <button id="calendar-previous-button" class="calendar-nav-button" type="button" aria-label="Previous month">&#8249;</button>
+              <h4 id="calendar-month-title">Month</h4>
+              <button id="calendar-next-button" class="calendar-nav-button" type="button" aria-label="Next month">&#8250;</button>
+              <button id="calendar-today-button" class="text-button" type="button">Today</button>
+            </div>
+
+            <div class="calendar-layout">
+              <div class="calendar-board">
+                <div class="calendar-weekdays" aria-hidden="true">
+                  <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+                </div>
+                <div id="calendar-grid" class="calendar-grid" aria-label="Month calendar"></div>
+              </div>
+              <aside class="calendar-agenda" aria-live="polite">
+                <div class="calendar-agenda-heading">
+                  <div>
+                    <p class="eyebrow">Selected day</p>
+                    <h4 id="calendar-selected-title">Today</h4>
+                  </div>
+                  <button id="calendar-day-add-button" class="calendar-inline-add" type="button" aria-label="Add event on selected day">+</button>
+                </div>
+                <div id="calendar-agenda-list" class="calendar-agenda-list"></div>
+              </aside>
+            </div>
+
+            <div class="calendar-legend" aria-label="Calendar legend">
+              <span><i class="exam"></i>Exam</span>
+              <span><i class="assignment"></i>Deadline</span>
+              <span><i class="study_session"></i>Study session</span>
+              <span><i class="personal"></i>Personal</span>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <div id="calendar-modal" class="calendar-modal" hidden>
+      <button id="calendar-modal-overlay" class="calendar-modal-overlay" type="button" aria-label="Close event editor"></button>
+      <section class="calendar-dialog" role="dialog" aria-modal="true" aria-labelledby="calendar-dialog-title">
+        <div class="calendar-dialog-heading">
+          <div>
+            <p class="eyebrow">Personal planner</p>
+            <h3 id="calendar-dialog-title">Add calendar event</h3>
+          </div>
+          <button id="calendar-modal-close" class="calendar-close-button" type="button" aria-label="Close">&#10005;</button>
+        </div>
+        <form id="calendar-event-form" class="calendar-event-form">
+          <label>Title<input id="calendar-event-title" maxlength="100" required></label>
+          <label>Description<textarea id="calendar-event-description" maxlength="400" rows="3" placeholder="Optional notes"></textarea></label>
+          <div class="calendar-form-row">
+            <label>Date<input id="calendar-event-date" type="date" required></label>
+            <label>Start time<input id="calendar-event-time" type="time" value="18:00" required></label>
+          </div>
+          <div class="calendar-form-row">
+            <label>Duration
+              <select id="calendar-event-duration">
+                <option value="30">30 minutes</option>
+                <option value="60" selected>1 hour</option>
+                <option value="90">1.5 hours</option>
+                <option value="120">2 hours</option>
+              </select>
+            </label>
+            <label>Event type
+              <select id="calendar-event-type">
+                <option value="study_session">Study session</option>
+                <option value="personal">Personal event</option>
+              </select>
+            </label>
+          </div>
+          <p id="calendar-form-status" class="message" role="status" aria-live="polite"></p>
+          <div class="calendar-form-actions">
+            <button id="calendar-cancel-button" class="secondary-button" type="button">Cancel</button>
+            <button class="primary-button" type="submit">Save event</button>
+          </div>
+        </form>
+      </section>
+    </div>
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+    <script src="renderer.js"></script>
+  </body>
+</html>

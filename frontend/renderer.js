@@ -1,0 +1,1193 @@
+const apiBaseUrl = window.aegis.apiBaseUrl;
+const academicApiBaseUrl = window.aegis.academicApiBaseUrl || apiBaseUrl;
+const themeToggleButtons = document.querySelectorAll('[data-theme-toggle]');
+const dashboardHomeButtons = document.querySelectorAll('[data-dashboard-home]');
+
+const THEME_STORAGE_KEY = 'aegisos-theme';
+
+
+function preferredTheme() {
+  const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+  if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme;
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+
+function applyTheme(theme, persist = false) {
+  const isLight = theme === 'light';
+  document.documentElement.dataset.theme = isLight ? 'light' : 'dark';
+  if (persist) localStorage.setItem(THEME_STORAGE_KEY, isLight ? 'light' : 'dark');
+
+  for (const button of themeToggleButtons) {
+    const nextTheme = isLight ? 'dark' : 'light';
+    button.setAttribute('aria-label', `Switch to ${nextTheme} mode`);
+    button.setAttribute('title', `Switch to ${nextTheme} mode`);
+    button.querySelector('[data-theme-icon]').textContent = isLight ? '\u263E' : '\u2600';
+    button.querySelector('[data-theme-label]').textContent =
+      `${nextTheme[0].toUpperCase()}${nextTheme.slice(1)} mode`;
+  }
+}
+
+
+applyTheme(preferredTheme());
+
+for (const button of themeToggleButtons) {
+  button.addEventListener('click', () => {
+    const nextTheme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    applyTheme(nextTheme, true);
+  });
+}
+
+
+const loginView = document.querySelector('#login-view');
+const dashboardView = document.querySelector('#dashboard-view');
+const loginForm = document.querySelector('#login-form');
+const loginButton = document.querySelector('#login-button');
+const studentIdInput = document.querySelector('#student-id');
+const loginStatus = document.querySelector('#login-status');
+const actionStatus = document.querySelector('#action-status');
+const courseList = document.querySelector('#course-list');
+const createWorkspaceButton = document.querySelector('#create-workspace-button');
+const openVsCodeButton = document.querySelector('#open-vscode-button');
+
+const workspaceTab = document.querySelector('#workspace-tab');
+const advisorTab = document.querySelector('#advisor-tab');
+const progressTab = document.querySelector('#progress-tab');
+const calendarTab = document.querySelector('#calendar-tab');
+const workspacePanel = document.querySelector('#workspace-panel');
+const advisorPanel = document.querySelector('#advisor-panel');
+const progressPanel = document.querySelector('#progress-panel');
+const calendarPanel = document.querySelector('#calendar-panel');
+const advisorForm = document.querySelector('#advisor-form');
+const advisorInput = document.querySelector('#advisor-input');
+const advisorSendButton = document.querySelector('#advisor-send-button');
+const advisorVoiceButton = document.querySelector('#advisor-voice-button');
+const advisorLanguage = document.querySelector('#advisor-language');
+const advisorMessages = document.querySelector('#advisor-messages');
+const advisorStatus = document.querySelector('#advisor-status');
+const advisorIntent = document.querySelector('#advisor-intent');
+
+const calendarGrid = document.querySelector('#calendar-grid');
+const calendarMonthTitle = document.querySelector('#calendar-month-title');
+const calendarSelectedTitle = document.querySelector('#calendar-selected-title');
+const calendarAgendaList = document.querySelector('#calendar-agenda-list');
+const calendarModal = document.querySelector('#calendar-modal');
+const calendarEventForm = document.querySelector('#calendar-event-form');
+const calendarEventTitle = document.querySelector('#calendar-event-title');
+const calendarEventDescription = document.querySelector('#calendar-event-description');
+const calendarEventDate = document.querySelector('#calendar-event-date');
+const calendarEventTime = document.querySelector('#calendar-event-time');
+const calendarEventDuration = document.querySelector('#calendar-event-duration');
+const calendarEventType = document.querySelector('#calendar-event-type');
+const calendarFormStatus = document.querySelector('#calendar-form-status');
+
+let currentStudent = null;
+let selectedCourse = null;
+let advisorHistory = [];
+let activeRecording = null;
+let currentTwin = null;
+let calendarCustomEvents = [];
+let calendarSelectedDate = new Date();
+let calendarMonth = new Date(calendarSelectedDate.getFullYear(), calendarSelectedDate.getMonth(), 1);
+
+
+async function apiRequest(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    });
+  } catch (_error) {
+    throw new Error('Uni Track backend is unavailable. Start the app with desktop/start-aegis.sh.');
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.detail || `Request failed (${response.status})`);
+  }
+  return payload;
+}
+
+
+async function academicApiRequest(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(`${academicApiBaseUrl}${path}`, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    });
+  } catch (_error) {
+    throw new Error('The shared academic notification service is unavailable.');
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.detail || `Request failed (${response.status})`);
+  }
+  return payload;
+}
+
+
+function setMessage(element, text, isError = false) {
+  element.textContent = text;
+  element.classList.toggle('error', isError);
+}
+
+
+function setBusy(isBusy) {
+  loginButton.disabled = isBusy;
+  createWorkspaceButton.disabled = isBusy;
+  openVsCodeButton.disabled = isBusy;
+}
+
+
+function setAdvisorBusy(isBusy) {
+  advisorInput.disabled = isBusy;
+  advisorSendButton.disabled = isBusy;
+  advisorVoiceButton.disabled = isBusy;
+}
+
+
+function selectCourse(course) {
+  selectedCourse = course;
+  for (const button of courseList.querySelectorAll('.course-button')) {
+    button.setAttribute('aria-pressed', String(button.dataset.course === course));
+  }
+  setMessage(actionStatus, `Selected: ${course}`);
+}
+
+
+function showDashboardSection(section) {
+  const showAdvisor = section === 'advisor';
+  const showProgress = section === 'progress';
+  const showCalendar = section === 'calendar';
+  workspacePanel.hidden = showAdvisor || showProgress || showCalendar;
+  advisorPanel.hidden = !showAdvisor;
+  progressPanel.hidden = !showProgress;
+  calendarPanel.hidden = !showCalendar;
+  dashboardView.dataset.section = section;
+  workspaceTab.setAttribute('aria-pressed', String(!showAdvisor && !showProgress && !showCalendar));
+  advisorTab.setAttribute('aria-pressed', String(showAdvisor));
+  progressTab.setAttribute('aria-pressed', String(showProgress));
+  calendarTab.setAttribute('aria-pressed', String(showCalendar));
+
+  if (showAdvisor) {
+    advisorInput.focus();
+  }
+  if (showCalendar) {
+    renderCalendar();
+  }
+}
+
+
+function displayPercentage(value) {
+  return value === null || value === undefined ? '—' : `${Number(value).toFixed(1)}%`;
+}
+
+function healthTone(value) {
+  if (value === null || value === undefined) return 'health-unknown';
+  return value >= 70 ? 'health-green' : value >= 60 ? 'health-yellow' : 'health-red';
+}
+
+function gradeMarks(course) {
+  const posted = course.assessments.filter((item) => item.mark !== null && item.mark !== undefined);
+  return posted.length ? posted.map((item) => `${item.name} ${Number(item.mark).toFixed(1)}/${Number(item.max_marks).toFixed(0)}`).join(' · ') : 'No marks posted yet';
+}
+
+
+function healthHistoryPoints(twin, course) {
+  const points = (twin.weekly_history || [])
+    .filter((row) => row.course_id === course.course_id)
+    .map((row) => ({
+      week: Number(row.week_number),
+      value: row.course_health === null || row.course_health === undefined ? null : Number(row.course_health),
+    }))
+    .filter((point) => point.value !== null && !Number.isNaN(point.value))
+    .sort((a, b) => a.week - b.week);
+
+  const current = course.metrics.course_health;
+  if (current !== null && current !== undefined && !points.some((point) => point.week === twin.current_week)) {
+    points.push({ week: twin.current_week, value: Number(current) });
+    points.sort((a, b) => a.week - b.week);
+  }
+  return points;
+}
+
+
+function buildHealthChart(points) {
+  const chart = document.createElement('div');
+  chart.className = 'health-chart';
+  if (points.length === 0) {
+    chart.classList.add('empty');
+    chart.textContent = 'No weekly history yet';
+    return chart;
+  }
+
+  const width = 210;
+  const height = 60;
+  const padX = 10;
+  const padY = 10;
+  const weeks = points.map((point) => point.week);
+  const minWeek = Math.min(...weeks);
+  const maxWeek = Math.max(...weeks);
+  const span = Math.max(1, maxWeek - minWeek);
+  const x = (week) => padX + ((week - minWeek) / span) * (width - padX * 2);
+  const y = (value) => padY + (1 - Math.max(0, Math.min(100, value)) / 100) * (height - padY * 2);
+
+  const latest = points[points.length - 1].value;
+  const tone = latest >= 70 ? 'var(--green)' : latest >= 60 ? 'var(--amber)' : 'var(--red)';
+  const linePoints = points.map((point) => `${x(point.week).toFixed(1)},${y(point.value).toFixed(1)}`).join(' ');
+  const dots = points
+    .map((point) => `<circle cx="${x(point.week).toFixed(1)}" cy="${y(point.value).toFixed(1)}" r="2.6" fill="${tone}"><title>Week ${point.week}: ${point.value.toFixed(1)}%</title></circle>`)
+    .join('');
+
+  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Weekly course health trend">
+    <line x1="${padX}" y1="${y(60)}" x2="${width - padX}" y2="${y(60)}" stroke="var(--border)" stroke-dasharray="3 3" stroke-width="1"></line>
+    <polyline points="${linePoints}" fill="none" stroke="${tone}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
+    ${dots}
+    <text class="health-chart-axis" x="${padX}" y="${height - 1}">W${minWeek}</text>
+    <text class="health-chart-axis" x="${width - padX}" y="${height - 1}" text-anchor="end">W${maxWeek}</text>
+  </svg>`;
+  return chart;
+}
+
+
+function renderProgress(twin) {
+  document.querySelector('#progress-week').textContent = `${twin.semester} · Week ${twin.current_week}`;
+  const overallHealth = document.querySelector('#overall-health');
+  overallHealth.textContent = displayPercentage(twin.overall_academic_health);
+  overallHealth.className = healthTone(twin.overall_academic_health);
+  const latest = twin.recent_interventions.find((item) => item.status === 'active' || item.status === 'escalated');
+  document.querySelector('#current-intervention').textContent = latest?.message || twin.current_recommendation || 'No recommendation is needed right now.';
+  const list = document.querySelector('#progress-course-list');
+  list.replaceChildren();
+  for (const course of twin.courses) {
+    const card = document.createElement('article');
+    card.className = 'progress-course-card';
+    const title = document.createElement('h4');
+    title.textContent = course.course_name;
+    const risk = document.createElement('span');
+    risk.className = `risk-badge ${course.risk_level || 'none'}`;
+    risk.textContent = course.risk_level === 'high' ? 'high risk' : course.risk_level === 'medium' ? 'mid risk' : 'safe';
+    const facts = document.createElement('p');
+    facts.textContent = `Academic health ${displayPercentage(course.metrics.course_health)} · ${gradeMarks(course)} · Lectures ${course.completed_lectures.length}/${course.lectures.filter((lecture) => lecture.available_week <= twin.current_week).length}`;
+    facts.classList.add(healthTone(course.metrics.course_health));
+    const trendRow = document.createElement('div');
+    trendRow.className = 'progress-trend-row';
+    const details = document.createElement('p');
+    details.className = 'progress-details';
+    details.textContent = `Trend: ${course.metrics.trend}`;
+    trendRow.append(details, buildHealthChart(healthHistoryPoints(twin, course)));
+    card.append(title, risk, facts, trendRow);
+    list.append(card);
+  }
+}
+
+
+async function loadProgress(studentId) {
+  setMessage(document.querySelector('#progress-status'), 'Loading semester progress...');
+  try {
+    const twin = await apiRequest(`/progress/${encodeURIComponent(studentId)}`);
+    if (!currentStudent || currentStudent.student_id !== studentId) return;
+    currentTwin = twin;
+    renderProgress(twin);
+    const scheduled = scheduleUrgentStudySessions();
+    renderCalendar();
+    if (scheduled.length > 0) {
+      showToasts([{
+        type: 'study',
+        title: 'AI study plan updated',
+        body: `${scheduled.length} urgent study ${scheduled.length === 1 ? 'session was' : 'sessions were'} added to your calendar.`,
+      }]);
+    }
+    setMessage(document.querySelector('#progress-status'), '');
+  } catch (error) {
+    if (!currentStudent || currentStudent.student_id !== studentId) return;
+    currentTwin = null;
+    renderCalendar();
+    setMessage(document.querySelector('#progress-status'), error.message, true);
+  }
+}
+
+
+const CALENDAR_EXAM_TYPES = new Set(['midterm', 'final', 'exam']);
+
+function calendarDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function calendarStorageKey(studentId) {
+  return `aegisos-calendar:${studentId}`;
+}
+
+function loadCalendarEvents(studentId) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(calendarStorageKey(studentId)) || '[]');
+    return Array.isArray(stored)
+      ? stored.filter((event) => event?.id && event?.title && event?.startAt && event?.endAt)
+      : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function saveCalendarEvents() {
+  if (!currentStudent) return;
+  try {
+    localStorage.setItem(calendarStorageKey(currentStudent.student_id), JSON.stringify(calendarCustomEvents));
+  } catch (_error) {
+    // Keep the planner usable for this session when local storage is unavailable.
+  }
+}
+
+function semesterStart(currentWeek) {
+  const monday = new Date();
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  monday.setDate(monday.getDate() - (Number(currentWeek) - 1) * 7);
+  return monday;
+}
+
+function academicCalendarEvents() {
+  if (!currentTwin) return [];
+  const startOfSemester = semesterStart(currentTwin.current_week);
+  return currentTwin.courses.flatMap((course) => (course.assessments || []).map((assessment) => {
+    const isExam = CALENDAR_EXAM_TYPES.has(String(assessment.assessment_type).toLowerCase());
+    const start = new Date(startOfSemester);
+    start.setDate(start.getDate() + (Number(assessment.due_week) - 1) * 7 + (isExam ? 0 : 6));
+    start.setHours(isExam ? 9 : 22, 0, 0, 0);
+    return {
+      id: `academic:${assessment.assessment_id}`,
+      title: assessment.name,
+      description: `${course.course_name} · ${assessment.max_marks} marks · academic week ${assessment.due_week}`,
+      startAt: start.toISOString(),
+      endAt: new Date(start.getTime() + (isExam ? 120 : 60) * 60000).toISOString(),
+      type: isExam ? 'exam' : 'assignment',
+      source: 'academic',
+      courseId: course.course_id,
+      completed: assessment.mark !== null && assessment.mark !== undefined,
+    };
+  }));
+}
+
+function allCalendarEvents() {
+  return [...academicCalendarEvents(), ...calendarCustomEvents]
+    .sort((left, right) => new Date(left.startAt) - new Date(right.startAt));
+}
+
+function eventsOverlap(start, end, events) {
+  return events.some((event) => start < new Date(event.endAt) && end > new Date(event.startAt));
+}
+
+function nextStudySlot(events, offset) {
+  const now = new Date();
+  const first = new Date(now);
+  first.setMinutes(0, 0, 0);
+  if (first.getHours() >= 18) first.setDate(first.getDate() + 1);
+  const candidates = [];
+  for (let day = 0; day < 5; day += 1) {
+    for (const hour of [18, 20]) {
+      const candidate = new Date(first);
+      candidate.setDate(first.getDate() + day);
+      candidate.setHours(hour, 0, 0, 0);
+      candidates.push(candidate);
+    }
+  }
+  const rotated = [...candidates.slice(offset), ...candidates.slice(0, offset)];
+  return rotated.find((start) => start > now && !eventsOverlap(start, new Date(start.getTime() + 90 * 60000), events))
+    || candidates[candidates.length - 1];
+}
+
+function riskText(course) {
+  const risks = Array.isArray(course.risks) ? course.risks : [];
+  const messages = risks.slice(0, 2).map((risk) => typeof risk === 'string' ? risk : risk.message).filter(Boolean);
+  return messages.length > 0 ? messages.join('; ') : `${course.risk_level || 'elevated'} academic risk was detected`;
+}
+
+function scheduleUrgentStudySessions() {
+  if (!currentTwin) return [];
+  const existing = allCalendarEvents();
+  const urgentCourses = currentTwin.courses.filter((course) => {
+    const health = course.metrics?.course_health;
+    return course.risk_level === 'high'
+      || (health !== null && health !== undefined && Number(health) < 60 && (course.risks || []).length > 0);
+  });
+  const added = [];
+  for (const [index, course] of urgentCourses.entries()) {
+    const id = `ai:${currentTwin.semester}:${currentTwin.current_week}:${course.course_id}`;
+    if (calendarCustomEvents.some((event) => event.id === id)) continue;
+    const start = nextStudySlot([...existing, ...added], index);
+    added.push({
+      id,
+      title: `Urgent study: ${course.course_name}`,
+      description: `AI scheduled this focus session because ${riskText(course)}.`,
+      startAt: start.toISOString(),
+      endAt: new Date(start.getTime() + 90 * 60000).toISOString(),
+      type: 'study_session',
+      source: 'ai',
+      courseId: course.course_id,
+      urgent: true,
+    });
+  }
+  if (added.length > 0) {
+    calendarCustomEvents.push(...added);
+    saveCalendarEvents();
+  }
+  return added;
+}
+
+function eventTypeLabel(event) {
+  if (event.type === 'study_session') return event.source === 'ai' ? 'AI study session' : 'Study session';
+  if (event.type === 'assignment') return 'Assignment deadline';
+  return event.type.charAt(0).toUpperCase() + event.type.slice(1);
+}
+
+function renderCalendarAgenda(events) {
+  calendarSelectedTitle.textContent = calendarSelectedDate.toLocaleDateString(undefined, {
+    weekday: 'long', month: 'long', day: 'numeric',
+  });
+  calendarAgendaList.replaceChildren();
+  if (events.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'calendar-empty';
+    empty.textContent = 'No events yet. Add a study session or personal event.';
+    calendarAgendaList.append(empty);
+    return;
+  }
+  for (const event of events) {
+    const card = document.createElement('article');
+    card.className = `calendar-agenda-card ${event.type}${event.completed ? ' completed' : ''}`;
+    const meta = document.createElement('p');
+    meta.className = 'calendar-event-meta';
+    meta.textContent = `${new Date(event.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · ${eventTypeLabel(event)}`;
+    const title = document.createElement('h5');
+    title.textContent = event.title;
+    const description = document.createElement('p');
+    description.textContent = event.description || (event.source === 'student' ? 'Personal calendar event' : 'Academic calendar event');
+    card.append(meta, title, description);
+    if (event.completed) {
+      const done = document.createElement('span');
+      done.className = 'calendar-completed';
+      done.textContent = 'Completed';
+      card.append(done);
+    } else if (event.source !== 'academic') {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'calendar-delete-button';
+      remove.textContent = 'Remove';
+      remove.addEventListener('click', () => {
+        calendarCustomEvents = calendarCustomEvents.filter((item) => item.id !== event.id);
+        saveCalendarEvents();
+        renderCalendar();
+      });
+      card.append(remove);
+    }
+    calendarAgendaList.append(card);
+  }
+}
+
+function renderCalendar() {
+  if (!calendarGrid) return;
+  const events = allCalendarEvents();
+  calendarMonthTitle.textContent = calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  calendarGrid.replaceChildren();
+  const first = new Date(calendarMonth);
+  first.setDate(1 - ((first.getDay() + 6) % 7));
+  const todayKey = calendarDateKey(new Date());
+  const selectedKey = calendarDateKey(calendarSelectedDate);
+
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(first);
+    date.setDate(first.getDate() + index);
+    const dateKey = calendarDateKey(date);
+    const dayEvents = events.filter((event) => calendarDateKey(new Date(event.startAt)) === dateKey);
+    const day = document.createElement('button');
+    day.type = 'button';
+    day.className = 'calendar-day';
+    if (date.getMonth() !== calendarMonth.getMonth()) day.classList.add('outside');
+    if (dateKey === todayKey) day.classList.add('today');
+    if (dateKey === selectedKey) day.classList.add('selected');
+    day.setAttribute('aria-label', `${date.toLocaleDateString()}${dayEvents.length ? `, ${dayEvents.length} events` : ''}`);
+    const number = document.createElement('span');
+    number.className = 'calendar-day-number';
+    number.textContent = String(date.getDate());
+    day.append(number);
+    for (const event of dayEvents.slice(0, 3)) {
+      const pill = document.createElement('span');
+      pill.className = `calendar-event-pill ${event.type}`;
+      pill.textContent = event.title;
+      day.append(pill);
+    }
+    if (dayEvents.length > 3) {
+      const more = document.createElement('span');
+      more.className = 'calendar-event-more';
+      more.textContent = `+${dayEvents.length - 3} more`;
+      day.append(more);
+    }
+    day.addEventListener('click', () => {
+      calendarSelectedDate = date;
+      renderCalendar();
+    });
+    day.addEventListener('dblclick', () => openCalendarModal(date));
+    calendarGrid.append(day);
+  }
+  renderCalendarAgenda(events.filter((event) => calendarDateKey(new Date(event.startAt)) === selectedKey));
+}
+
+function openCalendarModal(date = calendarSelectedDate) {
+  calendarEventForm.reset();
+  calendarEventDate.value = calendarDateKey(date);
+  calendarEventTime.value = '18:00';
+  calendarEventDuration.value = '60';
+  calendarEventType.value = 'study_session';
+  setMessage(calendarFormStatus, '');
+  calendarModal.hidden = false;
+  calendarEventTitle.focus();
+}
+
+function closeCalendarModal() {
+  calendarModal.hidden = true;
+  calendarEventForm.reset();
+  setMessage(calendarFormStatus, '');
+}
+
+
+const notifButton = document.querySelector('#notif-button');
+const notifBadge = document.querySelector('#notif-badge');
+const notifPanel = document.querySelector('#notif-panel');
+const notifList = document.querySelector('#notif-list');
+const notifEmpty = document.querySelector('#notif-empty');
+const notifClearButton = document.querySelector('#notif-clear-button');
+
+const NOTIF_POLL_MS = 60000;
+let notifTimer = null;
+let notifPrimed = false;
+let notifications = [];
+
+
+function renderNotifications() {
+  const unread = notifications.filter((item) => !item.read);
+
+  notifBadge.hidden = unread.length === 0;
+  notifBadge.textContent = String(unread.length);
+
+  notifList.replaceChildren();
+  notifEmpty.hidden = notifications.length > 0;
+  for (const item of notifications) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = `notif-item ${item.type}${item.read ? '' : ' unread'}`;
+    row.setAttribute('aria-label', `${item.read ? 'Mark unread' : 'Mark read'}: ${item.title}`);
+    row.addEventListener('click', () => setNotificationReadState(item.id, !item.read));
+    const dot = document.createElement('span');
+    dot.className = 'notif-dot';
+    const text = document.createElement('div');
+    const title = document.createElement('p');
+    title.className = 'notif-item-title';
+    title.textContent = item.title;
+    const body = document.createElement('p');
+    body.className = 'notif-item-body';
+    body.textContent = item.body;
+    const meta = document.createElement('p');
+    meta.className = 'notif-item-meta';
+    meta.textContent = `${item.category} · ${item.timestamp}`;
+    text.append(title, body, meta);
+    row.append(dot, text);
+    notifList.append(row);
+  }
+}
+
+
+const toastContainer = document.querySelector('#toast-container');
+const TOAST_DURATION_MS = 5000;
+
+
+function showToasts(items) {
+  for (const item of items.slice(0, 4)) {
+    const toast = document.createElement('div');
+    toast.className = `toast ${item.type}`;
+
+    const body = document.createElement('div');
+    body.className = 'toast-body';
+    const title = document.createElement('p');
+    title.className = 'toast-title';
+    title.textContent = item.title;
+    const text = document.createElement('p');
+    text.className = 'toast-text';
+    text.textContent = item.body;
+    body.append(title, text);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'toast-close';
+    close.textContent = '✕';
+    close.setAttribute('aria-label', 'Dismiss notification');
+
+    let dismissed = false;
+    const dismiss = () => {
+      if (dismissed) return;
+      dismissed = true;
+      toast.classList.add('leaving');
+      setTimeout(() => toast.remove(), 250);
+    };
+    close.addEventListener('click', dismiss);
+
+    toast.append(body, close);
+    toastContainer.append(toast);
+    setTimeout(dismiss, TOAST_DURATION_MS);
+  }
+}
+
+
+async function refreshNotifications() {
+  if (!currentStudent) return;
+  try {
+    const response = await academicApiRequest(`/portal/students/${encodeURIComponent(currentStudent.student_id)}/notifications`);
+    const items = response.notifications || [];
+    const fresh = items.filter((item) => !item.read && !notifications.some((old) => old.id === item.id));
+    notifications = items;
+    renderNotifications();
+    if (notifPrimed && fresh.length > 0) {
+      showToasts(fresh);
+    }
+    notifPrimed = true;
+  } catch (_error) {
+    // Notification sync is best-effort and must never break the dashboard.
+  }
+}
+
+
+function startNotificationSync() {
+  stopNotificationSync();
+  notifPrimed = false;
+  notifications = [];
+  renderNotifications();
+  refreshNotifications();
+  notifTimer = setInterval(refreshNotifications, NOTIF_POLL_MS);
+}
+
+function stopNotificationSync() {
+  if (notifTimer) {
+    clearInterval(notifTimer);
+    notifTimer = null;
+  }
+}
+
+
+async function markAllNotificationsRead() {
+  if (!currentStudent) return;
+  const unreadIds = notifications.filter((item) => !item.read).map((item) => item.id);
+  if (unreadIds.length === 0) return;
+  notifications = notifications.map((item) => ({ ...item, read: true }));
+  renderNotifications();
+  try {
+    const response = await academicApiRequest(
+      `/portal/students/${encodeURIComponent(currentStudent.student_id)}/notifications/read`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ notification_ids: unreadIds, read: true }),
+      },
+    );
+    notifications = response.notifications || [];
+    renderNotifications();
+  } catch (_error) {
+    await refreshNotifications();
+  }
+}
+
+
+async function setNotificationReadState(notificationId, read) {
+  if (!currentStudent) return;
+  notifications = notifications.map((item) =>
+    item.id === notificationId ? { ...item, read } : item,
+  );
+  renderNotifications();
+  try {
+    const response = await academicApiRequest(
+      `/portal/students/${encodeURIComponent(currentStudent.student_id)}/notifications/read`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ notification_ids: [notificationId], read }),
+      },
+    );
+    notifications = response.notifications || [];
+    renderNotifications();
+  } catch (_error) {
+    await refreshNotifications();
+  }
+}
+
+
+notifButton.addEventListener('click', () => {
+  const opening = notifPanel.hidden;
+  notifPanel.hidden = !opening;
+  notifButton.setAttribute('aria-expanded', String(opening));
+  if (opening) refreshNotifications();
+});
+
+notifClearButton.addEventListener('click', markAllNotificationsRead);
+
+document.addEventListener('click', (event) => {
+  if (notifPanel.hidden) return;
+  if (event.target instanceof Element && event.target.closest('.notif-wrap')) return;
+  notifPanel.hidden = true;
+  notifButton.setAttribute('aria-expanded', 'false');
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  if (!calendarModal.hidden) {
+    closeCalendarModal();
+    document.querySelector('#calendar-add-button').focus();
+    return;
+  }
+  if (!notifPanel.hidden) {
+    notifPanel.hidden = true;
+    notifButton.setAttribute('aria-expanded', 'false');
+    notifButton.focus();
+  }
+});
+
+window.addEventListener('focus', refreshNotifications);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshNotifications();
+});
+
+
+function addAdvisorMessage(role, content, audioUrl = null) {
+  const message = document.createElement('div');
+  message.className = `chat-message ${role}`;
+
+  const label = document.createElement('span');
+  label.className = 'chat-role';
+  label.textContent = role === 'user' ? 'You' : 'Advisor AI';
+
+  const body = document.createElement('p');
+  body.textContent = content;
+
+  message.append(label, body);
+
+  if (audioUrl) {
+    const audio = document.createElement('audio');
+    audio.className = 'advisor-audio';
+    audio.controls = true;
+    audio.src = audioUrl;
+    message.append(audio);
+  }
+
+  advisorMessages.append(message);
+  advisorMessages.scrollTop = advisorMessages.scrollHeight;
+}
+
+
+function resetAdvisor() {
+  advisorHistory = [];
+  advisorMessages.replaceChildren();
+  advisorIntent.textContent = 'Ready';
+  setMessage(advisorStatus, '');
+
+  if (currentStudent) {
+    addAdvisorMessage(
+      'assistant',
+      `Hi ${currentStudent.name}. Ask me about academic progress, semester planning, career guidance, or a what-if scenario.`,
+    );
+  }
+}
+
+
+function renderStudent(student) {
+  currentStudent = student;
+  currentTwin = null;
+  calendarCustomEvents = loadCalendarEvents(student.student_id);
+  calendarSelectedDate = new Date();
+  calendarMonth = new Date(calendarSelectedDate.getFullYear(), calendarSelectedDate.getMonth(), 1);
+  document.querySelector('#welcome-title').textContent = `Welcome, ${student.name}`;
+  document.querySelector('#student-major').textContent = student.major;
+  document.querySelector('#student-year').textContent = `Year ${student.year}`;
+  document.querySelector('#student-gpa').textContent = Number(student.gpa).toFixed(2);
+  document.querySelector('#course-count').textContent = `${student.courses.length} courses`;
+
+  courseList.replaceChildren();
+  for (const course of student.courses) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'course-button';
+    button.dataset.course = course;
+    button.textContent = course;
+    button.setAttribute('aria-pressed', 'false');
+    button.addEventListener('click', () => selectCourse(course));
+    courseList.append(button);
+  }
+
+  loginView.hidden = true;
+  dashboardView.hidden = false;
+  document.body.classList.add('is-authenticated');
+  showDashboardSection('workspace');
+  renderCalendar();
+  resetAdvisor();
+  loadProgress(student.student_id);
+  startNotificationSync();
+
+  if (student.courses.length > 0) {
+    selectCourse(student.courses[0]);
+  } else {
+    selectedCourse = null;
+    setMessage(actionStatus, 'No enrolled courses are available.');
+  }
+}
+
+
+loginForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const studentId = studentIdInput.value.trim();
+  if (!studentId) return;
+
+  setBusy(true);
+  setMessage(loginStatus, 'Loading student profile...');
+  try {
+    const student = await apiRequest(`/student/${encodeURIComponent(studentId)}`);
+    setMessage(loginStatus, '');
+    renderStudent(student);
+  } catch (error) {
+    setMessage(loginStatus, error.message, true);
+  } finally {
+    setBusy(false);
+  }
+});
+
+
+async function runWorkspaceAction(path, pendingText) {
+  if (!currentStudent || !selectedCourse) return;
+
+  setBusy(true);
+  setMessage(actionStatus, pendingText);
+  try {
+    const result = await apiRequest(path, {
+      method: 'POST',
+      body: JSON.stringify({
+        student_id: currentStudent.student_id,
+        course: selectedCourse,
+      }),
+    });
+    setMessage(
+      actionStatus,
+      result.opened ? `VS Code opened: ${result.path}` : `Workspace ready: ${result.path}`,
+    );
+  } catch (error) {
+    setMessage(actionStatus, error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+
+createWorkspaceButton.addEventListener('click', () => {
+  runWorkspaceAction('/workspace/create', 'Preparing the course workspace...');
+});
+
+
+openVsCodeButton.addEventListener('click', () => {
+  runWorkspaceAction('/workspace/vscode', 'Opening the course in VS Code...');
+});
+
+
+workspaceTab.addEventListener('click', () => showDashboardSection('workspace'));
+advisorTab.addEventListener('click', () => showDashboardSection('advisor'));
+progressTab.addEventListener('click', () => showDashboardSection('progress'));
+calendarTab.addEventListener('click', () => showDashboardSection('calendar'));
+
+for (const button of dashboardHomeButtons) {
+  button.addEventListener('click', () => showDashboardSection('workspace'));
+}
+
+document.querySelector('#calendar-previous-button').addEventListener('click', () => {
+  calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1);
+  renderCalendar();
+});
+
+document.querySelector('#calendar-next-button').addEventListener('click', () => {
+  calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1);
+  renderCalendar();
+});
+
+document.querySelector('#calendar-today-button').addEventListener('click', () => {
+  calendarSelectedDate = new Date();
+  calendarMonth = new Date(calendarSelectedDate.getFullYear(), calendarSelectedDate.getMonth(), 1);
+  renderCalendar();
+});
+
+document.querySelector('#calendar-add-button').addEventListener('click', () => openCalendarModal());
+document.querySelector('#calendar-day-add-button').addEventListener('click', () => openCalendarModal());
+document.querySelector('#calendar-modal-close').addEventListener('click', closeCalendarModal);
+document.querySelector('#calendar-cancel-button').addEventListener('click', closeCalendarModal);
+document.querySelector('#calendar-modal-overlay').addEventListener('click', closeCalendarModal);
+
+document.querySelector('#calendar-ai-button').addEventListener('click', () => {
+  if (!currentTwin) {
+    showToasts([{ type: 'study', title: 'Academic data is loading', body: 'Try planning again after semester progress has loaded.' }]);
+    return;
+  }
+  const added = scheduleUrgentStudySessions();
+  renderCalendar();
+  showToasts([{
+    type: 'study',
+    title: added.length > 0 ? 'AI study plan updated' : 'Study plan is up to date',
+    body: added.length > 0
+      ? `${added.length} urgent study ${added.length === 1 ? 'session was' : 'sessions were'} added.`
+      : 'No new urgent sessions are needed right now.',
+  }]);
+});
+
+calendarEventForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!currentStudent) return;
+  const title = calendarEventTitle.value.trim();
+  const dateParts = calendarEventDate.value.split('-').map(Number);
+  const timeParts = calendarEventTime.value.split(':').map(Number);
+  if (!title || dateParts.length !== 3 || timeParts.length !== 2 || dateParts.some(Number.isNaN) || timeParts.some(Number.isNaN)) {
+    setMessage(calendarFormStatus, 'Enter a title, date, and start time.', true);
+    return;
+  }
+  const start = new Date(dateParts[0], dateParts[1] - 1, dateParts[2], timeParts[0], timeParts[1]);
+  const durationMinutes = Number(calendarEventDuration.value);
+  const eventType = calendarEventType.value;
+  calendarCustomEvents.push({
+    id: `student:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+    title,
+    description: calendarEventDescription.value.trim(),
+    startAt: start.toISOString(),
+    endAt: new Date(start.getTime() + durationMinutes * 60000).toISOString(),
+    type: eventType,
+    source: 'student',
+  });
+  calendarSelectedDate = start;
+  calendarMonth = new Date(start.getFullYear(), start.getMonth(), 1);
+  saveCalendarEvents();
+  closeCalendarModal();
+  renderCalendar();
+  showToasts([{ type: eventType, title: 'Calendar updated', body: `${title} was added to your calendar.` }]);
+});
+
+
+advisorForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!currentStudent) return;
+
+  const message = advisorInput.value.trim();
+  if (!message) return;
+
+  const priorHistory = advisorHistory.slice(-10);
+  advisorHistory.push({ role: 'user', content: message });
+  addAdvisorMessage('user', message);
+  advisorInput.value = '';
+  setAdvisorBusy(true);
+  advisorIntent.textContent = 'Thinking';
+  setMessage(advisorStatus, 'Advisor AI is processing your request...');
+
+  try {
+    const language = advisorLanguage.value;
+    const result = await apiRequest('/advisor', {
+      method: 'POST',
+      body: JSON.stringify({
+        student_id: currentStudent.student_id,
+        message,
+        language,
+        history: priorHistory,
+      }),
+    });
+
+    advisorHistory.push({ role: 'assistant', content: result.response });
+    advisorHistory = advisorHistory.slice(-10);
+    addAdvisorMessage('assistant', result.response);
+    advisorIntent.textContent = result.intent.replaceAll('_', ' ');
+    setMessage(advisorStatus, '');
+  } catch (error) {
+    advisorHistory.pop();
+    advisorIntent.textContent = 'Unavailable';
+    setMessage(advisorStatus, error.message, true);
+  } finally {
+    setAdvisorBusy(false);
+    advisorInput.focus();
+  }
+});
+
+
+function encodeWAV(samples, sampleRate = 16000) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  const writeString = (offset, string) => {
+    for (let i = 0; i < string.length; i += 1) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i += 1) {
+    let sample = Math.max(-1, Math.min(1, samples[i]));
+    sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+    view.setInt16(offset, sample, true);
+    offset += 2;
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+
+async function startRecording() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const audioContext = new AudioContext({ sampleRate: 16000 });
+  const source = audioContext.createMediaStreamSource(stream);
+  const processor = audioContext.createScriptProcessor(4096, 1, 1);
+  const chunks = [];
+
+  source.connect(processor);
+  processor.connect(audioContext.destination);
+
+  processor.onaudioprocess = (event) => {
+    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+  };
+
+  return {
+    stream,
+    audioContext,
+    source,
+    processor,
+    stop: async () => {
+      processor.disconnect();
+      source.disconnect();
+      stream.getTracks().forEach((track) => track.stop());
+      await audioContext.close();
+
+      const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      const samples = new Float32Array(totalLength);
+      let position = 0;
+      for (const chunk of chunks) {
+        samples.set(chunk, position);
+        position += chunk.length;
+      }
+      return encodeWAV(samples, 16000);
+    },
+  };
+}
+
+
+function setRecordingState(isRecording) {
+  advisorVoiceButton.classList.toggle('recording', isRecording);
+  advisorVoiceButton.querySelector('.mic-icon').hidden = isRecording;
+  advisorVoiceButton.querySelector('.recording-indicator').hidden = !isRecording;
+  advisorVoiceButton.setAttribute(
+    'aria-label',
+    isRecording ? 'Stop recording' : 'Record voice message',
+  );
+}
+
+
+async function sendVoiceMessage(blob) {
+  if (!currentStudent) return;
+
+  const language = advisorLanguage.value;
+  const formData = new FormData();
+  formData.append('student_id', currentStudent.student_id);
+  formData.append('language', language);
+  formData.append('audio', blob, 'message.wav');
+
+  setAdvisorBusy(true);
+  advisorIntent.textContent = 'Listening';
+  setMessage(advisorStatus, 'Transcribing and thinking...');
+
+  try {
+    const response = await fetch(`${apiBaseUrl}/advisor/voice`, {
+      method: 'POST',
+      body: formData,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || `Voice request failed (${response.status})`);
+    }
+
+    advisorHistory.push({ role: 'user', content: payload.transcript });
+    advisorHistory.push({ role: 'assistant', content: payload.response });
+    advisorHistory = advisorHistory.slice(-10);
+
+    addAdvisorMessage('user', payload.transcript);
+    const audioUrl = `data:audio/mp3;base64,${payload.audio_base64}`;
+    addAdvisorMessage('assistant', payload.response, audioUrl);
+    advisorIntent.textContent = payload.intent.replaceAll('_', ' ');
+    setMessage(advisorStatus, '');
+  } catch (error) {
+    setMessage(advisorStatus, error.message, true);
+    advisorIntent.textContent = 'Unavailable';
+  } finally {
+    setAdvisorBusy(false);
+  }
+}
+
+
+advisorVoiceButton.addEventListener('click', async () => {
+  if (!currentStudent) return;
+
+  if (activeRecording) {
+    try {
+      const blob = await activeRecording.stop();
+      activeRecording = null;
+      setRecordingState(false);
+      await sendVoiceMessage(blob);
+    } catch (error) {
+      activeRecording = null;
+      setRecordingState(false);
+      setMessage(advisorStatus, error.message, true);
+    }
+    return;
+  }
+
+  try {
+    activeRecording = await startRecording();
+    setRecordingState(true);
+    setMessage(advisorStatus, 'Recording... click Mic again to stop.');
+  } catch (error) {
+    setMessage(advisorStatus, `Microphone access failed: ${error.message}`, true);
+  }
+});
+
+
+document.querySelector('#sign-out-button').addEventListener('click', () => {
+  stopNotificationSync();
+  notifications = [];
+  toastContainer.replaceChildren();
+  notifPanel.hidden = true;
+  notifButton.setAttribute('aria-expanded', 'false');
+  currentStudent = null;
+  selectedCourse = null;
+  currentTwin = null;
+  calendarCustomEvents = [];
+  calendarSelectedDate = new Date();
+  calendarMonth = new Date(calendarSelectedDate.getFullYear(), calendarSelectedDate.getMonth(), 1);
+  closeCalendarModal();
+  advisorHistory = [];
+  advisorMessages.replaceChildren();
+  dashboardView.hidden = true;
+  loginView.hidden = false;
+  document.body.classList.remove('is-authenticated');
+  setMessage(actionStatus, '');
+  setMessage(advisorStatus, '');
+  studentIdInput.focus();
+});

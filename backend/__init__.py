@@ -1,0 +1,1 @@
+"""AegisOS EDU FastAPI backend."""
