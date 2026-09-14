@@ -59,8 +59,16 @@ def build_student_twin(repository: StudentRepository, student_id: str) -> Studen
             risks=risks,
             risk_level=highest_risk_level(risks),
         ))
-    semester = course_twins[0].semester if course_twins else "Unknown"
-    current_week = course_twins[0].current_week if course_twins else 1
+    semester = (
+        course_twins[0].semester
+        if course_twins
+        else str(raw.get("semester") or "Fall 2026")
+    )
+    current_week = (
+        course_twins[0].current_week
+        if course_twins
+        else int(raw.get("current_week") or 1)
+    )
     twin = StudentTwin(
         student=StudentProfile(**raw["student"]),
         semester=semester,

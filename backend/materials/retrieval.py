@@ -7,6 +7,10 @@ import re
 
 EMBEDDING_DIMENSIONS = 768
 _WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_+.#-]*")
+_REQUESTED_WEEK_RE = re.compile(
+    r"\b(?:lecture|lec|week|w)\s*(?:number|no\.?|#)?\s*[-_:]?\s*(\d{1,2})\b",
+    re.IGNORECASE,
+)
 
 
 def search_terms(text: str) -> list[str]:
@@ -16,6 +20,15 @@ def search_terms(text: str) -> list[str]:
         for token in _WORD_RE.findall(text)
         if len(token) > 2 or token.isdigit()
     ]
+
+
+def requested_week(text: str) -> int | None:
+    """Return an explicitly requested lecture/week number, when present."""
+    match = _REQUESTED_WEEK_RE.search(text)
+    if not match:
+        return None
+    number = int(match.group(1))
+    return number if 1 <= number <= 16 else None
 
 
 def embed_text(text: str, dimensions: int = EMBEDDING_DIMENSIONS) -> list[float]:

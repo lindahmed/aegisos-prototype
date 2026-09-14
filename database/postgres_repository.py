@@ -40,7 +40,7 @@ class PostgresStudentRepository:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
-        self.semester = os.getenv("AEGIS_CURRENT_SEMESTER", "Current semester")
+        self.semester = os.getenv("AEGIS_CURRENT_SEMESTER", "Fall 2026")
         start_date_value = os.getenv(
             "AEGIS_SEMESTER_START_DATE", FALL_2026_START_DATE.isoformat()
         )
@@ -349,7 +349,14 @@ class PostgresStudentRepository:
                                JOIN courses c ON c.course_code = sc.course_code
                                WHERE sc.student_id = s.student_id
                                  AND sc.status = 'Current'
-                           ) AS current_courses
+                           ) AS enrolled_courses,
+                           (
+                               SELECT ARRAY_AGG(c.course_title ORDER BY c.course_title)
+                               FROM department_plan_courses plan
+                               JOIN courses c ON c.course_code = plan.course_code
+                               WHERE upper(plan.major_code) = upper(p.major_code)
+                                 AND plan.program_semester = s.current_semester
+                           ) AS planned_courses
                     FROM students s
                     JOIN majors p ON p.program_id = s.program_id
                     WHERE s.student_id::text = %s
@@ -368,7 +375,11 @@ class PostgresStudentRepository:
             major=student_row["major_name"],
             year=student_row["academic_level"],
             gpa=float(student_row["gpa"]) if student_row["gpa"] is not None else self._compute_gpa(completed_rows),
-            courses=tuple(student_row["current_courses"] or []),
+            courses=tuple(
+                student_row["enrolled_courses"]
+                or student_row["planned_courses"]
+                or []
+            ),
         )
 
     def get_registered_students(self) -> list[Student]:
@@ -442,17 +453,35 @@ class PostgresStudentRepository:
         if student is None:
             return None
         rows = self._fetch_all(
-            """SELECT c.course_code, c.course_title AS course_name,
-                      sc.status, COALESCE(sem.name, %s) AS semester,
+            """WITH current_enrollments AS (
+                 SELECT sc.course_code, sc.status, sc.semester_id
+                 FROM student_courses sc
+                 WHERE sc.student_id::text = %s AND sc.status = 'Current'
+               ),
+               selected_courses AS (
+                 SELECT course_code, status, semester_id
+                 FROM current_enrollments
+                 UNION ALL
+                 SELECT plan.course_code, 'Current' AS status, NULL::integer
+                 FROM students selected_student
+                 JOIN majors selected_major
+                   ON selected_major.program_id = selected_student.program_id
+                 JOIN department_plan_courses plan
+                   ON upper(plan.major_code) = upper(selected_major.major_code)
+                  AND plan.program_semester = selected_student.current_semester
+                 WHERE selected_student.student_id::text = %s
+                   AND NOT EXISTS (SELECT 1 FROM current_enrollments)
+               )
+               SELECT c.course_code, c.course_title AS course_name,
+                      selected.status, COALESCE(sem.name, %s) AS semester,
                       slot.day_of_week, slot.start_minute,
                       slot.end_minute, slot.location
-               FROM student_courses sc
-               JOIN courses c ON c.course_code = sc.course_code
-               LEFT JOIN semesters sem ON sem.id = sc.semester_id
+               FROM selected_courses selected
+               JOIN courses c ON c.course_code = selected.course_code
+               LEFT JOIN semesters sem ON sem.id = selected.semester_id
                LEFT JOIN course_schedule_slots slot ON slot.course_id = c.course_code
-               WHERE sc.student_id::text = %s AND sc.status = 'Current'
                ORDER BY c.course_title, slot.day_of_week, slot.start_minute""",
-            (self.semester, student.student_id),
+            (student.student_id, student.student_id, self.semester),
         )
         courses: dict[str, dict[str, Any]] = {}
         for row in rows:
@@ -629,7 +658,7 @@ class PostgresStudentRepository:
         course_id: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        from backend.materials.retrieval import embed_text
+        from backend.materials.retrieval import embed_text, requested_week
 
         vector = self._vector_literal(embed_text(query))
         course_clause = ""
@@ -637,6 +666,11 @@ class PostgresStudentRepository:
         if course_id:
             course_clause = " AND document.course_id = %s"
             parameters.append(course_id)
+        week_clause = ""
+        week_number = requested_week(query)
+        if week_number is not None:
+            week_clause = " AND document.week_number = %s"
+            parameters.append(week_number)
         parameters.append(max(1, min(limit, 20)))
         return self._fetch_all(
             f"""SELECT chunk.chunk_id, chunk.document_id,
@@ -645,7 +679,13 @@ class PostgresStudentRepository:
                        chunk.page_start, chunk.page_end, chunk.content,
                        document.storage_path,
                        ROUND((
-                         ts_rank_cd(chunk.search_document, plainto_tsquery('english', %s)) * 0.65
+                         ts_rank_cd(
+                           to_tsvector(
+                             'english',
+                             document.title || ' ' || document.course_name || ' ' || chunk.content
+                           ),
+                           plainto_tsquery('english', %s)
+                         ) * 0.65
                          + GREATEST(0, 1 - (chunk.embedding <=> %s::vector)) * 0.35
                        )::numeric, 6)::double precision AS score
                 FROM material_chunks chunk
@@ -657,6 +697,7 @@ class PostgresStudentRepository:
                   AND document.program_semester = student.current_semester
                   AND document.visibility IN ('student', 'student_practice')
                   {course_clause}
+                  {week_clause}
                 ORDER BY score DESC, document.course_name, document.title
                 LIMIT %s""",
             tuple(parameters),
@@ -1018,6 +1059,24 @@ class PostgresStudentRepository:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
+                    WITH current_enrollments AS (
+                      SELECT sc.course_code
+                      FROM student_courses sc
+                      WHERE sc.student_id::text = %s AND sc.status = 'Current'
+                    ),
+                    selected_courses AS (
+                      SELECT course_code FROM current_enrollments
+                      UNION
+                      SELECT plan.course_code
+                      FROM students selected_student
+                      JOIN majors selected_major
+                        ON selected_major.program_id = selected_student.program_id
+                      JOIN department_plan_courses plan
+                        ON upper(plan.major_code) = upper(selected_major.major_code)
+                       AND plan.program_semester = selected_student.current_semester
+                      WHERE selected_student.student_id::text = %s
+                        AND NOT EXISTS (SELECT 1 FROM current_enrollments)
+                    )
                     SELECT c.course_code AS course_id,
                            c.course_title AS course_name,
                            g.student_id AS gradebook_student_id,
@@ -1025,13 +1084,13 @@ class PostgresStudentRepository:
                            g.week7_exam_mark,
                            g.week12_exam_mark,
                            g.final_exam_mark
-                    FROM student_courses sc
-                    JOIN courses c ON c.course_code = sc.course_code
+                    FROM selected_courses selected
+                    JOIN courses c ON c.course_code = selected.course_code
                     LEFT JOIN LATERAL (
                       SELECT entry.*
                       FROM course_gradebook_entries entry
-                      WHERE entry.student_id = sc.student_id::text
-                        AND entry.course_id = sc.course_code
+                      WHERE entry.student_id = %s
+                        AND entry.course_id = selected.course_code
                       ORDER BY CASE
                         WHEN entry.semester = %s THEN 0
                         WHEN entry.semester = 'Current semester' THEN 1
@@ -1039,10 +1098,14 @@ class PostgresStudentRepository:
                       END, entry.updated_at DESC
                       LIMIT 1
                     ) g ON TRUE
-                    WHERE sc.student_id::text = %s AND sc.status = 'Current'
                     ORDER BY c.course_title
                     """,
-                    (self.semester, student.student_id),
+                    (
+                        student.student_id,
+                        student.student_id,
+                        student.student_id,
+                        self.semester,
+                    ),
                 )
                 course_rows = cursor.fetchall()
         courses = []
@@ -1068,7 +1131,12 @@ class PostgresStudentRepository:
                 "lectures": [],
                 "materials": [],
             })
-        return {"student": student.as_dict(), "courses": courses}
+        return {
+            "student": student.as_dict(),
+            "semester": self.semester,
+            "current_week": self.current_week,
+            "courses": courses,
+        }
 
     def get_previous_course_snapshot(self, student_id: str, course_id: str, week_number: int) -> dict[str, Any] | None:
         return self._fetch_one(

@@ -757,11 +757,25 @@ class StudentRepository:
         course_id: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        from backend.materials.retrieval import cosine_similarity, embed_text, search_terms
+        from backend.materials.retrieval import (
+            cosine_similarity,
+            embed_text,
+            requested_week,
+            search_terms,
+        )
 
         documents = self.list_student_materials(student_id, course_id)
         if not documents:
             return []
+        week_number = requested_week(query)
+        if week_number is not None:
+            exact_week_documents = [
+                document
+                for document in documents
+                if document.get("week_number") == week_number
+            ]
+            if exact_week_documents:
+                documents = exact_week_documents
         document_ids = {str(document["document_id"]) for document in documents}
         metadata = {str(document["document_id"]): document for document in documents}
         placeholders = ", ".join("?" for _ in document_ids)
@@ -776,13 +790,17 @@ class StudentRepository:
         ranked: list[tuple[float, dict[str, Any]]] = []
         for row in rows:
             item = dict(row)
-            content_terms = set(search_terms(str(item["content"])))
+            document = metadata[str(item["document_id"])]
+            content_terms = set(
+                search_terms(
+                    f"{document['title']} {document['course_name']} {item['content']}"
+                )
+            )
             lexical = len(query_terms & content_terms) / max(1, len(query_terms))
             semantic = cosine_similarity(
                 query_embedding, json.loads(str(item["embedding_json"]))
             )
             score = lexical * 0.65 + max(0.0, semantic) * 0.35
-            document = metadata[str(item["document_id"])]
             ranked.append(
                 (
                     score,
@@ -1253,7 +1271,12 @@ class StudentRepository:
                 course_record.pop("start_date", None)
                 course_record["current_week"] = current_week
                 courses.append({**course_record, "assessments": assessments, "lectures": lectures, "materials": materials})
-        return {"student": student.as_dict(), "courses": courses}
+        return {
+            "student": student.as_dict(),
+            "semester": "Fall 2026",
+            "current_week": academic_week(FALL_2026_START_DATE),
+            "courses": courses,
+        }
 
     def get_previous_course_snapshot(self, student_id: str, course_id: str, week_number: int) -> dict[str, Any] | None:
         with self._connect() as connection:

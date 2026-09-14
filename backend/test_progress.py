@@ -150,6 +150,24 @@ def test_progress_fastapi_endpoints_and_read_only_what_if(tmp_path: Path, monkey
     assert before == after
 
 
+def test_student_twin_keeps_global_semester_and_week_without_course_rows(
+    tmp_path: Path,
+) -> None:
+    repository = make_repository(tmp_path)
+    with repository._connect() as connection:
+        connection.execute(
+            "UPDATE courses SET status = 'Withdrawn' WHERE student_id = ?",
+            ("231027905",),
+        )
+
+    twin = build_student_twin(repository, "231027905")
+
+    assert twin is not None
+    assert twin.semester == "Fall 2026"
+    assert twin.current_week == 6
+    assert twin.courses == []
+
+
 def test_database_url_selects_the_postgres_repository(tmp_path: Path, monkeypatch) -> None:
     class FakePostgresRepository:
         initialized = False

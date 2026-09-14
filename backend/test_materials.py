@@ -76,6 +76,56 @@ def _add_operating_system_material(
     return document_id
 
 
+def _add_ai_lecture(
+    repository: StudentRepository,
+    *,
+    week: int,
+    title: str,
+    content: str,
+) -> str:
+    document_id = f"ai-week-{week}"
+    now = datetime.now(UTC).isoformat()
+    repository.upsert_material_document(
+        {
+            "document_id": document_id,
+            "course_id": "CAI3101",
+            "course_name": "Introduction to Artificial Intelligence",
+            "major_code": "CS",
+            "program_semester": 5,
+            "title": title,
+            "category": "lecture",
+            "week_number": week,
+            "original_filename": f"W{week}.pdf",
+            "source_archive_path": f"Lectures/W{week}.pdf",
+            "storage_provider": "local",
+            "storage_path": f"cs/semester-5/CAI3101/lecture/W{week}.pdf",
+            "mime_type": "application/pdf",
+            "checksum": f"ai-week-{week}-checksum",
+            "size_bytes": 100,
+            "page_count": 1,
+            "visibility": "student",
+            "status": "ready",
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+    repository.replace_material_chunks(
+        document_id,
+        [
+            {
+                "chunk_id": f"{document_id}-chunk",
+                "chunk_index": 0,
+                "content": content,
+                "page_start": 1,
+                "page_end": 1,
+                "token_count": max(1, len(content) // 4),
+                "embedding": embed_text(f"{title} {content}"),
+            }
+        ],
+    )
+    return document_id
+
+
 def test_material_search_is_scoped_to_cs_semester_five(tmp_path: Path) -> None:
     repository = StudentRepository(tmp_path / "aegisos.db")
     repository.initialize()
@@ -89,6 +139,35 @@ def test_material_search_is_scoped_to_cs_semester_five(tmp_path: Path) -> None:
     assert results[0]["page_start"] == 4
 
     assert repository.list_student_materials("231027906") == []
+
+
+def test_explicit_lecture_number_selects_that_week_not_a_later_match(
+    tmp_path: Path,
+) -> None:
+    repository = StudentRepository(tmp_path / "aegisos.db")
+    repository.initialize()
+    lecture_one = _add_ai_lecture(
+        repository,
+        week=1,
+        title="W1 Introduction to Artificial Intelligence",
+        content="Artificial intelligence studies rational agents, environments, and problem solving.",
+    )
+    _add_ai_lecture(
+        repository,
+        week=9,
+        title="W9 Introduction to Neural Networks",
+        content="Artificial intelligence uses neural networks and activation functions.",
+    )
+
+    results = repository.search_student_materials(
+        "231027905",
+        "Explain Lecture 1 in Introduction to AI",
+        course_id="CAI3101",
+    )
+
+    assert results
+    assert {result["document_id"] for result in results} == {lecture_one}
+    assert all(result["week_number"] == 1 for result in results)
 
 
 def test_advisor_context_contains_citable_material(tmp_path: Path) -> None:
