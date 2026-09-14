@@ -1,19 +1,18 @@
 import type { ExamRecord } from '@staff/types'
 import StatusBadge from './StatusBadge'
+import { useLanguage } from '@/context/LanguageContext'
 
 export default function ExamTable({ exams }: { exams: ExamRecord[] }) {
+  const { language, t } = useLanguage()
+
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-surface shadow-card">
       <table className="w-full min-w-[720px] text-left text-sm">
         <thead>
           <tr className="border-b border-border bg-surface-raised text-xs font-semibold uppercase tracking-wide text-text-muted">
-            <th className="px-4 py-3">Course</th>
-            <th className="px-4 py-3">Section</th>
-            <th className="px-4 py-3">Date</th>
-            <th className="px-4 py-3">Time</th>
-            <th className="px-4 py-3">Room</th>
-            <th className="px-4 py-3">Type</th>
-            <th className="px-4 py-3">Status</th>
+            {['Course', 'Section', 'Date', 'Time', 'Room', 'Type', 'Status'].map((label) => (
+              <th key={label} className="px-4 py-3">{t(label)}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -24,7 +23,7 @@ export default function ExamTable({ exams }: { exams: ExamRecord[] }) {
                 <p className="font-medium text-text-primary">{e.courseTitle}</p>
               </td>
               <td className="px-4 py-3.5 text-text-secondary">{e.section}</td>
-              <td className="px-4 py-3.5 text-text-secondary">{new Date(e.date).toLocaleDateString()}</td>
+              <td className="px-4 py-3.5 text-text-secondary">{new Date(e.date).toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-GB')}</td>
               <td className="px-4 py-3.5 font-mono text-text-secondary">{e.start}–{e.end}</td>
               <td className="px-4 py-3.5 text-text-secondary">{e.room}</td>
               <td className="px-4 py-3.5 text-text-secondary">{e.type}</td>

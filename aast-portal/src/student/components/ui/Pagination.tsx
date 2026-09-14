@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useLanguage } from '@/context/LanguageContext'
 
 interface PaginationProps {
   page: number
@@ -7,20 +8,21 @@ interface PaginationProps {
 }
 
 export default function Pagination({ page, totalPages, onChange }: PaginationProps) {
+  const { isRtl, language } = useLanguage()
   if (totalPages <= 1) return null
   return (
     <div className="flex items-center justify-between px-1 py-3">
       <p className="text-xs text-text-muted">
-        Page {page} of {totalPages}
+        {language === 'ar' ? `الصفحة ${page} من ${totalPages}` : `Page ${page} of ${totalPages}`}
       </p>
       <div className="flex items-center gap-1">
         <button
           onClick={() => onChange(Math.max(1, page - 1))}
           disabled={page === 1}
-          aria-label="Previous page"
+          aria-label={language === 'ar' ? 'الصفحة السابقة' : 'Previous page'}
           className="flex h-8 w-8 items-center justify-center rounded-md border border-border-strong text-text-secondary hover:bg-surface-sunk disabled:opacity-40 disabled:hover:bg-transparent"
         >
-          <ChevronLeft className="h-4 w-4" />
+          {isRtl ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
         </button>
         {Array.from({ length: totalPages }).map((_, i) => (
           <button
@@ -37,10 +39,10 @@ export default function Pagination({ page, totalPages, onChange }: PaginationPro
         <button
           onClick={() => onChange(Math.min(totalPages, page + 1))}
           disabled={page === totalPages}
-          aria-label="Next page"
+          aria-label={language === 'ar' ? 'الصفحة التالية' : 'Next page'}
           className="flex h-8 w-8 items-center justify-center rounded-md border border-border-strong text-text-secondary hover:bg-surface-sunk disabled:opacity-40 disabled:hover:bg-transparent"
         >
-          <ChevronRight className="h-4 w-4" />
+          {isRtl ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
       </div>
     </div>

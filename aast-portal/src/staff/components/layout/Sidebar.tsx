@@ -33,6 +33,7 @@ import {
   ShieldAlert,
 } from 'lucide-react'
 import { staff } from '@staff/data/mockData'
+import { useLanguage } from '@/context/LanguageContext'
 
 const navGroups = [
   {
@@ -107,6 +108,8 @@ const navGroups = [
 ]
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+  const { t } = useLanguage()
+
   return (
     <div className="flex h-full flex-col bg-ink-900 text-text-onDark">
       <div className="flex items-center gap-2.5 px-5 py-5">
@@ -115,7 +118,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </div>
         <div>
           <p className="font-display text-sm font-bold leading-tight text-white">AAST</p>
-          <p className="text-xs text-white/50">Staff Portal</p>
+          <p className="text-xs text-white/50">{t('Staff Portal')}</p>
         </div>
       </div>
 
@@ -134,7 +137,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <nav className="flex-1 space-y-5 overflow-y-auto px-3 pb-6 scrollbar-thin">
         {navGroups.map((group) => (
           <div key={group.label}>
-            <p className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wider text-white/35">{group.label}</p>
+            <p className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wider text-white/35">{t(group.label)}</p>
             <div className="space-y-0.5">
               {group.items.map((item, i) => (
                 <NavLink
@@ -142,14 +145,16 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   to={item.to}
                   end={item.to === '/'}
                   onClick={onNavigate}
+                  title={t(item.label)}
+                  aria-label={t(item.label)}
                   className={({ isActive }) =>
                     `flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                       isActive ? 'bg-teal-600 text-white' : 'text-white/70 hover:bg-white/5 hover:text-white'
                     }`
                   }
                 >
-                  <item.icon className="h-4 w-4 shrink-0" />
-                  {item.label}
+                  <item.icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
+                  {t(item.label)}
                 </NavLink>
               ))}
             </div>

@@ -5,8 +5,10 @@ interface FilterBarProps {
 }
 
 export default function FilterBar({ options, active, onChange }: FilterBarProps) {
+  const { t } = useLanguage()
+
   return (
-    <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filters">
+    <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('Filters')}>
       {options.map((opt) => (
         <button
           key={opt}
@@ -18,9 +20,10 @@ export default function FilterBar({ options, active, onChange }: FilterBarProps)
               : 'bg-surface-sunk text-text-secondary hover:bg-border/60'
           }`}
         >
-          {opt}
+          {t(opt)}
         </button>
       ))}
     </div>
   )
 }
+import { useLanguage } from '@/context/LanguageContext'

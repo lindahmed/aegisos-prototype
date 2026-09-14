@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { X } from 'lucide-react'
 import type { Course } from '@student/types'
 import StatusBadge from './StatusBadge'
+import { useLanguage } from '@/context/LanguageContext'
 
 interface CourseTableProps {
   courses: Course[]
@@ -9,18 +10,17 @@ interface CourseTableProps {
 }
 
 export default function CourseTable({ courses, onDrop }: CourseTableProps) {
+  const { t } = useLanguage()
+
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-surface shadow-card">
       <table className="w-full min-w-[720px] text-left text-sm">
         <thead>
           <tr className="border-b border-border bg-surface-raised text-xs font-semibold uppercase tracking-wide text-text-muted">
-            <th className="px-4 py-3">Course</th>
-            <th className="px-4 py-3">Instructor</th>
-            <th className="px-4 py-3">Schedule</th>
-            <th className="px-4 py-3">Room</th>
-            <th className="px-4 py-3">Credits</th>
-            <th className="px-4 py-3">Status</th>
-            {onDrop && <th className="px-4 py-3 text-right">Action</th>}
+            {['Course', 'Instructor', 'Schedule', 'Room', 'Credits', 'Status'].map((label) => (
+              <th key={label} className="px-4 py-3">{t(label)}</th>
+            ))}
+            {onDrop && <th className="px-4 py-3 text-end">{t('Action')}</th>}
           </tr>
         </thead>
         <tbody>
@@ -48,7 +48,7 @@ export default function CourseTable({ courses, onDrop }: CourseTableProps) {
                     className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-error hover:bg-error-100"
                   >
                     <X className="h-3.5 w-3.5" />
-                    Drop
+                    {t('Drop')}
                   </button>
                 </td>
               )}

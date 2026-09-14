@@ -15,6 +15,7 @@ import {
   Contact,
 } from 'lucide-react'
 import { useAuth } from '@student/context/AuthContext'
+import { useLanguage } from '@/context/LanguageContext'
 
 const navGroups = [
   {
@@ -64,6 +65,7 @@ function firstName(name: string): string {
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { student, portalId } = useAuth()
+  const { t } = useLanguage()
 
   const displayName = student?.name ?? 'Student'
   const displayId = student?.student_id ?? portalId ?? ''
@@ -76,7 +78,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </div>
         <div>
           <p className="font-display text-sm font-bold leading-tight text-white">AAST</p>
-          <p className="text-xs text-white/50">Student Portal</p>
+          <p className="text-xs text-white/50">{t('Student Portal')}</p>
         </div>
       </div>
 
@@ -95,7 +97,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <nav className="flex-1 space-y-5 overflow-y-auto px-3 pb-6 scrollbar-thin">
         {navGroups.map((group) => (
           <div key={group.label}>
-            <p className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wider text-white/35">{group.label}</p>
+            <p className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wider text-white/35">{t(group.label)}</p>
             <div className="space-y-0.5">
               {group.items.map((item) => (
                 <NavLink
@@ -103,6 +105,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   to={item.to}
                   end={item.to === '/'}
                   onClick={onNavigate}
+                  title={t(item.label)}
+                  aria-label={t(item.label)}
                   className={({ isActive }) =>
                     `flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                       isActive
@@ -111,8 +115,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                     }`
                   }
                 >
-                  <item.icon className="h-4 w-4 shrink-0" />
-                  {item.label}
+                  <item.icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
+                  {t(item.label)}
                 </NavLink>
               ))}
             </div>

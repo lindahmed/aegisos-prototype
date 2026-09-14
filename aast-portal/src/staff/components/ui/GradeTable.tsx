@@ -1,4 +1,5 @@
 import type { GradeRow } from '@staff/types'
+import { useLanguage } from '@/context/LanguageContext'
 
 const gradeTone = (grade: string) => {
   if (grade === 'U') return 'text-text-muted'
@@ -15,19 +16,16 @@ interface GradeTableProps {
 }
 
 export default function GradeTable({ rows, editable, onChange }: GradeTableProps) {
+  const { t } = useLanguage()
+
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-surface shadow-card">
       <table className="w-full min-w-[720px] text-left text-sm">
         <thead>
           <tr className="border-b border-border bg-surface-raised text-xs font-semibold uppercase tracking-wide text-text-muted">
-            <th className="px-4 py-3">Student</th>
-            <th className="px-4 py-3">Coursework (/10)</th>
-            <th className="px-4 py-3">Week 7 exam (/30)</th>
-            <th className="px-4 py-3">Week 12 exam (/20)</th>
-            <th className="px-4 py-3">Final exam (/40)</th>
-            <th className="px-4 py-3">Total (/100)</th>
-            <th className="px-4 py-3">Grade</th>
-            <th className="px-4 py-3">GPA</th>
+            {['Student', 'Coursework (/10)', 'Week 7 exam (/30)', 'Week 12 exam (/20)', 'Final exam (/40)', 'Total (/100)', 'Grade', 'GPA'].map((label) => (
+              <th key={label} className="px-4 py-3">{t(label)}</th>
+            ))}
           </tr>
         </thead>
         <tbody>

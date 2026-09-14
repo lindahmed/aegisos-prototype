@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { useLanguage } from '@/context/LanguageContext'
 
 interface DropdownOption {
   label: string
@@ -16,6 +17,7 @@ interface DropdownProps {
 }
 
 export default function Dropdown({ label, options, value, onSelect, align = 'left' }: DropdownProps) {
+  const { isRtl, t } = useLanguage()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -38,14 +40,14 @@ export default function Dropdown({ label, options, value, onSelect, align = 'lef
         className="flex items-center gap-2 rounded-md border border-border-strong bg-white px-3 py-2 text-sm font-medium text-text-primary hover:bg-surface-sunk"
       >
         {current?.icon}
-        {current?.label ?? label}
+        {t(current?.label ?? label)}
         <ChevronDown className={`h-3.5 w-3.5 text-text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <div
           role="listbox"
           className={`absolute z-20 mt-1.5 min-w-[180px] rounded-md border border-border bg-surface py-1 shadow-raised ${
-            align === 'right' ? 'right-0' : 'left-0'
+            (align === 'right') !== isRtl ? 'end-0' : 'start-0'
           }`}
         >
           {options.map((opt) => (
@@ -62,7 +64,7 @@ export default function Dropdown({ label, options, value, onSelect, align = 'lef
               }`}
             >
               {opt.icon}
-              {opt.label}
+              {t(opt.label)}
             </button>
           ))}
         </div>

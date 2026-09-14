@@ -17,6 +17,7 @@ import Card from '@student/components/ui/Card'
 import StatusBadge from '@student/components/ui/StatusBadge'
 import EmptyState from '@student/components/ui/EmptyState'
 import { CardSkeleton, TableSkeleton } from '@student/components/ui/LoadingState'
+import { useLanguage } from '@/context/LanguageContext'
 
 function firstName(name: string): string {
   return name.split(' ')[0] ?? name
@@ -32,6 +33,7 @@ function courseStatus(health: number | null): { label: string; tone: 'success' |
 export default function Dashboard() {
   const { student } = useAuth()
   const { academics, loading, error } = useStudentAcademics()
+  const { isRtl, language, t } = useLanguage()
 
   const upcomingExams = exams.filter((e) => e.status === 'Upcoming').slice(0, 3)
 
@@ -85,7 +87,7 @@ export default function Dashboard() {
           <Link to="/registration">
             <span className="inline-flex items-center gap-2 rounded-md bg-coral-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-coral-600">
               <ClipboardList className="h-4 w-4" />
-              Open Registration
+              {t('Open Registration')}
             </span>
           </Link>
         }
@@ -95,13 +97,13 @@ export default function Dashboard() {
         <div className="space-y-6 lg:col-span-2">
           <Card padded={false}>
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="font-display text-base font-semibold text-text-primary">Registered Courses</h2>
+              <h2 className="font-display text-base font-semibold text-text-primary">{t('Registered Courses')}</h2>
               <Link to="/courses" className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:underline">
-                View all <ArrowRight className="h-3 w-3" />
+                {t('View all')} <ArrowRight className={`h-3 w-3 ${isRtl ? 'rtl-flip' : ''}`} />
               </Link>
             </div>
             {registeredCourses.length === 0 ? (
-              <p className="px-5 py-8 text-center text-sm text-text-secondary">No registered courses found in the academic database.</p>
+              <p className="px-5 py-8 text-center text-sm text-text-secondary">{t('No registered courses found in the academic database.')}</p>
             ) : (
               <div className="divide-y divide-border">
                 {registeredCourses.map((course) => {
@@ -116,7 +118,7 @@ export default function Dashboard() {
                         <p className="font-mono text-xs font-semibold text-teal-700">{course.course_id}</p>
                         <p className="text-sm font-medium text-text-primary">{course.course_name}</p>
                         <p className="text-xs text-text-muted">
-                          Health: {course.metrics.course_health?.toFixed(0) ?? '—'}/100
+                          {t('Health')}: {course.metrics.course_health?.toFixed(0) ?? '—'}/100
                         </p>
                       </div>
                       <StatusBadge label={status.label} tone={status.tone} />
@@ -129,13 +131,13 @@ export default function Dashboard() {
 
           <Card padded={false}>
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="font-display text-base font-semibold text-text-primary">Today's Classes</h2>
+              <h2 className="font-display text-base font-semibold text-text-primary">{t("Today's Classes")}</h2>
               <Link to="/schedule" className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:underline">
-                Full calendar <ArrowRight className="h-3 w-3" />
+                {t('Full calendar')} <ArrowRight className={`h-3 w-3 ${isRtl ? 'rtl-flip' : ''}`} />
               </Link>
             </div>
             {todaysClasses.length === 0 ? (
-              <p className="px-5 py-8 text-center text-sm text-text-secondary">No classes scheduled for today. Enjoy the break.</p>
+              <p className="px-5 py-8 text-center text-sm text-text-secondary">{t('No classes scheduled for today. Enjoy the break.')}</p>
             ) : (
               <div className="divide-y divide-border">
                 {todaysClasses.map((s, i) => (
@@ -158,9 +160,9 @@ export default function Dashboard() {
         <div className="space-y-6">
           <Card padded={false}>
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="font-display text-base font-semibold text-text-primary">Upcoming Exams</h2>
+              <h2 className="font-display text-base font-semibold text-text-primary">{t('Upcoming Exams')}</h2>
               <Link to="/exams" className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:underline">
-                All <ArrowRight className="h-3 w-3" />
+                {t('All')} <ArrowRight className={`h-3 w-3 ${isRtl ? 'rtl-flip' : ''}`} />
               </Link>
             </div>
             <div className="divide-y divide-border">
@@ -172,7 +174,7 @@ export default function Dashboard() {
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-text-primary">{e.courseTitle}</p>
                     <p className="flex items-center gap-1 text-xs text-text-muted">
-                      <Clock className="h-3 w-3" /> {new Date(e.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · {e.start}
+                      <Clock className="h-3 w-3" /> {new Date(e.date).toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-GB', { month: 'short', day: 'numeric' })} · {e.start}
                     </p>
                   </div>
                 </div>
@@ -182,9 +184,9 @@ export default function Dashboard() {
 
           <Card padded={false}>
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="font-display text-base font-semibold text-text-primary">Announcements</h2>
+              <h2 className="font-display text-base font-semibold text-text-primary">{t('Announcements')}</h2>
               <Link to="/announcements" className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:underline">
-                All <ArrowRight className="h-3 w-3" />
+                {t('All')} <ArrowRight className={`h-3 w-3 ${isRtl ? 'rtl-flip' : ''}`} />
               </Link>
             </div>
             {recentAnnouncements.length > 0 ? (
@@ -219,7 +221,7 @@ export default function Dashboard() {
                       />
                     </div>
                     <p className="mt-1 text-xs text-text-muted">
-                      {new Date(announcement.publishedAt).toLocaleString(undefined, {
+                      {new Date(announcement.publishedAt).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-GB', {
                         month: 'short',
                         day: 'numeric',
                         hour: 'numeric',
@@ -231,7 +233,7 @@ export default function Dashboard() {
               </div>
             ) : (
               <p className="px-5 py-8 text-center text-sm text-text-secondary">
-                No new announcements.
+                {t('No new announcements.')}
               </p>
             )}
           </Card>
@@ -239,7 +241,7 @@ export default function Dashboard() {
           <Card>
             <div className="flex items-center gap-2.5">
               <FileText className="h-4 w-4 text-teal-600" />
-              <h2 className="font-display text-base font-semibold text-text-primary">Quick Actions</h2>
+              <h2 className="font-display text-base font-semibold text-text-primary">{t('Quick Actions')}</h2>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
               {[
@@ -255,7 +257,7 @@ export default function Dashboard() {
                   to={a.to}
                   className="rounded-md border border-border-strong px-3 py-2.5 text-center text-xs font-semibold text-text-primary hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700"
                 >
-                  {a.label}
+                  {t(a.label)}
                 </Link>
               ))}
             </div>

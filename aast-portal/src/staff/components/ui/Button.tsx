@@ -1,5 +1,6 @@
 import { type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { Loader2 } from 'lucide-react'
+import { useLanguage } from '@/context/LanguageContext'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -35,6 +36,9 @@ export default function Button({
   disabled,
   ...rest
 }: ButtonProps) {
+  const { t } = useLanguage()
+  const label = typeof children === 'string' ? t(children) : children
+
   return (
     <button
       className={`inline-flex items-center justify-center rounded-md font-semibold transition-colors duration-150 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
@@ -42,7 +46,7 @@ export default function Button({
       {...rest}
     >
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : icon}
-      {children}
+      {label}
     </button>
   )
 }

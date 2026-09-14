@@ -5,6 +5,8 @@ interface TabsProps {
 }
 
 export default function Tabs({ tabs, active, onChange }: TabsProps) {
+  const { t } = useLanguage()
+
   return (
     <div role="tablist" className="flex gap-1 border-b border-border overflow-x-auto scrollbar-thin">
       {tabs.map((tab) => (
@@ -17,10 +19,11 @@ export default function Tabs({ tabs, active, onChange }: TabsProps) {
             active === tab ? 'text-teal-700' : 'text-text-secondary hover:text-text-primary'
           }`}
         >
-          {tab}
+          {t(tab)}
           {active === tab && <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-teal-600" />}
         </button>
       ))}
     </div>
   )
 }
+import { useLanguage } from '@/context/LanguageContext'

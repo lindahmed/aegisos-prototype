@@ -19,8 +19,10 @@ import PageHeader from '@staff/components/layout/PageHeader'
 import StatCard from '@staff/components/ui/StatCard'
 import Card from '@staff/components/ui/Card'
 import StatusBadge from '@staff/components/ui/StatusBadge'
+import { useLanguage } from '@/context/LanguageContext'
 
 export default function Dashboard() {
+  const { isRtl, language, t } = useLanguage()
   const activeCourses = courseSections.filter((c) => c.status === 'Active')
   const totalStudents = activeCourses.reduce((sum, c) => sum + c.studentsCount, 0)
   const pendingRequests = requests.filter((r) => r.status === 'Pending').length
@@ -40,7 +42,7 @@ export default function Dashboard() {
           <Link to="/attendance">
             <span className="inline-flex items-center gap-2 rounded-md bg-coral-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-coral-600">
               <ClipboardCheck className="h-4 w-4" />
-              Take Attendance
+              {t('Take Attendance')}
             </span>
           </Link>
         }
@@ -59,13 +61,13 @@ export default function Dashboard() {
         <div className="space-y-6 lg:col-span-2">
           <Card padded={false}>
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="font-display text-base font-semibold text-text-primary">Today's Schedule</h2>
+              <h2 className="font-display text-base font-semibold text-text-primary">{t("Today's Schedule")}</h2>
               <Link to="/schedule" className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:underline">
-                Full schedule <ArrowRight className="h-3 w-3" />
+                {t('Full schedule')} <ArrowRight className={`h-3 w-3 ${isRtl ? 'rtl-flip' : ''}`} />
               </Link>
             </div>
             {todaysClasses.length === 0 ? (
-              <p className="px-5 py-8 text-center text-sm text-text-secondary">No classes scheduled for today.</p>
+              <p className="px-5 py-8 text-center text-sm text-text-secondary">{t('No classes scheduled for today.')}</p>
             ) : (
               <div className="divide-y divide-border">
                 {todaysClasses.map((s, i) => (
@@ -86,9 +88,9 @@ export default function Dashboard() {
 
           <Card padded={false}>
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="font-display text-base font-semibold text-text-primary">My Courses</h2>
+              <h2 className="font-display text-base font-semibold text-text-primary">{t('My Courses')}</h2>
               <Link to="/courses" className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:underline">
-                View all <ArrowRight className="h-3 w-3" />
+                {t('View all')} <ArrowRight className={`h-3 w-3 ${isRtl ? 'rtl-flip' : ''}`} />
               </Link>
             </div>
             <div className="divide-y divide-border">
@@ -98,7 +100,7 @@ export default function Dashboard() {
                     <p className="font-mono text-xs font-semibold text-teal-700">{c.code} · {c.section}</p>
                     <p className="text-sm font-medium text-text-primary">{c.title}</p>
                   </div>
-                  <span className="shrink-0 font-mono text-xs text-text-muted">{c.studentsCount} students</span>
+                  <span className="shrink-0 font-mono text-xs text-text-muted">{c.studentsCount} {t('students')}</span>
                 </Link>
               ))}
             </div>
@@ -108,9 +110,9 @@ export default function Dashboard() {
         <div className="space-y-6">
           <Card padded={false}>
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="font-display text-base font-semibold text-text-primary">Notifications</h2>
+              <h2 className="font-display text-base font-semibold text-text-primary">{t('Notifications')}</h2>
               <Link to="/notifications" className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:underline">
-                All <ArrowRight className="h-3 w-3" />
+                {t('All')} <ArrowRight className={`h-3 w-3 ${isRtl ? 'rtl-flip' : ''}`} />
               </Link>
             </div>
             <div className="divide-y divide-border">
@@ -128,9 +130,9 @@ export default function Dashboard() {
 
           <Card padded={false}>
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="font-display text-base font-semibold text-text-primary">Announcements</h2>
+              <h2 className="font-display text-base font-semibold text-text-primary">{t('Announcements')}</h2>
               <Link to="/announcements" className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:underline">
-                All <ArrowRight className="h-3 w-3" />
+                {t('All')} <ArrowRight className={`h-3 w-3 ${isRtl ? 'rtl-flip' : ''}`} />
               </Link>
             </div>
             <div className="divide-y divide-border">
@@ -141,7 +143,7 @@ export default function Dashboard() {
                     <p className="text-sm font-medium text-text-primary">{a.title}</p>
                   </div>
                   <p className="mt-0.5 text-xs text-text-muted">
-                    {new Date(a.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    {new Date(a.date).toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-GB', { month: 'short', day: 'numeric' })}
                   </p>
                 </div>
               ))}
@@ -149,7 +151,7 @@ export default function Dashboard() {
           </Card>
 
           <Card>
-            <h2 className="font-display text-base font-semibold text-text-primary">Quick Actions</h2>
+            <h2 className="font-display text-base font-semibold text-text-primary">{t('Quick Actions')}</h2>
             <div className="mt-3 grid grid-cols-2 gap-2">
               {[
                 { label: 'Enter Grades', to: '/grades', icon: GraduationCap },
@@ -165,7 +167,7 @@ export default function Dashboard() {
                   className="flex flex-col items-center gap-1.5 rounded-md border border-border-strong px-3 py-3 text-center text-xs font-semibold text-text-primary hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700"
                 >
                   <a.icon className="h-4 w-4" />
-                  {a.label}
+                  {t(a.label)}
                 </Link>
               ))}
             </div>

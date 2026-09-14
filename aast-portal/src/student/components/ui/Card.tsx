@@ -17,7 +17,7 @@ const accentBorder: Record<string, string> = {
 export default function Card({ children, className = '', padded = true, accent = 'none' }: CardProps) {
   return (
     <div
-      className={`bg-surface rounded-lg border border-border shadow-card ${accentBorder[accent]} ${
+      className={`portal-card bg-surface rounded-lg border border-border shadow-card ${accentBorder[accent]} ${
         padded ? 'p-5' : ''
       } ${className}`}
     >

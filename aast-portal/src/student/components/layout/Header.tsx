@@ -6,7 +6,6 @@ import {
   BookOpen,
   CalendarDays,
   ChevronDown,
-  Globe,
   GraduationCap,
   FileClock,
   FileText,
@@ -21,6 +20,8 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@student/context/AuthContext'
 import { useNotifications } from '@student/context/NotificationsContext'
+import LanguageToggle from '@/components/LanguageToggle'
+import { useLanguage } from '@/context/LanguageContext'
 
 const primaryNav = [
   { to: '/', label: 'Dashboard', icon: Home },
@@ -50,30 +51,34 @@ function firstName(name: string): string {
 }
 
 function NavigationLinks({ mobile = false }: { mobile?: boolean }) {
+  const { t } = useLanguage()
+
   return (
     <nav
-      aria-label="Student navigation"
+      aria-label={t('Student navigation')}
       className={mobile
-        ? 'flex min-w-max items-center gap-1 px-3 py-2'
-        : 'hidden items-center gap-1 lg:flex'}
+        ? 'flex min-w-max items-center gap-1.5 px-3 py-2.5'
+        : 'hidden items-center gap-0.5 lg:flex'}
     >
       {primaryNav.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
           end={item.to === '/'}
-          title={item.label}
+          title={t(item.label)}
+          aria-label={t(item.label)}
+          data-tooltip={mobile ? undefined : t(item.label)}
           className={({ isActive }) =>
             (mobile
-              ? 'flex min-w-16 flex-col items-center gap-1 rounded-md px-2 py-1.5 text-[11px] font-semibold '
-              : 'flex items-center gap-1.5 rounded-md px-2.5 py-2 text-xs font-semibold ') +
+              ? 'flex min-w-[4.5rem] flex-col items-center gap-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold '
+              : 'nav-icon-link ') +
             (isActive
-              ? 'bg-teal-50 text-teal-700'
-              : 'text-text-secondary hover:bg-surface-sunk hover:text-teal-700')
+              ? (mobile ? 'border-teal-600 bg-teal-600 text-white' : 'nav-icon-link-active')
+              : (mobile ? 'border-border bg-white text-text-secondary hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700' : ''))
           }
         >
-          <item.icon className="h-4 w-4 shrink-0" />
-          <span className={mobile ? '' : 'sr-only'}>{item.label}</span>
+          <item.icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
+          <span className={mobile ? '' : 'sr-only'}>{t(item.label)}</span>
         </NavLink>
       ))}
     </nav>
@@ -87,6 +92,7 @@ export default function Header() {
   const { notifications, loading: notificationsLoading } = useNotifications()
   const unread = notifications.filter((notification) => !notification.read).length
   const { logout, student, portalId } = useAuth()
+  const { t } = useLanguage()
   const navigate = useNavigate()
 
   const displayName = student?.name ?? 'Student'
@@ -113,26 +119,19 @@ export default function Header() {
   }, [notifOpen])
 
   return (
-    <header className="sticky top-0 z-30 shrink-0 border-b border-border bg-surface/95 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-        <Link to="/" className="flex shrink-0 items-center gap-2.5" aria-label="AAST Portal home">
-          <span className="flex h-10 w-10 items-center justify-center rounded-md bg-teal-600 text-white">
-            <GraduationCap className="h-5 w-5" />
+    <header className="sticky top-0 z-30 shrink-0 border-b-2 border-ink-800 bg-white/95 shadow-[0_6px_24px_rgba(11,36,66,0.08)] backdrop-blur">
+      <div className="mx-auto flex h-[4.5rem] max-w-screen-2xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+        <Link to="/" className="flex shrink-0 items-center gap-2.5" aria-label={t('AAST Portal home')}>
+          <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-gradient-to-br from-teal-500 to-ink-800 text-white shadow-card">
+            <GraduationCap className="h-6 w-6" strokeWidth={1.9} />
           </span>
-          <span className="font-display text-base font-bold text-ink-900">AAST Portal</span>
+          <span className="hidden font-display text-base font-bold text-ink-900 xl:inline">{t('AAST Portal')}</span>
         </Link>
 
         <NavigationLinks />
 
         <div className="flex items-center gap-1 sm:gap-2">
-          <button
-            type="button"
-            className="hidden items-center gap-1.5 rounded-md px-2.5 py-2 text-sm font-medium text-text-secondary hover:bg-surface-sunk hover:text-teal-700 md:flex"
-          >
-            <Globe className="h-4 w-4" />
-            EN
-            <ChevronDown className="h-3 w-3" />
-          </button>
+          <div className="hidden md:block"><LanguageToggle /></div>
 
           <div ref={notifRef} className="relative">
             <button
@@ -142,12 +141,13 @@ export default function Header() {
                 setNotifOpen(opening)
                 setProfileOpen(false)
               }}
-              aria-label="Notifications"
+              aria-label={t('Notifications')}
+              title={t('Notifications')}
               aria-expanded={notifOpen}
               aria-controls="student-notifications-menu"
-              className="relative flex h-9 w-9 items-center justify-center rounded-md text-text-secondary hover:bg-surface-sunk"
+              className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-white text-text-secondary shadow-card transition-all hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700"
             >
-              <Bell className="h-4.5 w-4.5" />
+              <Bell className="h-5 w-5" strokeWidth={1.9} />
               {unread > 0 && (
                 <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral-500 px-1 text-[10px] font-bold text-white">
                   {unread}
@@ -157,22 +157,22 @@ export default function Header() {
             {notifOpen && (
               <div
                 id="student-notifications-menu"
-                className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-border bg-surface py-2 shadow-raised"
+                className="absolute end-0 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-border bg-surface py-2 shadow-raised"
               >
                 <div className="flex items-center justify-between px-3.5 pb-2">
-                  <p className="text-sm font-semibold text-text-primary">Notifications</p>
+                  <p className="text-sm font-semibold text-text-primary">{t('Notifications')}</p>
                   <Link
                     to="/notifications"
                     onClick={() => setNotifOpen(false)}
                     className="text-xs font-semibold text-teal-700 hover:underline"
                   >
-                    View all
+                    {t('View all')}
                   </Link>
                 </div>
                 <div className="max-h-72 overflow-y-auto scrollbar-thin">
                   {notificationsLoading && notifications.length === 0 && (
                     <p className="border-t border-border px-3.5 py-5 text-center text-xs text-text-muted">
-                      Loading notifications…
+                      {t('Loading notifications…')}
                     </p>
                   )}
                   {notifications.slice(0, 4).map((notification) => (
@@ -191,7 +191,7 @@ export default function Header() {
                   ))}
                   {!notificationsLoading && notifications.length === 0 && (
                     <p className="border-t border-border px-3.5 py-5 text-center text-xs text-text-muted">
-                      You are all caught up.
+                      {t('You are all caught up.')}
                     </p>
                   )}
                 </div>
@@ -206,7 +206,7 @@ export default function Header() {
                 setProfileOpen((open) => !open)
                 setNotifOpen(false)
               }}
-              className="flex items-center gap-2 rounded-md py-1.5 pl-1.5 pr-2 hover:bg-surface-sunk"
+              className="flex items-center gap-2 rounded-md py-1.5 pe-2 ps-1.5 hover:bg-surface-sunk"
             >
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-600 font-display text-xs font-bold text-white">
                 {initials(displayName)}
@@ -217,7 +217,7 @@ export default function Header() {
               <ChevronDown className="hidden h-3.5 w-3.5 text-text-muted md:inline" />
             </button>
             {profileOpen && (
-              <div className="absolute right-0 mt-2 w-56 rounded-lg border border-border bg-surface py-1.5 shadow-raised">
+              <div className="absolute end-0 mt-2 w-56 rounded-lg border border-border bg-surface py-1.5 shadow-raised">
                 <div className="border-b border-border px-3.5 py-2.5">
                   <p className="truncate text-sm font-semibold text-text-primary">{displayName}</p>
                   <p className="font-mono text-xs text-text-muted">{displayId}</p>
@@ -228,14 +228,14 @@ export default function Header() {
                   className="flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-sunk"
                 >
                   <UserRound className="h-4 w-4 text-text-muted" />
-                  My Profile
+                  {t('My Profile')}
                 </Link>
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-text-primary hover:bg-surface-sunk"
                 >
                   <Settings className="h-4 w-4 text-text-muted" />
-                  Settings
+                  {t('Settings')}
                 </button>
                 <button
                   type="button"
@@ -246,7 +246,7 @@ export default function Header() {
                   className="flex w-full items-center gap-2.5 border-t border-border px-3.5 py-2 text-left text-sm text-error hover:bg-error-100"
                 >
                   <LogOut className="h-4 w-4" />
-                  Sign out
+                  {t('Sign out')}
                 </button>
               </div>
             )}
@@ -254,8 +254,9 @@ export default function Header() {
         </div>
       </div>
 
-      <div className="overflow-x-auto border-t border-border scrollbar-thin lg:hidden">
-        <NavigationLinks mobile />
+      <div className="flex items-center border-t border-border bg-surface-raised lg:hidden">
+        <div className="overflow-x-auto scrollbar-thin"><NavigationLinks mobile /></div>
+        <div className="shrink-0 border-s border-border px-2 md:hidden"><LanguageToggle compact /></div>
       </div>
     </header>
   )

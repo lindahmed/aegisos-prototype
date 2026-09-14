@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { Student } from '@staff/types'
 import StatusBadge from './StatusBadge'
+import { useLanguage } from '@/context/LanguageContext'
 
 const gradeStatusTone: Record<Student['gradeStatus'], 'success' | 'warning' | 'error' | 'info'> = {
   Excellent: 'success',
@@ -10,17 +11,16 @@ const gradeStatusTone: Record<Student['gradeStatus'], 'success' | 'warning' | 'e
 }
 
 export default function StudentTable({ students }: { students: Student[] }) {
+  const { t } = useLanguage()
+
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-surface shadow-card">
       <table className="w-full min-w-[720px] text-left text-sm">
         <thead>
           <tr className="border-b border-border bg-surface-raised text-xs font-semibold uppercase tracking-wide text-text-muted">
-            <th className="px-4 py-3">Student</th>
-            <th className="px-4 py-3">ID</th>
-            <th className="px-4 py-3">Level</th>
-            <th className="px-4 py-3">Section</th>
-            <th className="px-4 py-3">Attendance</th>
-            <th className="px-4 py-3">Status</th>
+            {['Student', 'ID', 'Level', 'Section', 'Attendance', 'Status'].map((label) => (
+              <th key={label} className="px-4 py-3">{t(label)}</th>
+            ))}
           </tr>
         </thead>
         <tbody>

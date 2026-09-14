@@ -1,4 +1,5 @@
 import type { ScheduleSlot } from '@student/types'
+import { useLanguage } from '@/context/LanguageContext'
 
 const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu']
 const hours = Array.from({ length: 9 }, (_, i) => 9 + i) // 9 -> 17
@@ -15,6 +16,7 @@ function toMinutes(time: string) {
 }
 
 export default function ScheduleGrid({ slots }: { slots: ScheduleSlot[] }) {
+  const { t } = useLanguage()
   const dayStart = hours[0] * 60
   const rowHeight = 56
 
@@ -25,7 +27,7 @@ export default function ScheduleGrid({ slots }: { slots: ScheduleSlot[] }) {
           <div className="py-3" />
           {days.map((d) => (
             <div key={d} className="py-3 text-center text-sm font-semibold text-text-primary">
-              {d}
+              {t(d)}
             </div>
           ))}
         </div>
