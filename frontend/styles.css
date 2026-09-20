@@ -647,6 +647,7 @@ body.is-authenticated .dashboard-view:not([data-section="workspace"]) .dashboard
   display: none;
 }
 body.is-authenticated .dashboard-tabs { flex: none; }
+body.is-authenticated .dashboard-view[data-section="advisor"] .dashboard-tabs { display: none; }
 body.is-authenticated .dashboard-page {
   flex: 1;
   min-height: 0;
@@ -666,6 +667,7 @@ body.is-authenticated .advisor-messages {
   min-height: 240px;
 }
 body.is-authenticated .advisor-form { flex: none; }
+body.is-authenticated #advisor-status:empty { display: none; }
 
 body.is-authenticated .course-section,
 body.is-authenticated .advisor-panel,
