@@ -1,8 +1,4 @@
 from __future__ import annotations
-
-
-
-
 import json
 import os
 from datetime import date
@@ -214,23 +210,31 @@ def _portal_notifications(
 
     read_ids = repository.get_read_notification_ids(student_id)
     items: list[dict[str, object]] = []
+    for stored in repository.get_stored_notifications(student_id):
+        stored_notification_id = f"stored:{stored['notification_id']}"
+        items.append(
+            {
+                "id": stored_notification_id,
+                "type": stored["type"],
+                "category": stored["type"].capitalize(),
+                "title": stored["message"],
+                "body": "",
+                "timestamp": str(stored["created_at"]),
+                "read": bool(stored["is_read"]),
+            }
+        )
     for alert in repository.get_attendance_alerts(student_id):
         absence_count = int(alert["absence_count"])
-        dropped = bool(alert["automatically_dropped"])
+        dropped = bool(alert.get("automatically_dropped"))
         notification_id = (
-            f"attendance:{'drop' if dropped else 'warning'}:"
-            f"{alert['course_id']}:{alert['semester']}"
+            f"attendance:{alert['course_id']}:{alert['semester']}:{absence_count}"
         )
         items.append(
             {
                 "id": notification_id,
                 "type": "attendance",
-                "category": "Registration",
-                "title": (
-                    f"Course dropped: {alert['course_name']}"
-                    if dropped
-                    else f"Attendance warning: {alert['course_name']}"
-                ),
+                "category": "Attendance",
+                "title": f"{alert['course_name']} attendance alert",
                 "body": (
                     "This course was automatically dropped after your fourth "
                     "recorded absence."
@@ -247,6 +251,7 @@ def _portal_notifications(
                 "read": notification_id in read_ids,
             }
         )
+
     twin = build_student_twin(repository, student_id)
     if twin is not None:
         for course in twin.courses:

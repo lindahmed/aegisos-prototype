@@ -514,6 +514,8 @@ class PostgresStudentRepository:
             "courses": list(courses.values()),
         }
 
+
+
     def upsert_material_document(self, document: dict[str, Any]) -> None:
         fields = (
             "document_id", "course_id", "course_name", "major_code",
@@ -548,6 +550,16 @@ class PostgresStudentRepository:
                           status=EXCLUDED.status,
                           updated_at=EXCLUDED.updated_at""",
                     values,
+                )
+                cursor.execute(
+                    """INSERT INTO notifications (student_id, message, type)
+                       SELECT sc.student_id, %s, 'material'
+                       FROM student_courses sc
+                       WHERE sc.course_code = %s AND sc.status = 'Current'""",
+                    (
+                        f"New lecture uploaded: {document.get('title')} ({document.get('course_name')})",
+                        document.get("course_id"),
+                    ),
                 )
 
     @staticmethod
@@ -1021,6 +1033,19 @@ class PostgresStudentRepository:
             (student_id,),
         )
         return {str(row["notification_id"]) for row in rows}
+
+
+
+    def get_stored_notifications(self, student_id: str) -> list[dict[str, Any]]:
+        return self._fetch_all(
+            """SELECT notification_id, message, type, is_read, created_at
+               FROM notifications
+               WHERE student_id = %s
+               ORDER BY created_at DESC""",
+            (student_id,),
+        )
+
+
 
     def set_notifications_read(
         self, student_id: str, notification_ids: list[str], read: bool
