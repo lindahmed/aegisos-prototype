@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import {
-  validateStaffId,
+  loginPortalStaff,
   validateStudentId,
   type ValidatedStudent,
 } from "@/lib/portalGrades";
@@ -92,17 +92,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: "Please enter your password." };
     }
 
-    const email = idToHiddenEmail(selectedRole, normalizedId);
-    const { error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (authError) {
-      return { success: false, error: "Incorrect ID or password." };
-    }
-
     try {
       if (selectedRole === "student") {
+        const email = idToHiddenEmail(selectedRole, normalizedId);
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (authError) {
+          return { success: false, error: "Incorrect ID or password." };
+        }
         const student = await validateStudentId(normalizedId);
         if (student === null) {
           return {
@@ -130,14 +129,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: true };
       }
 
-      const valid = await validateStaffId(normalizedId);
-      if (!valid) {
-        return {
-          success: false,
-          error:
-            "Staff ID not recognized. Please contact IT if this is a new account.",
-        };
-      }
+      const staffLogin = await loginPortalStaff(normalizedId, password);
+      if (!staffLogin.valid) return { success: false, error: "Incorrect ID or password." };
       const nextSession: StoredSession = {
         role: "staff",
         portalId: normalizedId,

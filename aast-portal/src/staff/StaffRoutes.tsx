@@ -24,6 +24,7 @@ import Profile from '@staff/pages/Profile'
 import UpdateData from '@staff/pages/UpdateData'
 import ChangePassword from '@staff/pages/ChangePassword'
 import Settings from '@staff/pages/Settings'
+import Messages from '@staff/pages/Messages'
 
 export default function StaffRoutes() {
   return (
@@ -51,6 +52,7 @@ export default function StaffRoutes() {
         <Route path="/support" element={<Support />} />
         <Route path="/announcements" element={<Announcements />} />
         <Route path="/notifications" element={<Notifications />} />
+        <Route path="/messages" element={<Messages />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/profile/update" element={<UpdateData />} />
         <Route path="/profile/password" element={<ChangePassword />} />

@@ -122,6 +122,71 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
+export type MessageParticipantType = 'student' | 'staff'
+
+export interface MessageContact {
+  type: MessageParticipantType
+  id: string
+  name: string
+  subtitle: string
+}
+
+export interface PortalMessage {
+  message_id: string
+  sender_type: MessageParticipantType
+  sender_id: string
+  sender_name: string
+  recipient_type: MessageParticipantType | null
+  recipient_id: string | null
+  recipient_name: string
+  is_broadcast: boolean
+  body: string
+  created_at: string
+  read: boolean
+}
+
+export function getMessageContacts(actorType: MessageParticipantType, actorId: string) {
+  const search = new URLSearchParams({ actor_type: actorType, actor_id: actorId }).toString()
+  return request<{ actor: MessageContact; contacts: MessageContact[] }>(`/messages/contacts?${search}`)
+}
+
+export function getMessages(actorType: MessageParticipantType, actorId: string) {
+  const search = new URLSearchParams({ actor_type: actorType, actor_id: actorId }).toString()
+  return request<{ messages: PortalMessage[] }>(`/messages?${search}`)
+}
+
+export function loginPortalStaff(staffId: string, password: string) {
+  return request<{ staff_id: string; name: string; valid: boolean }>('/portal/staff/login', {
+    method: 'POST',
+    body: JSON.stringify({ staff_id: staffId, password }),
+  })
+}
+
+export function sendPortalMessage(input: {
+  sender_type: MessageParticipantType
+  sender_id: string
+  recipient_type?: MessageParticipantType
+  recipient_id?: string
+  is_broadcast?: boolean
+  body: string
+}) {
+  return request<{ message: PortalMessage }>('/messages', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function markPortalMessagesRead(
+  actorType: MessageParticipantType,
+  actorId: string,
+  messageIds: string[],
+) {
+  return request<{ read: string[] }>('/messages/read', {
+    method: 'PUT',
+    body: JSON.stringify({ actor_type: actorType, actor_id: actorId, message_ids: messageIds }),
+  })
+}
+
 export function listPortalCourses() {
   return request<{ courses: PortalCourse[] }>('/portal/courses')
 }

@@ -63,6 +63,12 @@
                 <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">&#9728;</span>
                 <span data-theme-label>Light mode</span>
               </button>
+              <button id="inbox-button" class="icon-button inbox-button" type="button" aria-label="Open inbox" title="Inbox">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path>
+                </svg>
+                <span id="inbox-badge" class="notif-badge" hidden>0</span>
+              </button>
               <div class="notif-wrap">
                 <button id="notif-button" class="icon-button" type="button" aria-label="Notifications" aria-expanded="false">
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -240,6 +246,45 @@
               <span><i class="assignment"></i>Deadline</span>
               <span><i class="study_session"></i>Study session</span>
               <span><i class="personal"></i>Personal</span>
+            </div>
+          </section>
+
+          <section id="messages-panel" class="dashboard-page messages-panel" hidden>
+            <button class="page-back-button" type="button" data-dashboard-home>
+              <span aria-hidden="true">&#8592;</span> Back to dashboard
+            </button>
+            <div class="messages-heading">
+              <div>
+                <p class="eyebrow">Campus conversations</p>
+                <h3>Inbox</h3>
+              </div>
+              <button id="new-message-button" class="secondary-button" type="button">New message</button>
+            </div>
+            <div class="messages-layout">
+              <aside class="conversation-sidebar">
+                <label class="message-search-label" for="message-search">Find a classmate or professor</label>
+                <input id="message-search" type="search" placeholder="Search people" autocomplete="off">
+                <div id="conversation-list" class="conversation-list"></div>
+              </aside>
+              <section class="conversation-pane" aria-live="polite">
+                <header id="conversation-header" class="conversation-header">
+                  <div>
+                    <h4 id="conversation-title">Choose a conversation</h4>
+                    <p id="conversation-subtitle">Your classmates and professors are here.</p>
+                  </div>
+                </header>
+                <div id="message-thread" class="message-thread">
+                  <div class="message-thread-empty">
+                    <strong>Start a conversation</strong>
+                    <span>Select someone from the inbox to view or send messages.</span>
+                  </div>
+                </div>
+                <form id="message-compose-form" class="message-compose-form" hidden>
+                  <textarea id="message-compose-input" rows="2" maxlength="4000" placeholder="Write a message…" required></textarea>
+                  <button id="message-send-button" class="primary-button" type="submit">Send</button>
+                </form>
+                <p id="message-status" class="message" role="status" aria-live="polite"></p>
+              </section>
             </div>
           </section>
         </section>

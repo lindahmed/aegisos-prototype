@@ -2,9 +2,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Callable, Literal
+from uuid import uuid4
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -81,6 +82,26 @@ class PortalGradebookUpdateRequest(BaseModel):
 class PortalNotificationReadRequest(BaseModel):
     notification_ids: list[str] = Field(max_length=200)
     read: bool = True
+
+
+class PortalMessageCreateRequest(BaseModel):
+    sender_type: Literal["student", "staff"]
+    sender_id: str = Field(min_length=1, max_length=64)
+    recipient_type: Literal["student", "staff"] | None = None
+    recipient_id: str | None = Field(default=None, max_length=64)
+    is_broadcast: bool = False
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class PortalMessageReadRequest(BaseModel):
+    actor_type: Literal["student", "staff"]
+    actor_id: str = Field(min_length=1, max_length=64)
+    message_ids: list[str] = Field(max_length=200)
+
+
+class PortalStaffLoginRequest(BaseModel):
+    staff_id: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
 
 
 class WeeklyPlanStatusRequest(BaseModel):
@@ -580,6 +601,49 @@ def create_app(
         allow_headers=["Content-Type"],
     )
 
+    staff_names = {"104217": "Dr. Omar Fathallah"}
+    allowed_staff_ids = {
+        identifier.strip()
+        for identifier in os.environ.get("AEGIS_STAFF_IDS", "104217").split(",")
+        if identifier.strip()
+    }
+
+    def messaging_participant(actor_type: str, actor_id: str) -> dict[str, str]:
+        normalized_id = actor_id.strip()
+        if actor_type == "student":
+            student = repository.get_student(normalized_id)
+            if student is None:
+                raise HTTPException(status_code=404, detail="Student not found")
+            return {
+                "type": "student",
+                "id": student.student_id,
+                "name": student.name,
+                "subtitle": f"Year {student.year} · {student.major}",
+            }
+        if normalized_id not in allowed_staff_ids:
+            raise HTTPException(status_code=404, detail="Staff member not found")
+        return {
+            "type": "staff",
+            "id": normalized_id,
+            "name": staff_names.get(normalized_id, f"Staff {normalized_id}"),
+            "subtitle": "Professor · Computer Engineering",
+        }
+
+    def enrich_message(message: dict[str, object]) -> dict[str, object]:
+        result = dict(message)
+        sender = messaging_participant(
+            str(result["sender_type"]), str(result["sender_id"])
+        )
+        result["sender_name"] = sender["name"]
+        if result.get("recipient_id") and result.get("recipient_type"):
+            recipient = messaging_participant(
+                str(result["recipient_type"]), str(result["recipient_id"])
+            )
+            result["recipient_name"] = recipient["name"]
+        else:
+            result["recipient_name"] = "All students"
+        return result
+
     @api.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -590,6 +654,81 @@ def create_app(
         if student is None:
             raise HTTPException(status_code=404, detail="Student not found")
         return student.as_dict()
+
+    @api.get("/messages/contacts")
+    def get_message_contacts(actor_type: Literal["student", "staff"], actor_id: str) -> dict[str, object]:
+        actor = messaging_participant(actor_type, actor_id)
+        students = [
+            {
+                "type": "student",
+                "id": student.student_id,
+                "name": student.name,
+                "subtitle": f"Year {student.year} · {student.major}",
+            }
+            for student in repository.get_registered_students()
+            if not (actor_type == "student" and student.student_id == actor["id"])
+        ]
+        contacts = students
+        if actor_type == "student":
+            contacts = [
+                messaging_participant("staff", identifier)
+                for identifier in sorted(allowed_staff_ids)
+            ] + students
+        return {"actor": actor, "contacts": contacts}
+
+    @api.get("/messages")
+    def get_messages(actor_type: Literal["student", "staff"], actor_id: str) -> dict[str, object]:
+        actor = messaging_participant(actor_type, actor_id)
+        messages = [
+            enrich_message(message)
+            for message in repository.list_portal_messages(actor_type, actor["id"])
+        ]
+        return {"messages": messages}
+
+    @api.post("/messages")
+    def create_message(request: PortalMessageCreateRequest) -> dict[str, object]:
+        sender = messaging_participant(request.sender_type, request.sender_id)
+        body = request.body.strip()
+        if not body:
+            raise HTTPException(status_code=400, detail="Message cannot be empty")
+        if request.is_broadcast:
+            if request.sender_type != "staff":
+                raise HTTPException(status_code=403, detail="Only staff can broadcast messages")
+            recipient_type = None
+            recipient_id = None
+        else:
+            if request.recipient_type is None or not request.recipient_id:
+                raise HTTPException(status_code=400, detail="Choose a message recipient")
+            recipient = messaging_participant(request.recipient_type, request.recipient_id)
+            if request.sender_type == "staff" and recipient["type"] != "student":
+                raise HTTPException(status_code=400, detail="Staff messages must be sent to students")
+            recipient_type = recipient["type"]
+            recipient_id = recipient["id"]
+        message = repository.create_portal_message(
+            {
+                "message_id": str(uuid4()),
+                "sender_type": sender["type"],
+                "sender_id": sender["id"],
+                "recipient_type": recipient_type,
+                "recipient_id": recipient_id,
+                "is_broadcast": request.is_broadcast,
+                "body": body,
+                "created_at": datetime.now(UTC).isoformat(),
+                "read": True,
+            }
+        )
+        return {"message": enrich_message(message)}
+
+    @api.put("/messages/read")
+    def mark_messages_read(request: PortalMessageReadRequest) -> dict[str, object]:
+        actor = messaging_participant(request.actor_type, request.actor_id)
+        visible = {
+            str(message["message_id"])
+            for message in repository.list_portal_messages(request.actor_type, actor["id"])
+        }
+        message_ids = [message_id for message_id in request.message_ids if message_id in visible]
+        repository.mark_portal_messages_read(request.actor_type, actor["id"], message_ids)
+        return {"read": message_ids}
 
     @api.get("/portal/courses")
     def get_portal_courses() -> dict[str, object]:
@@ -867,6 +1006,20 @@ def create_app(
         if staff_id.strip() not in allowed_ids:
             raise HTTPException(status_code=404, detail="Staff member not found")
         return {"staff_id": staff_id.strip(), "valid": True}
+
+    @api.post("/portal/staff/login")
+    def login_portal_staff(request: PortalStaffLoginRequest) -> dict[str, object]:
+        staff_member = messaging_participant("staff", request.staff_id)
+        expected_password = os.environ.get(
+            "AEGIS_STAFF_DEMO_PASSWORD", "demo1234"
+        )
+        if request.password != expected_password:
+            raise HTTPException(status_code=401, detail="Incorrect ID or password")
+        return {
+            "staff_id": staff_member["id"],
+            "name": staff_member["name"],
+            "valid": True,
+        }
 
     @api.post("/workspace/create", response_model=WorkspaceResponse)
     def create_workspace(request: WorkspaceRequest) -> WorkspaceResponse:

@@ -263,6 +263,33 @@ class PostgresStudentRepository:
                         location TEXT,
                         CHECK(end_minute > start_minute)
                     );
+                    CREATE TABLE IF NOT EXISTS portal_messages (
+                        message_id TEXT PRIMARY KEY,
+                        sender_type TEXT NOT NULL CHECK(sender_type IN ('student', 'staff')),
+                        sender_id TEXT NOT NULL,
+                        recipient_type TEXT CHECK(recipient_type IN ('student', 'staff')),
+                        recipient_id TEXT,
+                        is_broadcast BOOLEAN NOT NULL DEFAULT FALSE,
+                        body TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        CHECK(
+                            (is_broadcast AND sender_type = 'staff' AND recipient_id IS NULL)
+                            OR
+                            (NOT is_broadcast AND recipient_type IS NOT NULL AND recipient_id IS NOT NULL)
+                        )
+                    );
+                    CREATE TABLE IF NOT EXISTS portal_message_reads (
+                        message_id TEXT NOT NULL REFERENCES portal_messages(message_id)
+                            ON DELETE CASCADE,
+                        reader_type TEXT NOT NULL CHECK(reader_type IN ('student', 'staff')),
+                        reader_id TEXT NOT NULL,
+                        read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY (message_id, reader_type, reader_id)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_portal_messages_sender
+                        ON portal_messages(sender_type, sender_id, created_at);
+                    CREATE INDEX IF NOT EXISTS idx_portal_messages_recipient
+                        ON portal_messages(recipient_type, recipient_id, created_at);
                     CREATE TABLE IF NOT EXISTS material_documents (
                         document_id TEXT PRIMARY KEY,
                         course_id TEXT NOT NULL REFERENCES courses(course_code),
@@ -408,6 +435,81 @@ class PostgresStudentRepository:
                 cursor.execute("SELECT student_id::text AS student_id FROM students ORDER BY student_id")
                 ids = [row["student_id"] for row in cursor.fetchall()]
         return [student for student_id in ids if (student := self.get_student(student_id))]
+
+    def create_portal_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO portal_messages (
+                           message_id, sender_type, sender_id, recipient_type,
+                           recipient_id, is_broadcast, body, created_at
+                       ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        message["message_id"],
+                        message["sender_type"],
+                        message["sender_id"],
+                        message.get("recipient_type"),
+                        message.get("recipient_id"),
+                        bool(message.get("is_broadcast")),
+                        message["body"],
+                        message["created_at"],
+                    ),
+                )
+        return dict(message)
+
+    def list_portal_messages(
+        self, actor_type: str, actor_id: str
+    ) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """SELECT m.*,
+                      CASE WHEN r.message_id IS NULL THEN FALSE ELSE TRUE END AS was_read
+               FROM portal_messages AS m
+               LEFT JOIN portal_message_reads AS r
+                 ON r.message_id = m.message_id
+                AND r.reader_type = %s AND r.reader_id = %s
+               WHERE (m.sender_type = %s AND m.sender_id = %s)
+                  OR (m.recipient_type = %s AND m.recipient_id = %s)
+                  OR (%s = 'student' AND m.is_broadcast = TRUE)
+               ORDER BY m.created_at, m.message_id""",
+            (
+                actor_type,
+                actor_id,
+                actor_type,
+                actor_id,
+                actor_type,
+                actor_id,
+                actor_type,
+            ),
+        )
+        for message in rows:
+            created_at = message.get("created_at")
+            if hasattr(created_at, "isoformat"):
+                message["created_at"] = created_at.isoformat()
+            message["is_broadcast"] = bool(message["is_broadcast"])
+            message["read"] = (
+                message["sender_type"] == actor_type
+                and message["sender_id"] == actor_id
+            ) or bool(message.pop("was_read"))
+        return rows
+
+    def mark_portal_messages_read(
+        self, actor_type: str, actor_id: str, message_ids: list[str]
+    ) -> None:
+        if not message_ids:
+            return
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    """INSERT INTO portal_message_reads (
+                           message_id, reader_type, reader_id, read_at
+                       ) VALUES (%s, %s, %s, NOW())
+                       ON CONFLICT(message_id, reader_type, reader_id)
+                       DO UPDATE SET read_at=EXCLUDED.read_at""",
+                    (
+                        (message_id, actor_type, actor_id)
+                        for message_id in message_ids
+                    ),
+                )
 
     def get_semester_planner_source(self, student_id: str) -> dict[str, Any] | None:
         """Return normalized curriculum facts used by the semester planner."""

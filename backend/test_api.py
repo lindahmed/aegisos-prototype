@@ -75,6 +75,110 @@ def test_unknown_student_is_rejected(tmp_path: Path) -> None:
     assert response.status_code == 404
 
 
+def test_student_and_professor_messages_share_one_inbox(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    direct = client.post(
+        "/messages",
+        json={
+            "sender_type": "staff",
+            "sender_id": "104217",
+            "recipient_type": "student",
+            "recipient_id": "231027905",
+            "body": "Please stop by during office hours.",
+        },
+    )
+    assert direct.status_code == 200
+    direct_id = direct.json()["message"]["message_id"]
+
+    peer = client.post(
+        "/messages",
+        json={
+            "sender_type": "student",
+            "sender_id": "231027906",
+            "recipient_type": "student",
+            "recipient_id": "231027905",
+            "body": "Want to review the lab together?",
+        },
+    )
+    assert peer.status_code == 200
+
+    inbox = client.get(
+        "/messages",
+        params={"actor_type": "student", "actor_id": "231027905"},
+    ).json()["messages"]
+    assert [message["body"] for message in inbox] == [
+        "Please stop by during office hours.",
+        "Want to review the lab together?",
+    ]
+    assert all(message["read"] is False for message in inbox)
+
+    marked = client.put(
+        "/messages/read",
+        json={
+            "actor_type": "student",
+            "actor_id": "231027905",
+            "message_ids": [direct_id],
+        },
+    )
+    assert marked.status_code == 200
+    refreshed = client.get(
+        "/messages",
+        params={"actor_type": "student", "actor_id": "231027905"},
+    ).json()["messages"]
+    assert next(message for message in refreshed if message["message_id"] == direct_id)["read"] is True
+
+
+def test_professor_broadcast_reaches_every_student(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    response = client.post(
+        "/messages",
+        json={
+            "sender_type": "staff",
+            "sender_id": "104217",
+            "is_broadcast": True,
+            "body": "Tomorrow's lecture will start at 10:00.",
+        },
+    )
+    assert response.status_code == 200
+
+    for student_id in ("231027905", "231027906", "231027907"):
+        inbox = client.get(
+            "/messages",
+            params={"actor_type": "student", "actor_id": student_id},
+        ).json()["messages"]
+        assert any(message["is_broadcast"] for message in inbox)
+
+
+def test_student_cannot_broadcast_messages(tmp_path: Path) -> None:
+    response = make_client(tmp_path).post(
+        "/messages",
+        json={
+            "sender_type": "student",
+            "sender_id": "231027905",
+            "is_broadcast": True,
+            "body": "This should be rejected.",
+        },
+    )
+    assert response.status_code == 403
+
+
+def test_staff_demo_login_uses_local_backend_password(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    accepted = client.post(
+        "/portal/staff/login",
+        json={"staff_id": "104217", "password": "demo1234"},
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["valid"] is True
+
+    rejected = client.post(
+        "/portal/staff/login",
+        json={"staff_id": "104217", "password": "wrong-password"},
+    )
+    assert rejected.status_code == 401
+
+
 def test_portal_courses_are_available_for_gradebook(tmp_path: Path) -> None:
     response = make_client(tmp_path).get("/portal/courses")
     assert response.status_code == 200

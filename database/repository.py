@@ -317,6 +317,34 @@ class StudentRepository:
                     CHECK(end_minute > start_minute),
                     FOREIGN KEY (course_id) REFERENCES course_offerings(course_id)
                 );
+                CREATE TABLE IF NOT EXISTS portal_messages (
+                    message_id TEXT PRIMARY KEY,
+                    sender_type TEXT NOT NULL CHECK(sender_type IN ('student', 'staff')),
+                    sender_id TEXT NOT NULL,
+                    recipient_type TEXT CHECK(recipient_type IN ('student', 'staff')),
+                    recipient_id TEXT,
+                    is_broadcast INTEGER NOT NULL DEFAULT 0 CHECK(is_broadcast IN (0, 1)),
+                    body TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    CHECK(
+                        (is_broadcast = 1 AND sender_type = 'staff' AND recipient_id IS NULL)
+                        OR
+                        (is_broadcast = 0 AND recipient_type IS NOT NULL AND recipient_id IS NOT NULL)
+                    )
+                );
+                CREATE TABLE IF NOT EXISTS portal_message_reads (
+                    message_id TEXT NOT NULL,
+                    reader_type TEXT NOT NULL CHECK(reader_type IN ('student', 'staff')),
+                    reader_id TEXT NOT NULL,
+                    read_at TEXT NOT NULL,
+                    PRIMARY KEY (message_id, reader_type, reader_id),
+                    FOREIGN KEY (message_id) REFERENCES portal_messages(message_id)
+                        ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_portal_messages_sender
+                    ON portal_messages(sender_type, sender_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_portal_messages_recipient
+                    ON portal_messages(recipient_type, recipient_id, created_at);
                 """
             )
             course_columns = {
@@ -516,6 +544,79 @@ class StudentRepository:
         with self._connect() as connection:
             student_ids = [row["student_id"] for row in connection.execute("SELECT student_id FROM students ORDER BY student_id")]
         return [student for student_id in student_ids if (student := self.get_student(student_id)) is not None]
+
+    def create_portal_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO portal_messages (
+                       message_id, sender_type, sender_id, recipient_type,
+                       recipient_id, is_broadcast, body, created_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    message["message_id"],
+                    message["sender_type"],
+                    message["sender_id"],
+                    message.get("recipient_type"),
+                    message.get("recipient_id"),
+                    1 if message.get("is_broadcast") else 0,
+                    message["body"],
+                    message["created_at"],
+                ),
+            )
+        return dict(message)
+
+    def list_portal_messages(
+        self, actor_type: str, actor_id: str
+    ) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT m.*,
+                          CASE WHEN r.message_id IS NULL THEN 0 ELSE 1 END AS was_read
+                   FROM portal_messages AS m
+                   LEFT JOIN portal_message_reads AS r
+                     ON r.message_id = m.message_id
+                    AND r.reader_type = ? AND r.reader_id = ?
+                   WHERE (m.sender_type = ? AND m.sender_id = ?)
+                      OR (m.recipient_type = ? AND m.recipient_id = ?)
+                      OR (? = 'student' AND m.is_broadcast = 1)
+                   ORDER BY m.created_at, m.message_id""",
+                (
+                    actor_type,
+                    actor_id,
+                    actor_type,
+                    actor_id,
+                    actor_type,
+                    actor_id,
+                    actor_type,
+                ),
+            ).fetchall()
+        messages = [dict(row) for row in rows]
+        for message in messages:
+            message["is_broadcast"] = bool(message["is_broadcast"])
+            message["read"] = (
+                message["sender_type"] == actor_type
+                and message["sender_id"] == actor_id
+            ) or bool(message.pop("was_read"))
+        return messages
+
+    def mark_portal_messages_read(
+        self, actor_type: str, actor_id: str, message_ids: list[str]
+    ) -> None:
+        if not message_ids:
+            return
+        read_at = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            connection.executemany(
+                """INSERT INTO portal_message_reads (
+                       message_id, reader_type, reader_id, read_at
+                   ) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(message_id, reader_type, reader_id)
+                   DO UPDATE SET read_at=excluded.read_at""",
+                (
+                    (message_id, actor_type, actor_id, read_at)
+                    for message_id in message_ids
+                ),
+            )
 
     def get_semester_planner_source(self, student_id: str) -> dict[str, Any] | None:
         """Provide a data-limited planner source for the local SQLite prototype."""

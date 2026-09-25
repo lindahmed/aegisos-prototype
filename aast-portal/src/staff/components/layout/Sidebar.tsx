@@ -92,6 +92,7 @@ const navGroups = [
     items: [
       { to: '/services', label: 'Staff Services', icon: LayoutGrid },
       { to: '/requests', label: 'Requests', icon: Inbox },
+      { to: '/messages', label: 'Messages', icon: MessageSquareWarning },
       { to: '/support', label: 'Support and inquiries', icon: LifeBuoy },
       { to: '/announcements', label: 'Announcements', icon: Megaphone },
     ],

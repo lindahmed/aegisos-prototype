@@ -15,6 +15,7 @@ import {
   LifeBuoy,
   LogOut,
   Megaphone,
+  MessageCircle,
   Settings,
   UserRound,
   Users,
@@ -98,6 +99,15 @@ export default function Header() {
 
         <div className="flex items-center gap-1 sm:gap-2">
           <div className="hidden md:block"><LanguageToggle /></div>
+
+          <Link
+            to="/messages"
+            aria-label={t('Inbox')}
+            title={t('Inbox')}
+            className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-white text-text-secondary shadow-card transition-all hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700"
+          >
+            <MessageCircle className="h-5 w-5" strokeWidth={1.9} />
+          </Link>
 
           <div className="relative">
             <button
