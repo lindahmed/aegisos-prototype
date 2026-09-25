@@ -1218,6 +1218,15 @@ class StudentRepository:
             ).fetchall()
         return {str(row["notification_id"]) for row in rows}
 
+    def get_stored_notifications(self, student_id: str) -> list[dict[str, Any]]:
+        """Return persisted notifications supported by the production backend.
+
+        SQLite is the local/test backend and does not persist source-system
+        notifications, so it exposes the shared repository interface with an
+        empty result.
+        """
+        return []
+
     def set_notifications_read(
         self, student_id: str, notification_ids: list[str], read: bool
     ) -> None:

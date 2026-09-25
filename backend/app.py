@@ -245,7 +245,11 @@ def _portal_notifications(
                 "id": notification_id,
                 "type": "attendance",
                 "category": "Attendance",
-                "title": f"{alert['course_name']} attendance alert",
+                "title": (
+                    f"Course dropped: {alert['course_name']}"
+                    if dropped
+                    else f"Attendance warning: {alert['course_name']}"
+                ),
                 "body": (
                     "This course was automatically dropped after your fourth "
                     "recorded absence."
