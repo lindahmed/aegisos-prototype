@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/student.dart';
+import '../models/weekly_plan.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
 Color get _ink => appScreenInk;
@@ -9,25 +13,90 @@ Color get _surface => appScreenSurface;
 Color get _border => appScreenBorder;
 const _indigo = Color(0xFF5965F2);
 
-class WeeklyPlanScreen extends StatelessWidget {
+class WeeklyPlanScreen extends StatefulWidget {
   const WeeklyPlanScreen({
     required this.student,
-    required this.progress,
+    required this.apiService,
     super.key,
   });
 
   final Student student;
-  final Map<String, dynamic>? progress;
+  final ApiService apiService;
+
+  @override
+  State<WeeklyPlanScreen> createState() => _WeeklyPlanScreenState();
+}
+
+class _WeeklyPlanScreenState extends State<WeeklyPlanScreen> {
+  WeeklyPlan? _plan;
+  String? _error;
+  bool _loading = true;
+  final Set<String> _savingTaskIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadPlan());
+  }
+
+  Future<void> _loadPlan({bool forceRefresh = false}) async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final plan = await widget.apiService.getWeeklyPlan(
+        widget.student.studentId,
+        forceRefresh: forceRefresh,
+      );
+      if (!mounted) return;
+      setState(() {
+        _plan = plan;
+        _loading = false;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.message;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _setCompleted(WeeklyPlanItem item, bool completed) async {
+    if (_savingTaskIds.contains(item.taskId) || _plan == null) return;
+    final previous = item;
+    setState(() {
+      _savingTaskIds.add(item.taskId);
+      _plan = _plan!.replaceItem(
+        item.withStatus(completed ? 'completed' : 'pending'),
+      );
+    });
+    try {
+      final saved = await widget.apiService.setWeeklyPlanItemStatus(
+        studentId: widget.student.studentId,
+        taskId: item.taskId,
+        completed: completed,
+      );
+      if (!mounted) return;
+      setState(() => _plan = _plan!.replaceItem(saved));
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _plan = _plan!.replaceItem(previous));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) {
+        setState(() => _savingTaskIds.remove(item.taskId));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final week = (progress?['current_week'] as num?)?.toInt() ?? 1;
-    final courses = ((progress?['courses'] as List<dynamic>?) ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .toList();
-    final priorities = _buildPriorities(courses, week);
-
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
@@ -38,168 +107,129 @@ class WeeklyPlanScreen extends StatelessWidget {
           'Fix My Week',
           style: TextStyle(fontWeight: FontWeight.w900),
         ),
-        actions: const [ThemeModeToggleButton()],
+        actions: [
+          IconButton(
+            tooltip: 'Refresh plan',
+            onPressed: _loading ? null : () => _loadPlan(forceRefresh: true),
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+          const ThemeModeToggleButton(),
+        ],
       ),
-      body: SafeArea(
-        child: ListView(
-          key: const Key('weekly-plan-page'),
-          padding: const EdgeInsets.fromLTRB(18, 8, 18, 32),
-          children: [
-            Container(
-              padding: const EdgeInsets.all(22),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF5965F2), Color(0xFF27BBD3)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(24),
+      body: SafeArea(child: _buildBody()),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading && _plan == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _plan == null) {
+      return _PlanError(message: _error!, onRetry: _loadPlan);
+    }
+
+    final plan = _plan!;
+    final remaining = plan.items.where((item) => !item.isCompleted).length;
+    return RefreshIndicator(
+      onRefresh: () => _loadPlan(forceRefresh: true),
+      child: ListView(
+        key: const Key('weekly-plan-page'),
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(18, 8, 18, 32),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF5965F2), Color(0xFF27BBD3)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'WEEK $week PLAN',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '${student.name.split(RegExp(r'\s+')).first}, focus on what matters most.',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      height: 1.2,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    '${priorities.length} ${priorities.length == 1 ? 'priority' : 'priorities'} built from your live progress.',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ],
-              ),
+              borderRadius: BorderRadius.circular(24),
             ),
-            const SizedBox(height: 24),
-            Text(
-              'Your priorities',
-              style: TextStyle(
-                color: _ink,
-                fontSize: 24,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Complete these in order and check each one off.',
-              style: TextStyle(color: _muted),
-            ),
-            const SizedBox(height: 14),
-            if (priorities.isEmpty)
-              const _EmptyPlan()
-            else
-              for (var index = 0; index < priorities.length; index++)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _PriorityCard(
-                    number: index + 1,
-                    priority: priorities[index],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'WEEK ${plan.currentWeek} PLAN',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
                   ),
                 ),
-          ],
-        ),
+                const SizedBox(height: 8),
+                Text(
+                  '${widget.student.name.split(RegExp(r'\s+')).first}, focus on what matters most.',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    height: 1.2,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '$remaining ${remaining == 1 ? 'priority' : 'priorities'} remaining this week.',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Your priorities',
+            style: TextStyle(
+              color: _ink,
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Your progress is saved and a fresh plan appears each week.',
+            style: TextStyle(color: _muted),
+          ),
+          const SizedBox(height: 14),
+          if (plan.items.isEmpty)
+            const _EmptyPlan()
+          else
+            for (final item in plan.items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _PriorityCard(
+                  item: item,
+                  saving: _savingTaskIds.contains(item.taskId),
+                  onChanged: (value) => _setCompleted(item, value),
+                ),
+              ),
+        ],
       ),
     );
   }
 }
 
-class _WeeklyPriority {
-  const _WeeklyPriority({
-    required this.course,
-    required this.title,
-    required this.detail,
-    required this.icon,
-    required this.color,
+class _PriorityCard extends StatelessWidget {
+  const _PriorityCard({
+    required this.item,
+    required this.saving,
+    required this.onChanged,
   });
 
-  final String course;
-  final String title;
-  final String detail;
-  final IconData icon;
-  final Color color;
-}
-
-List<_WeeklyPriority> _buildPriorities(
-  List<Map<String, dynamic>> courses,
-  int currentWeek,
-) {
-  final priorities = <_WeeklyPriority>[];
-  for (final course in courses) {
-    final courseName = course['course_name'] as String? ?? 'Course';
-    final risks = ((course['risks'] as List<dynamic>?) ?? const [])
-        .whereType<Map<String, dynamic>>();
-    for (final risk in risks.take(2)) {
-      final message = risk['message'] as String?;
-      if (message == null || message.trim().isEmpty) continue;
-      priorities.add(
-        _WeeklyPriority(
-          course: courseName,
-          title: 'Review course performance',
-          detail: message,
-          icon: Icons.priority_high_rounded,
-          color: const Color(0xFFFF647C),
-        ),
-      );
-    }
-
-    final assessments = ((course['assessments'] as List<dynamic>?) ?? const [])
-        .whereType<Map<String, dynamic>>();
-    for (final assessment in assessments) {
-      final dueWeek = (assessment['due_week'] as num?)?.toInt();
-      if (assessment['mark'] != null ||
-          dueWeek == null ||
-          dueWeek < currentWeek ||
-          dueWeek > currentWeek + 1) {
-        continue;
-      }
-      final name = assessment['name'] as String? ?? 'Assessment';
-      priorities.add(
-        _WeeklyPriority(
-          course: courseName,
-          title: 'Prepare for $name',
-          detail: dueWeek == currentWeek
-              ? 'Due this week. Schedule a focused study block today.'
-              : 'Due next week. Start the first review session this week.',
-          icon: Icons.event_available_outlined,
-          color: const Color(0xFF27BBD3),
-        ),
-      );
-    }
-  }
-  return priorities.take(6).toList();
-}
-
-class _PriorityCard extends StatefulWidget {
-  const _PriorityCard({required this.number, required this.priority});
-
-  final int number;
-  final _WeeklyPriority priority;
-
-  @override
-  State<_PriorityCard> createState() => _PriorityCardState();
-}
-
-class _PriorityCardState extends State<_PriorityCard> {
-  bool _complete = false;
+  final WeeklyPlanItem item;
+  final bool saving;
+  final ValueChanged<bool> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    final priority = widget.priority;
+    final color = item.taskType == 'risk'
+        ? const Color(0xFFFF647C)
+        : const Color(0xFF27BBD3);
+    final icon = item.taskType == 'risk'
+        ? Icons.priority_high_rounded
+        : Icons.event_available_outlined;
     return Material(
+      key: Key('weekly-task-${item.taskId}'),
       color: _surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -207,7 +237,7 @@ class _PriorityCardState extends State<_PriorityCard> {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
-        onTap: () => setState(() => _complete = !_complete),
+        onTap: saving ? null : () => onChanged(!item.isCompleted),
         child: Padding(
           padding: const EdgeInsets.all(17),
           child: Row(
@@ -217,10 +247,10 @@ class _PriorityCardState extends State<_PriorityCard> {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: priority.color.withValues(alpha: 0.12),
+                  color: color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(priority.icon, color: priority.color),
+                child: Icon(icon, color: color),
               ),
               const SizedBox(width: 13),
               Expanded(
@@ -228,45 +258,93 @@ class _PriorityCardState extends State<_PriorityCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${widget.number}. ${priority.course}',
+                      '${item.position}. ${item.courseName}',
                       style: TextStyle(
-                        color: priority.color,
+                        color: color,
                         fontWeight: FontWeight.w800,
                         fontSize: 13,
                       ),
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      priority.title,
+                      item.title,
                       style: TextStyle(
                         color: _ink,
                         fontSize: 17,
                         fontWeight: FontWeight.w900,
-                        decoration: _complete
+                        decoration: item.isCompleted
                             ? TextDecoration.lineThrough
                             : null,
                       ),
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      priority.detail,
+                      item.detail,
                       style: TextStyle(color: _muted, height: 1.35),
                     ),
+                    if (item.isCompleted) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Completed',
+                        style: TextStyle(
+                          color: Color(0xFF22B98B),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
-              Checkbox(
-                value: _complete,
-                activeColor: _indigo,
-                onChanged: (value) =>
-                    setState(() => _complete = value ?? false),
-              ),
+              saving
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : Checkbox(
+                      key: Key('weekly-task-checkbox-${item.taskId}'),
+                      value: item.isCompleted,
+                      activeColor: _indigo,
+                      onChanged: (value) => onChanged(value ?? false),
+                    ),
             ],
           ),
         ),
       ),
     );
   }
+}
+
+class _PlanError extends StatelessWidget {
+  const _PlanError({required this.message, required this.onRetry});
+
+  final String message;
+  final Future<void> Function({bool forceRefresh}) onRetry;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.cloud_off_rounded, size: 44, color: _indigo),
+          const SizedBox(height: 12),
+          Text(message, textAlign: TextAlign.center),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: () => onRetry(forceRefresh: true),
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Try again'),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _EmptyPlan extends StatelessWidget {

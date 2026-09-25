@@ -116,7 +116,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   void _openWeeklyPlan() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => WeeklyPlanScreen(student: student, progress: _progress),
+        builder: (_) =>
+            WeeklyPlanScreen(student: student, apiService: _apiService),
       ),
     );
   }

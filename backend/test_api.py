@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -474,6 +474,97 @@ def test_notification_read_state_is_shared_and_reversible(tmp_path: Path) -> Non
         for notification in unmarked.json()["notifications"]
         if notification["id"] == notification_id
     )["read"] is False
+
+
+def test_weekly_plan_status_is_saved_and_student_scoped(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    student_id = "231027905"
+
+    response = client.get(f"/portal/students/{student_id}/weekly-plan")
+    assert response.status_code == 200
+    plan = response.json()
+    assert plan["student_id"] == student_id
+    assert plan["items"]
+    assert all(item["status"] == "pending" for item in plan["items"])
+    assert all("%" not in item["detail"] for item in plan["items"])
+    assert all("min" in item["detail"] for item in plan["items"])
+
+    task_id = plan["items"][0]["task_id"]
+    with sqlite3.connect(tmp_path / "aegisos.db") as connection:
+        connection.execute(
+            """UPDATE weekly_plan_items
+               SET title = ?, detail = ?
+               WHERE task_id = ?""",
+            (
+                "Review course performance",
+                "Week 7 exam is 100 percentage points below coursework.",
+                task_id,
+            ),
+        )
+
+    regenerated = client.get(
+        f"/portal/students/{student_id}/weekly-plan"
+    ).json()
+    regenerated_item = next(
+        item for item in regenerated["items"] if item["task_id"] == task_id
+    )
+    assert regenerated_item["title"] != "Review course performance"
+    assert "%" not in regenerated_item["detail"]
+
+    completed = client.put(
+        f"/portal/students/{student_id}/weekly-plan/{task_id}",
+        json={"status": "completed"},
+    )
+    assert completed.status_code == 200
+    assert completed.json()["item"]["status"] == "completed"
+    assert completed.json()["item"]["completed_at"] is not None
+
+    refreshed = client.get(
+        f"/portal/students/{student_id}/weekly-plan"
+    ).json()
+    saved_item = next(item for item in refreshed["items"] if item["task_id"] == task_id)
+    assert saved_item["status"] == "completed"
+
+    other_student = client.put(
+        f"/portal/students/231027906/weekly-plan/{task_id}",
+        json={"status": "completed"},
+    )
+    assert other_student.status_code == 404
+
+    reopened = client.put(
+        f"/portal/students/{student_id}/weekly-plan/{task_id}",
+        json={"status": "pending"},
+    )
+    assert reopened.status_code == 200
+    assert reopened.json()["item"]["status"] == "pending"
+    assert reopened.json()["item"]["completed_at"] is None
+
+
+def test_weekly_plan_creates_fresh_items_when_week_advances(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    student_id = "231027905"
+    first = client.get(f"/portal/students/{student_id}/weekly-plan").json()
+    assert first["items"]
+
+    database_path = tmp_path / "aegisos.db"
+    with sqlite3.connect(database_path) as connection:
+        start_date = connection.execute(
+            "SELECT start_date FROM semester_calendar WHERE semester = ?",
+            (first["semester"],),
+        ).fetchone()[0]
+        earlier_start = date.fromisoformat(start_date) - timedelta(days=7)
+        connection.execute(
+            "UPDATE semester_calendar SET start_date = ? WHERE semester = ?",
+            (earlier_start.isoformat(), first["semester"]),
+        )
+
+    second = client.get(f"/portal/students/{student_id}/weekly-plan").json()
+    assert second["current_week"] == first["current_week"] + 1
+    assert second["items"]
+    assert {item["task_id"] for item in first["items"]}.isdisjoint(
+        item["task_id"] for item in second["items"]
+    )
+    assert all(item["status"] == "pending" for item in second["items"])
 
 
 def test_portal_grade_save_feeds_progress_agent(tmp_path: Path) -> None:

@@ -227,6 +227,26 @@ class PostgresStudentRepository:
                         read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         PRIMARY KEY (student_id, notification_id)
                     );
+                    CREATE TABLE IF NOT EXISTS weekly_plan_items (
+                        task_id TEXT PRIMARY KEY,
+                        student_id TEXT NOT NULL,
+                        semester TEXT NOT NULL,
+                        week_number INTEGER NOT NULL CHECK(week_number >= 1),
+                        course_id TEXT NOT NULL,
+                        course_name TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        detail TEXT NOT NULL,
+                        task_type TEXT NOT NULL CHECK(task_type IN ('risk', 'assessment')),
+                        status TEXT NOT NULL DEFAULT 'pending'
+                            CHECK(status IN ('pending', 'completed')),
+                        position INTEGER NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        completed_at TIMESTAMPTZ,
+                        UNIQUE(student_id, semester, week_number, task_id)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_weekly_plan_student_week
+                        ON weekly_plan_items(student_id, semester, week_number, position);
                     CREATE TABLE IF NOT EXISTS attendance_auto_drops (
                         student_id TEXT NOT NULL,
                         course_code TEXT NOT NULL,
@@ -1069,6 +1089,77 @@ class PostgresStudentRepository:
                            WHERE student_id = %s AND notification_id = ANY(%s)""",
                         (student_id, notification_ids),
                     )
+
+    def get_weekly_plan_items(
+        self, student_id: str, semester: str, week_number: int
+    ) -> list[dict[str, Any]]:
+        return self._fetch_all(
+            """SELECT task_id, course_id, course_name, title, detail,
+                      task_type, status, position, completed_at
+               FROM weekly_plan_items
+               WHERE student_id = %s AND semester = %s AND week_number = %s
+               ORDER BY position, created_at, task_id""",
+            (student_id, semester, week_number),
+        )
+
+    def upsert_weekly_plan_items(
+        self,
+        student_id: str,
+        semester: str,
+        week_number: int,
+        items: list[dict[str, Any]],
+    ) -> None:
+        if not items:
+            return
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                psycopg2.extras.execute_batch(
+                    cursor,
+                    """INSERT INTO weekly_plan_items
+                       (task_id, student_id, semester, week_number, course_id,
+                        course_name, title, detail, task_type, status, position)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s)
+                       ON CONFLICT (task_id) DO UPDATE SET
+                         course_name=EXCLUDED.course_name,
+                         title=EXCLUDED.title,
+                         detail=EXCLUDED.detail,
+                         position=EXCLUDED.position""",
+                    (
+                        (
+                            item["task_id"],
+                            student_id,
+                            semester,
+                            week_number,
+                            item["course_id"],
+                            item["course_name"],
+                            item["title"],
+                            item["detail"],
+                            item["task_type"],
+                            item["position"],
+                        )
+                        for item in items
+                    ),
+                )
+
+    def set_weekly_plan_item_status(
+        self, student_id: str, task_id: str, status: str
+    ) -> dict[str, Any] | None:
+        if status not in {"pending", "completed"}:
+            raise ValueError("Weekly plan status must be pending or completed")
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """UPDATE weekly_plan_items
+                       SET status = %s,
+                           completed_at = CASE WHEN %s = 'completed' THEN NOW() ELSE NULL END,
+                           updated_at = NOW()
+                       WHERE student_id = %s AND task_id = %s
+                       RETURNING task_id, course_id, course_name, title, detail,
+                                 task_type, status, position, completed_at""",
+                    (status, status, student_id, task_id),
+                )
+                row = cursor.fetchone()
+        return dict(row) if row is not None else None
 
     def get_student_progress(self, student_id: str) -> dict[str, Any] | None:
         """Return verified source records from the normalized schema.

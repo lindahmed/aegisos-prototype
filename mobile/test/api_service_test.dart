@@ -380,6 +380,87 @@ void main() {
     service.close();
   });
 
+  test('loads a database-backed weekly plan', () async {
+    final service = ApiService(
+      client: MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(
+          request.url.toString(),
+          'https://api.example.test/portal/students/231027905/weekly-plan',
+        );
+        return http.Response(
+          jsonEncode({
+            'student_id': '231027905',
+            'semester': 'Fall 2026',
+            'current_week': 6,
+            'items': [
+              {
+                'task_id': 'weekly:abc123',
+                'course_id': 'ai',
+                'course_name': 'Artificial Intelligence',
+                'title': 'Prepare for Week 7 exam',
+                'detail': 'Due next week.',
+                'task_type': 'assessment',
+                'status': 'pending',
+                'position': 1,
+                'completed_at': null,
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+      baseUrl: 'https://api.example.test',
+    );
+
+    final plan = await service.getWeeklyPlan('231027905');
+
+    expect(plan.currentWeek, 6);
+    expect(plan.items.single.taskId, 'weekly:abc123');
+    expect(plan.items.single.isCompleted, isFalse);
+    service.close();
+  });
+
+  test('saves a weekly task completion status', () async {
+    final service = ApiService(
+      client: MockClient((request) async {
+        expect(request.method, 'PUT');
+        expect(
+          request.url.toString(),
+          'https://api.example.test/portal/students/231027905/weekly-plan/weekly%3Aabc123',
+        );
+        expect(jsonDecode(request.body), {'status': 'completed'});
+        return http.Response(
+          jsonEncode({
+            'item': {
+              'task_id': 'weekly:abc123',
+              'course_id': 'ai',
+              'course_name': 'Artificial Intelligence',
+              'title': 'Prepare for Week 7 exam',
+              'detail': 'Due next week.',
+              'task_type': 'assessment',
+              'status': 'completed',
+              'position': 1,
+              'completed_at': '2026-09-25T12:00:00Z',
+            },
+          }),
+          200,
+        );
+      }),
+      baseUrl: 'https://api.example.test',
+    );
+
+    final item = await service.setWeeklyPlanItemStatus(
+      studentId: '231027905',
+      taskId: 'weekly:abc123',
+      completed: true,
+    );
+
+    expect(item.isCompleted, isTrue);
+    expect(item.completedAt, isNotNull);
+    service.close();
+  });
+
   test('loads the database-backed smart semester plan', () async {
     final service = ApiService(
       client: MockClient((request) async {

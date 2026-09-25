@@ -9,6 +9,7 @@ import '../models/semester_plan.dart';
 import '../models/student.dart';
 import '../models/student_course_schedule.dart';
 import '../models/student_notification.dart';
+import '../models/weekly_plan.dart';
 
 class ApiService {
   factory ApiService({http.Client? client, String? baseUrl}) {
@@ -470,6 +471,85 @@ class ApiService {
       DateTime.now().add(const Duration(minutes: 1)),
     );
     return _decodeNotifications(response);
+  }
+
+  Future<WeeklyPlan> getWeeklyPlan(
+    String studentId, {
+    bool forceRefresh = false,
+  }) async {
+    final normalizedId = Uri.encodeComponent(studentId.trim());
+    final uri = Uri.parse('$baseUrl/portal/students/$normalizedId/weekly-plan');
+    late http.Response response;
+    try {
+      response = await _get(
+        uri,
+        cacheFor: const Duration(seconds: 30),
+        forceRefresh: forceRefresh,
+      );
+    } on Exception {
+      throw const ApiException(
+        'Could not load your weekly plan. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not load your weekly plan (${response.statusCode}).',
+        ),
+      );
+    }
+    try {
+      return WeeklyPlan.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
+    } on Exception {
+      throw const ApiException('The server returned invalid weekly plan data.');
+    }
+  }
+
+  Future<WeeklyPlanItem> setWeeklyPlanItemStatus({
+    required String studentId,
+    required String taskId,
+    required bool completed,
+  }) async {
+    final normalizedId = Uri.encodeComponent(studentId.trim());
+    final normalizedTaskId = Uri.encodeComponent(taskId);
+    final uri = Uri.parse(
+      '$baseUrl/portal/students/$normalizedId/weekly-plan/$normalizedTaskId',
+    );
+    late http.Response response;
+    try {
+      response = await _client
+          .put(
+            uri,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({'status': completed ? 'completed' : 'pending'}),
+          )
+          .timeout(const Duration(seconds: 15));
+    } on Exception {
+      throw const ApiException(
+        'Could not save this task. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not save this task (${response.statusCode}).',
+        ),
+      );
+    }
+    _responseCache.remove(
+      Uri.parse('$baseUrl/portal/students/$normalizedId/weekly-plan')
+          .toString(),
+    );
+    try {
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      return WeeklyPlanItem.fromJson(payload['item'] as Map<String, dynamic>);
+    } on Exception {
+      throw const ApiException('The server returned invalid weekly task data.');
+    }
   }
 
   Future<List<StudentNotification>> setNotificationsRead({

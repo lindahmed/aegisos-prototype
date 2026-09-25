@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 import json
 import os
 from datetime import date
@@ -31,7 +32,13 @@ from backend.advisor.voice import (
     synthesize_speech,
     transcribe_audio,
 )
-from backend.progress.models import StudentTwin, WhatIfRequest, WhatIfResponse
+from backend.progress.models import (
+    CourseTwin,
+    Risk,
+    StudentTwin,
+    WhatIfRequest,
+    WhatIfResponse,
+)
 from backend.progress.narrative import generate_weekly_narrative
 from backend.progress.scheduler import run_analysis_cycle
 from backend.progress.service import build_student_twin
@@ -74,6 +81,10 @@ class PortalGradebookUpdateRequest(BaseModel):
 class PortalNotificationReadRequest(BaseModel):
     notification_ids: list[str] = Field(max_length=200)
     read: bool = True
+
+
+class WeeklyPlanStatusRequest(BaseModel):
+    status: Literal["pending", "completed"]
 
 
 class PortalAttendanceRowRequest(BaseModel):
@@ -335,6 +346,158 @@ def _portal_notifications(
                         "read": notification_id in read_ids,
                     }
                 )
+    return items
+
+
+def _risk_study_task(
+    course: CourseTwin, risk: Risk, timing: str
+) -> tuple[str, str]:
+    related_assessment = next(
+        (
+            assessment
+            for assessment in course.assessments
+            if assessment.assessment_id in risk.related_assessment_ids
+        ),
+        None,
+    )
+    assessment_name = related_assessment.name if related_assessment else "exam"
+    lecture_count = len(risk.related_lecture_ids)
+
+    tasks = {
+        "low_midterm": (
+            f"Review {assessment_name} mistakes",
+            f"{timing} · 45 min — revisit the covered topics, redo difficult "
+            "questions, and write down 3 weak points.",
+        ),
+        "midterm_coursework_drop": (
+            f"Practice {assessment_name} questions",
+            f"{timing} · 45 min — solve 5 exam-style questions without notes, "
+            "then check and correct every mistake.",
+        ),
+        "low_assignment_average": (
+            "Strengthen assignment skills",
+            f"{timing} · 40 min — redo one weak assignment section and compare "
+            "your solution with the course material.",
+        ),
+        "low_lab_average": (
+            "Practice the latest lab",
+            f"{timing} · 45 min — repeat the latest lab exercise from scratch "
+            "and note anything you still need to ask about.",
+        ),
+        "lecture_backlog": (
+            "Catch up on pending lectures",
+            f"{timing} · 45 min — finish the next incomplete lecture, make a "
+            "short summary, and answer 3 recall questions."
+            + (f" Start with one of the {lecture_count} pending lectures." if lecture_count else ""),
+        ),
+        "missed_assessment": (
+            "Check overdue assessment work",
+            f"{timing} · 20 min — confirm the submission or grade status, then "
+            "write the exact next action and deadline.",
+        ),
+        "repeated_poor_assessments": (
+            "Run a focused revision session",
+            f"{timing} · 45 min — choose the two weakest topics, review one "
+            "worked example for each, then solve one question alone.",
+        ),
+        "significant_decline": (
+            "Reset this course's study plan",
+            f"{timing} · 25 min — list unfinished work, choose the top two "
+            "priorities, and reserve study blocks for both.",
+        ),
+        "steady_decline": (
+            "Reset this course's study plan",
+            f"{timing} · 25 min — list unfinished work, choose the top two "
+            "priorities, and reserve study blocks for both.",
+        ),
+        "incomplete_exam_coverage": (
+            f"Complete {assessment_name} coverage",
+            f"{timing} · 50 min — finish one uncovered topic, summarize it in "
+            "5 lines, and solve 3 related questions.",
+        ),
+        "missing_coursework_window": (
+            f"Start {assessment_name}",
+            f"{timing} · 45 min — review the requirements, finish the next "
+            "covered topic, and begin the first section.",
+        ),
+        "deadline_cluster": (
+            "Plan upcoming deadlines",
+            f"{timing} · 20 min — split each assessment into small steps and "
+            "assign one step to every available study block.",
+        ),
+        "lecture_pace_slowdown": (
+            "Restore your lecture pace",
+            f"{timing} · 40 min — complete the next lecture and schedule the "
+            "following one before the end of the week.",
+        ),
+    }
+    return tasks.get(
+        risk.code,
+        (
+            "Strengthen this course this week",
+            f"{timing} · 40 min — review your weakest topic, solve 3 practice "
+            "questions, and record what still needs work.",
+        ),
+    )
+
+
+def _weekly_plan_candidates(student_id: str, twin: StudentTwin) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    timing_slots = ("Today", "Tomorrow", "Later this week")
+    for course in twin.courses:
+        for risk in course.risks[:2]:
+            source_key = f"risk:{course.course_id}:{risk.code}"
+            timing = timing_slots[min(len(candidates), len(timing_slots) - 1)]
+            title, detail = _risk_study_task(course, risk, timing)
+            candidates.append(
+                {
+                    "source_key": source_key,
+                    "course_id": course.course_id,
+                    "course_name": course.course_name,
+                    "title": title,
+                    "detail": detail,
+                    "task_type": "risk",
+                }
+            )
+
+        for assessment in course.assessments:
+            if (
+                assessment.mark is not None
+                or assessment.due_week < twin.current_week
+                or assessment.due_week > twin.current_week + 1
+            ):
+                continue
+            source_key = f"assessment:{assessment.assessment_id}"
+            timing = timing_slots[min(len(candidates), len(timing_slots) - 1)]
+            candidates.append(
+                {
+                    "source_key": source_key,
+                    "course_id": course.course_id,
+                    "course_name": course.course_name,
+                    "title": f"Prepare for {assessment.name}",
+                    "detail": (
+                        f"{timing} · 60 min — review the requirements, complete "
+                        "the next section, and leave time for a final check."
+                        if assessment.due_week == twin.current_week
+                        else f"{timing} · 45 min — review the covered material "
+                        "and begin the first practice or work section."
+                    ),
+                    "task_type": "assessment",
+                }
+            )
+
+    items: list[dict[str, object]] = []
+    for position, candidate in enumerate(candidates[:6], start=1):
+        identity = "|".join(
+            (
+                student_id,
+                twin.semester,
+                str(twin.current_week),
+                str(candidate.pop("source_key")),
+            )
+        )
+        task_id = f"weekly:{hashlib.sha256(identity.encode()).hexdigest()[:24]}"
+        items.append({"task_id": task_id, "position": position, **candidate})
     return items
 
 
@@ -655,6 +818,40 @@ def create_app(
             student_id, request.notification_ids, request.read
         )
         return {"notifications": _portal_notifications(repository, student_id)}
+
+    @api.get("/portal/students/{student_id}/weekly-plan")
+    def get_student_weekly_plan(student_id: str) -> dict[str, object]:
+        twin = build_student_twin(repository, student_id)
+        if twin is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        repository.upsert_weekly_plan_items(
+            student_id,
+            twin.semester,
+            twin.current_week,
+            _weekly_plan_candidates(student_id, twin),
+        )
+        items = repository.get_weekly_plan_items(
+            student_id, twin.semester, twin.current_week
+        )
+        return {
+            "student_id": student_id,
+            "semester": twin.semester,
+            "current_week": twin.current_week,
+            "items": items,
+        }
+
+    @api.put("/portal/students/{student_id}/weekly-plan/{task_id}")
+    def set_student_weekly_plan_status(
+        student_id: str, task_id: str, request: WeeklyPlanStatusRequest
+    ) -> dict[str, object]:
+        if repository.get_student(student_id) is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        item = repository.set_weekly_plan_item_status(
+            student_id, task_id, request.status
+        )
+        if item is None:
+            raise HTTPException(status_code=404, detail="Weekly plan item not found")
+        return {"item": item}
 
     @api.get("/portal/staff/{staff_id}")
     def validate_portal_staff(staff_id: str) -> dict[str, object]:

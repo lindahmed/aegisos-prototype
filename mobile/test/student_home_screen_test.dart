@@ -149,11 +149,56 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(1080, 2400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    var taskCompleted = false;
     final service = ApiService(
       baseUrl: 'https://api.example.test',
       client: MockClient((request) async {
         if (request.url.path.endsWith('/notifications')) {
           return http.Response(jsonEncode({'notifications': []}), 200);
+        }
+        if (request.url.path.endsWith('/weekly-plan')) {
+          return http.Response(
+            jsonEncode({
+              'student_id': 'STU001',
+              'semester': 'Fall 2026',
+              'current_week': 5,
+              'items': [
+                {
+                  'task_id': 'weekly:test-task',
+                  'course_id': '13',
+                  'course_name': 'Digital Logic Design',
+                  'title': 'Review course performance',
+                  'detail': 'Assignment average is below the threshold.',
+                  'task_type': 'risk',
+                  'status': taskCompleted ? 'completed' : 'pending',
+                  'position': 1,
+                  'completed_at': taskCompleted ? '2026-09-25T12:00:00Z' : null,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        if (request.url.path.contains('/weekly-plan/')) {
+          expect(request.method, 'PUT');
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          taskCompleted = body['status'] == 'completed';
+          return http.Response(
+            jsonEncode({
+              'item': {
+                'task_id': 'weekly:test-task',
+                'course_id': '13',
+                'course_name': 'Digital Logic Design',
+                'title': 'Review course performance',
+                'detail': 'Assignment average is below the threshold.',
+                'task_type': 'risk',
+                'status': taskCompleted ? 'completed' : 'pending',
+                'position': 1,
+                'completed_at': taskCompleted ? '2026-09-25T12:00:00Z' : null,
+              },
+            }),
+            200,
+          );
         }
         return http.Response(
           jsonEncode({
@@ -204,6 +249,28 @@ void main() {
     expect(find.text('Fix My Week'), findsOneWidget);
     expect(find.text('Advisor AI'), findsNothing);
     expect(find.textContaining('Digital Logic Design'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const Key('weekly-task-checkbox-weekly:test-task')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(taskCompleted, isTrue);
+    expect(find.text('Completed'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('fix-my-week')));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<Checkbox>(
+            find.byKey(const Key('weekly-task-checkbox-weekly:test-task')),
+          )
+          .value,
+      isTrue,
+    );
     expect(tester.takeException(), isNull);
   });
 
