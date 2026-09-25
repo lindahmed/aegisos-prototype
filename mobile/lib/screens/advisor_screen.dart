@@ -41,6 +41,8 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
   late final bool _ownsVoiceService;
   bool _isSending = false;
   bool _isRecording = false;
+  bool _isSpeaking = false;
+  int _recordingSession = 0;
   String _language = 'english';
   String? _errorMessage;
 
@@ -58,11 +60,14 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
 
     if (!_isRecording) {
       try {
+        if (_isSpeaking) await _stopSpeaking();
+        if (!mounted) return;
         _messageController.clear();
+        final recordingSession = ++_recordingSession;
         final started = await _voiceService.startListening(
           language: _language,
           onResult: (words) {
-            if (!mounted) return;
+            if (!mounted || recordingSession != _recordingSession) return;
             _messageController.value = TextEditingValue(
               text: words,
               selection: TextSelection.collapsed(offset: words.length),
@@ -70,6 +75,10 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
           },
         );
         if (!mounted) return;
+        if (!started) {
+          _recordingSession += 1;
+          _messageController.clear();
+        }
         setState(() {
           _isRecording = started;
           _errorMessage = started ? null : 'Speech recognition is unavailable. Check microphone permission.';
@@ -82,6 +91,7 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
       return;
     }
 
+    _recordingSession += 1;
     setState(() {
       _isRecording = false;
       _errorMessage = null;
@@ -106,12 +116,34 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
     }
   }
 
+  Future<void> _discardVoiceRecording() async {
+    if (!_isRecording) return;
+
+    _recordingSession += 1;
+    _messageController.clear();
+    setState(() {
+      _isRecording = false;
+      _errorMessage = null;
+    });
+
+    try {
+      await _voiceService.cancelListening();
+    } catch (_) {
+      if (mounted) {
+        setState(() => _errorMessage = 'Could not discard the recording.');
+      }
+    }
+  }
+
   Future<void> _sendMessage([
     String? suggestedMessage,
     bool speakReply = false,
   ]) async {
     final message = (suggestedMessage ?? _messageController.text).trim();
     if (message.isEmpty || _isSending || _isRecording) return;
+
+    if (_isSpeaking) await _stopSpeaking();
+    if (!mounted) return;
 
     final history = List<AdvisorMessage>.from(_messages);
     _messageController.clear();
@@ -139,13 +171,21 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
             text: reply.response,
             language: _language,
           );
-          await _voiceService.play(audioBytes);
+          if (!mounted) return;
+          setState(() => _isSpeaking = true);
+          await _voiceService.play(
+            audioBytes,
+            onComplete: () {
+              if (mounted) setState(() => _isSpeaking = false);
+            },
+          );
         } on Exception {
           if (mounted) {
-            setState(
-              () => _errorMessage =
-                  'The answer is ready, but its audio could not play.',
-            );
+            setState(() {
+              _isSpeaking = false;
+              _errorMessage =
+                  'The answer is ready, but its audio could not play.';
+            });
           }
         }
       }
@@ -177,12 +217,24 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
     });
   }
 
+  Future<void> _stopSpeaking() async {
+    try {
+      await _voiceService.stopPlayback();
+    } finally {
+      if (mounted) setState(() => _isSpeaking = false);
+    }
+  }
+
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
     if (_isRecording) unawaited(_voiceService.cancelListening());
-    if (_ownsVoiceService) unawaited(_voiceService.dispose());
+    if (_ownsVoiceService) {
+      unawaited(_voiceService.dispose());
+    } else if (_isSpeaking) {
+      unawaited(_voiceService.stopPlayback());
+    }
     if (_ownsApiService) _apiService.close();
     super.dispose();
   }
@@ -237,12 +289,43 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
                   horizontal: 16,
                   vertical: 10,
                 ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                child: Row(
                   children: [
-                    Icon(Icons.mic, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('Listening… Speak, then tap stop to send'),
+                    const Icon(Icons.mic, color: Colors.red),
+                    const SizedBox(width: 8),
+                    const Expanded(child: Text('Listening… Tap stop to send')),
+                    IconButton(
+                      key: const Key('advisor-discard-recording'),
+                      tooltip: 'Discard recording',
+                      onPressed: _discardVoiceRecording,
+                      icon: const Icon(Icons.delete_outline),
+                    ),
+                  ],
+                ),
+              ),
+            if (_isSpeaking)
+              Container(
+                key: const Key('advisor-speaking'),
+                width: double.infinity,
+                color: Theme.of(context).colorScheme.primaryContainer,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.volume_up,
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(child: Text('Reading response aloud')),
+                    TextButton.icon(
+                      key: const Key('advisor-stop-speaking'),
+                      onPressed: _stopSpeaking,
+                      icon: const Icon(Icons.stop_circle_outlined),
+                      label: const Text('Stop audio'),
+                    ),
                   ],
                 ),
               ),

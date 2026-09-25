@@ -13,7 +13,10 @@ import 'package:http/testing.dart';
 class FakeAdvisorVoiceService implements AdvisorVoiceService {
   int startCalls = 0;
   int stopCalls = 0;
+  int cancelCalls = 0;
+  int stopPlaybackCalls = 0;
   Uint8List? playedAudio;
+  void Function()? playbackComplete;
   String recognizedWords = 'What should I study next?';
 
   @override
@@ -33,12 +36,21 @@ class FakeAdvisorVoiceService implements AdvisorVoiceService {
   }
 
   @override
-  Future<void> play(Uint8List audioBytes) async {
+  Future<void> play(Uint8List audioBytes, {void Function()? onComplete}) async {
     playedAudio = audioBytes;
+    playbackComplete = onComplete;
   }
 
   @override
-  Future<void> cancelListening() async {}
+  Future<void> cancelListening() async {
+    cancelCalls += 1;
+  }
+
+  @override
+  Future<void> stopPlayback() async {
+    stopPlaybackCalls += 1;
+    playbackComplete = null;
+  }
 
   @override
   Future<void> dispose() async {}
@@ -159,6 +171,53 @@ void main() {
       findsOneWidget,
     );
     expect(voiceService.playedAudio, Uint8List.fromList([4, 5, 6]));
+    expect(find.byKey(const Key('advisor-speaking')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('advisor-stop-speaking')));
+    await tester.pumpAndSettle();
+
+    expect(voiceService.stopPlaybackCalls, 1);
+    expect(find.byKey(const Key('advisor-speaking')), findsNothing);
+    service.close();
+  });
+
+  testWidgets('discards a voice recording without sending it', (tester) async {
+    final voiceService = FakeAdvisorVoiceService();
+    var requestCalls = 0;
+    final service = ApiService(
+      baseUrl: 'https://api.example.test',
+      client: MockClient((request) async {
+        requestCalls += 1;
+        return http.Response('{}', 500);
+      }),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AdvisorScreen(
+          student: student,
+          apiService: service,
+          voiceService: voiceService,
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const Key('advisor-voice')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('advisor-recording')), findsOneWidget);
+    expect(find.byKey(const Key('advisor-discard-recording')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('advisor-discard-recording')));
+    await tester.pumpAndSettle();
+
+    final input = tester.widget<TextField>(
+      find.byKey(const Key('advisor-input')),
+    );
+    expect(voiceService.cancelCalls, 1);
+    expect(input.controller?.text, isEmpty);
+    expect(find.byKey(const Key('advisor-recording')), findsNothing);
+    expect(find.byKey(const Key('advisor-message-list')), findsNothing);
+    expect(requestCalls, 0);
     service.close();
   });
 }
