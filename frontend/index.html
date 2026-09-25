@@ -53,6 +53,16 @@
         </section>
 
         <section id="dashboard-view" class="view dashboard-view" aria-labelledby="welcome-title" hidden>
+          <header class="app-topbar">
+            <div class="app-topbar-brand">
+              <img class="app-topbar-logo" src="assets/unitrack-logo.jpeg" alt="Uni Track logo">
+              <span class="app-topbar-name">Uni Track</span>
+            </div>
+            <div class="app-topbar-sync" aria-hidden="true">
+              <span class="sync-ping"><span class="sync-ping-core"></span></span>
+              <span>Academic Cloud: Synced</span>
+            </div>
+          </header>
           <header class="dashboard-header">
             <div>
               <p class="eyebrow">Student dashboard</p>
@@ -91,9 +101,33 @@
           </header>
 
           <dl class="student-stats">
-            <div><dt>Major</dt><dd id="student-major">-</dd></div>
-            <div><dt>Year</dt><dd id="student-year">-</dd></div>
-            <div><dt>GPA</dt><dd id="student-gpa">-</dd></div>
+            <div class="stat-card">
+              <div class="stat-card-head">
+                <dt>Major specialization</dt>
+                <span class="stat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5Z"></path><path d="M6 12v5c0 1.5 2.5 3 6 3s6-1.5 6-3v-5"></path></svg>
+                </span>
+              </div>
+              <dd id="student-major">-</dd>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-head">
+                <dt>Academic standing</dt>
+                <span class="stat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"></rect><path d="M3 9.5h18M8 3v3M16 3v3"></path></svg>
+                </span>
+              </div>
+              <dd id="student-year">-</dd>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-head">
+                <dt>Cumulative GPA</dt>
+                <span class="stat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.5" r="5"></circle><path d="m8.2 12.8-1.6 7.4L12 17l5.4 3.2-1.6-7.4"></path></svg>
+                </span>
+              </div>
+              <dd id="student-gpa">-</dd>
+            </div>
           </dl>
 
           <nav class="dashboard-tabs" aria-label="Dashboard sections">
@@ -124,13 +158,23 @@
             </section>
 
             <div class="action-grid">
-              <button id="create-workspace-button" class="secondary-button" type="button">
-                <span>Create / open folder</span>
-                <small>Prepare assignments and labs</small>
+              <button id="create-workspace-button" class="secondary-button action-button" type="button">
+                <span class="action-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M12 12v4M10 14h4"></path></svg>
+                </span>
+                <span class="action-copy">
+                  <span>Create / open folder</span>
+                  <small>Prepare assignments and labs</small>
+                </span>
               </button>
-              <button id="open-vscode-button" class="primary-button" type="button">
-                <span>Open in VS Code</span>
-                <small>Launch the selected course</small>
+              <button id="open-vscode-button" class="primary-button action-button" type="button">
+                <span class="action-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-5.5 6L8 18M16 6l5.5 6-5.5 6"></path></svg>
+                </span>
+                <span class="action-copy">
+                  <span>Open in VS Code</span>
+                  <small>Launch the selected course</small>
+                </span>
               </button>
             </div>
             <p id="action-status" class="message" role="status" aria-live="polite"></p>
@@ -168,8 +212,14 @@
                   required
                 ></textarea>
                 <button id="advisor-voice-button" class="secondary-button voice-button" type="button" aria-label="Record voice message" title="Record voice message">
-                  <span class="mic-icon">Mic</span>
-                  <span class="recording-indicator" hidden>REC</span>
+                  <span class="mic-icon">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2.5" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5M9 21.5h6"></path></svg>
+                    <span>Mic</span>
+                  </span>
+                  <span class="recording-indicator" hidden>
+                    <span class="rec-dot" aria-hidden="true"></span>
+                    <span>REC</span>
+                  </span>
                 </button>
                 <button id="advisor-send-button" class="primary-button" type="submit">Send</button>
               </div>
@@ -206,8 +256,14 @@
                 <h3>My calendar</h3>
               </div>
               <div class="calendar-actions">
-                <button id="calendar-ai-button" class="secondary-button" type="button">Plan with AI</button>
-                <button id="calendar-add-button" class="primary-button" type="button">Add event</button>
+                <button id="calendar-ai-button" class="secondary-button" type="button">
+                  <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M3 12h3M18 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path><circle cx="12" cy="12" r="3.2"></circle></svg>
+                  Plan with AI
+                </button>
+                <button id="calendar-add-button" class="primary-button" type="button">
+                  <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                  Add event
+                </button>
               </div>
             </div>
 
@@ -258,7 +314,10 @@
                 <p class="eyebrow">Campus conversations</p>
                 <h3>Inbox</h3>
               </div>
-              <button id="new-message-button" class="secondary-button" type="button">New message</button>
+              <button id="new-message-button" class="secondary-button" type="button">
+                <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                New message
+              </button>
             </div>
             <div class="messages-layout">
               <aside class="conversation-sidebar">

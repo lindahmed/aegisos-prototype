@@ -10,6 +10,11 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/aegisos"
 BACKEND_LOG="$STATE_DIR/backend.log"
 BACKEND_PID=""
 
+if [[ -z "${DATABASE_URL:-}" ]] && ! grep -qE '^DATABASE_URL=[^[:space:]]+' "$PROJECT_ROOT/.env" 2>/dev/null; then
+    echo "Uni Track requires DATABASE_URL for the Supabase-backed backend." >&2
+    exit 1
+fi
+
 mkdir -p "$STATE_DIR"
 
 if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
