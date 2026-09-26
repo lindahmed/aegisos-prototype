@@ -7,15 +7,15 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AUTOSTART_FILE="$HOME/.config/autostart/aegisos.desktop"
 DESKTOP_FILE="$HOME/Desktop/UniTrack.desktop"
 LEGACY_DESKTOP_FILE="$HOME/Desktop/Uni Track.desktop"
-WALLPAPER="$HOME/.local/share/backgrounds/aegisos-wallpaper.svg"
+WALLPAPER="$HOME/.local/share/backgrounds/unitrack-wallpaper.png"
 
 if ! command -v xfconf-query >/dev/null 2>&1; then
     sudo apt update
     sudo apt install -y xfce4 xfce4-goodies
 fi
 
-install -Dm644 "$SCRIPT_DIR/assets/aegisos-wallpaper.svg" "$WALLPAPER"
-install -Dm644 "$SCRIPT_DIR/assets/unitrack-mark.png" "$HOME/.local/share/backgrounds/unitrack-mark.png"
+# Xfce does not reliably render images linked from SVG wallpapers.
+install -Dm644 "$SCRIPT_DIR/assets/unitrack-wallpaper.png" "$WALLPAPER"
 install -Dm644 "$SCRIPT_DIR/assets/unitrack-mark.png" "$HOME/.local/share/icons/unitrack-mark.png"
 
 render_launcher() {
