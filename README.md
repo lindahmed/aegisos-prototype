@@ -13,6 +13,14 @@ Desktop Client  ──────┘            │
 
 The Android app should talk to the FastAPI backend, not directly to the database.
 
+## Desktop student scores
+
+The desktop dashboard shows a points button in the top right. Its panel shows the top five students, students closest to the signed-in student's score (including all ties), and that student's weekly activity. Scores are recomputed from recorded work, so repeated Progress Agent runs do not duplicate points.
+
+The rules are 10 points per completed lecture, 25 per exam or quiz marked at least 70%, 40 per verified project, and 50 per verified award. An exam below 70% counts as taken but earns no points. Future-week activity is excluded until its week arrives. Lecture and exam activity comes from the progress data source; the PostgreSQL academic source currently does not provide lecture completion records, so those points appear only when that source is connected.
+
+Projects and awards are recorded by a trusted staff integration using `PUT /scores/{student_id}/achievements` with an `X-Scheduler-Token` header matching `AEGIS_SCHEDULER_TOKEN`. The JSON body needs a stable `achievement_id`, `kind` (`project` or `award`), `title`, and `week_number`. Reusing the same ID updates the record instead of awarding points twice. The read endpoint is `GET /scores/{student_id}`.
+
 ---
 
 # Install the UNI Track Android app

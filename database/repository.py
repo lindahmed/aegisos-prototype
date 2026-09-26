@@ -122,6 +122,15 @@ class StudentRepository:
                     FOREIGN KEY (course_id) REFERENCES course_offerings(course_id),
                     FOREIGN KEY (lecture_id) REFERENCES lectures(lecture_id)
                 );
+                CREATE TABLE IF NOT EXISTS student_score_achievements (
+                    student_id TEXT NOT NULL,
+                    achievement_id TEXT NOT NULL,
+                    kind TEXT NOT NULL CHECK(kind IN ('project', 'award')),
+                    title TEXT NOT NULL,
+                    week_number INTEGER NOT NULL CHECK(week_number >= 1),
+                    PRIMARY KEY (student_id, achievement_id),
+                    FOREIGN KEY (student_id) REFERENCES students(student_id)
+                );
                 CREATE TABLE IF NOT EXISTS material_documents (
                     document_id TEXT PRIMARY KEY,
                     course_id TEXT NOT NULL,
@@ -1465,6 +1474,7 @@ class StudentRepository:
                 )]
                 lectures = [dict(row) for row in connection.execute(
                     """SELECT lecture.lecture_id, lecture.lecture_number, lecture.title, lecture.available_week,
+                              progress.completed_week,
                               CASE WHEN progress.lecture_id IS NULL THEN 0 ELSE 1 END AS completed
                        FROM lectures lecture
                        LEFT JOIN student_lecture_progress progress
@@ -1486,6 +1496,24 @@ class StudentRepository:
             "current_week": academic_week(FALL_2026_START_DATE),
             "courses": courses,
         }
+
+    def get_score_achievements(self, student_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT achievement_id, kind, title, week_number FROM student_score_achievements WHERE student_id = ? ORDER BY week_number, achievement_id",
+                (student_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_score_achievement(self, student_id: str, achievement_id: str, kind: str, title: str, week_number: int) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO student_score_achievements (student_id, achievement_id, kind, title, week_number)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(student_id, achievement_id) DO UPDATE SET
+                   kind = excluded.kind, title = excluded.title, week_number = excluded.week_number""",
+                (student_id, achievement_id, kind, title, week_number),
+            )
 
     def get_previous_course_snapshot(self, student_id: str, course_id: str, week_number: int) -> dict[str, Any] | None:
         with self._connect() as connection:

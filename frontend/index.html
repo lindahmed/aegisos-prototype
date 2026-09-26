@@ -69,6 +69,19 @@
               <h2 id="welcome-title">Welcome</h2>
             </div>
             <div class="header-actions">
+              <div class="score-wrap">
+                <button id="score-button" class="score-button" type="button" aria-label="Open student scores" aria-expanded="false" aria-controls="score-panel" title="Student scores">
+                  <span aria-hidden="true">★</span><span id="score-value">—</span><span class="score-unit">pts</span>
+                </button>
+                <section id="score-panel" class="score-panel" hidden aria-label="Student scores">
+                  <div class="score-panel-heading"><h3>Student scores</h3><span id="score-rank"></span></div>
+                  <p id="score-summary" class="score-summary" role="status">Loading scores…</p>
+                  <p class="score-rules">10 per lecture · 25 per exam at 70%+ · 40 per project · 50 per award</p>
+                  <h4>Top 5</h4><ol id="score-top-five" class="score-list"></ol>
+                  <h4>Near your score</h4><ol id="score-nearby" class="score-list"></ol>
+                  <h4>Week by week</h4><div id="score-weekly" class="score-weeks"></div>
+                </section>
+              </div>
               <button class="theme-toggle" type="button" data-theme-toggle>
                 <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">&#9728;</span>
                 <span data-theme-label>Light mode</span>

@@ -49,6 +49,8 @@ const actionStatus = document.querySelector('#action-status');
 const courseList = document.querySelector('#course-list');
 const createWorkspaceButton = document.querySelector('#create-workspace-button');
 const openVsCodeButton = document.querySelector('#open-vscode-button');
+const scoreButton = document.querySelector('#score-button');
+const scorePanel = document.querySelector('#score-panel');
 
 const workspaceTab = document.querySelector('#workspace-tab');
 const advisorTab = document.querySelector('#advisor-tab');
@@ -87,6 +89,72 @@ let selectedCourse = null;
 let advisorHistory = [];
 let activeRecording = null;
 let currentTwin = null;
+let scoreRequestId = 0;
+
+function closeScorePanel() {
+  scorePanel.hidden = true;
+  scoreButton.setAttribute('aria-expanded', 'false');
+}
+
+function renderScoreRows(container, rows, studentId) {
+  container.replaceChildren();
+  for (const row of rows) {
+    const item = document.createElement('li');
+    item.className = `score-row${row.student_id === studentId ? ' is-you' : ''}`;
+    const rank = document.createElement('span');
+    rank.className = 'score-row-rank';
+    rank.textContent = `#${row.rank}`;
+    const name = document.createElement('span');
+    name.className = 'score-row-name';
+    name.textContent = `${row.name}${row.student_id === studentId ? ' (you)' : ''}`;
+    const points = document.createElement('strong');
+    points.textContent = `${row.score} pts`;
+    item.append(rank, name, points);
+    container.append(item);
+  }
+}
+
+async function loadScores(studentId) {
+  const requestId = ++scoreRequestId;
+  try {
+    const data = await apiRequest(`/scores/${encodeURIComponent(studentId)}`);
+    if (requestId !== scoreRequestId || currentStudent?.student_id !== studentId) return;
+    document.querySelector('#score-value').textContent = data.me.score;
+    document.querySelector('#score-rank').textContent = `Rank #${data.me.rank}`;
+    const totals = data.me.totals;
+    document.querySelector('#score-summary').textContent =
+      `${totals.lectures} lectures · ${totals.exams_taken} exams taken (${totals.good_exams} good marks) · ${totals.projects} projects · ${totals.awards} awards`;
+    renderScoreRows(document.querySelector('#score-top-five'), data.top_five, studentId);
+    renderScoreRows(document.querySelector('#score-nearby'), data.nearby, studentId);
+    const weekly = document.querySelector('#score-weekly');
+    weekly.replaceChildren();
+    if (!data.me.weekly.length) {
+      weekly.textContent = 'No scored activity yet.';
+    } else {
+      for (const week of data.me.weekly) {
+        const row = document.createElement('p');
+        row.textContent = `Week ${week.week}: +${week.points} pts · ${week.lectures} lectures, ${week.exams_taken} exams, ${week.projects} projects, ${week.awards} awards`;
+        weekly.append(row);
+      }
+    }
+  } catch (error) {
+    if (requestId !== scoreRequestId || currentStudent?.student_id !== studentId) return;
+    document.querySelector('#score-summary').textContent = error.message;
+  }
+}
+
+scoreButton.addEventListener('click', () => {
+  const opening = scorePanel.hidden;
+  scorePanel.hidden = !opening;
+  scoreButton.setAttribute('aria-expanded', String(opening));
+  if (opening && currentStudent) loadScores(currentStudent.student_id);
+});
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('.score-wrap')) closeScorePanel();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeScorePanel();
+});
 let calendarCustomEvents = [];
 let calendarSelectedDate = new Date();
 let calendarMonth = new Date(calendarSelectedDate.getFullYear(), calendarSelectedDate.getMonth(), 1);
@@ -1104,6 +1172,8 @@ function resetAdvisor() {
 
 function renderStudent(student) {
   currentStudent = student;
+  closeScorePanel();
+  document.querySelector('#score-value').textContent = '—';
   currentTwin = null;
   calendarCustomEvents = loadCalendarEvents(student.student_id);
   calendarSelectedDate = new Date();
@@ -1133,6 +1203,7 @@ function renderStudent(student) {
   renderCalendar();
   resetAdvisor();
   loadProgress(student.student_id);
+  loadScores(student.student_id);
   startNotificationSync();
   startMessageSync();
 
@@ -1478,6 +1549,8 @@ advisorVoiceButton.addEventListener('click', async () => {
 
 
 document.querySelector('#sign-out-button').addEventListener('click', () => {
+  scoreRequestId += 1;
+  closeScorePanel();
   stopNotificationSync();
   stopMessageSync();
   notifications = [];

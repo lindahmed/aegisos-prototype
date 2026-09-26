@@ -227,6 +227,14 @@ class PostgresStudentRepository:
                         read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         PRIMARY KEY (student_id, notification_id)
                     );
+                    CREATE TABLE IF NOT EXISTS student_score_achievements (
+                        student_id TEXT NOT NULL,
+                        achievement_id TEXT NOT NULL,
+                        kind TEXT NOT NULL CHECK(kind IN ('project', 'award')),
+                        title TEXT NOT NULL,
+                        week_number INTEGER NOT NULL CHECK(week_number >= 1),
+                        PRIMARY KEY (student_id, achievement_id)
+                    );
                     CREATE TABLE IF NOT EXISTS weekly_plan_items (
                         task_id TEXT PRIMARY KEY,
                         student_id TEXT NOT NULL,
@@ -1355,6 +1363,23 @@ class PostgresStudentRepository:
             "current_week": self.current_week,
             "courses": courses,
         }
+
+    def get_score_achievements(self, student_id: str) -> list[dict[str, Any]]:
+        return self._fetch_all(
+            "SELECT achievement_id, kind, title, week_number FROM student_score_achievements WHERE student_id = %s ORDER BY week_number, achievement_id",
+            (student_id,),
+        )
+
+    def save_score_achievement(self, student_id: str, achievement_id: str, kind: str, title: str, week_number: int) -> None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO student_score_achievements (student_id, achievement_id, kind, title, week_number)
+                       VALUES (%s, %s, %s, %s, %s)
+                       ON CONFLICT(student_id, achievement_id) DO UPDATE SET
+                       kind = excluded.kind, title = excluded.title, week_number = excluded.week_number""",
+                    (student_id, achievement_id, kind, title, week_number),
+                )
 
     def get_previous_course_snapshot(self, student_id: str, course_id: str, week_number: int) -> dict[str, Any] | None:
         return self._fetch_one(

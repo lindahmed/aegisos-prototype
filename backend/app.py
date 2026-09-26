@@ -1,5 +1,6 @@
 from __future__ import annotations
 import hashlib
+import hmac
 import json
 import os
 from datetime import UTC, date, datetime
@@ -42,6 +43,7 @@ from backend.progress.models import (
 )
 from backend.progress.narrative import generate_weekly_narrative
 from backend.progress.scheduler import run_analysis_cycle
+from backend.progress.scoring import leaderboard
 from backend.progress.service import build_student_twin
 from backend.planner.service import build_semester_plan
 from backend.progress_agent.graph import (
@@ -64,6 +66,13 @@ class WorkspaceResponse(BaseModel):
     course: str
     path: str
     opened: bool = False
+
+
+class ScoreAchievementRequest(BaseModel):
+    achievement_id: str = Field(min_length=1, max_length=100)
+    kind: Literal["project", "award"]
+    title: str = Field(min_length=1, max_length=160)
+    week_number: int = Field(ge=1, le=52)
 
 
 class PortalGradebookRowRequest(BaseModel):
@@ -1163,6 +1172,28 @@ def create_app(
             "language": language,
             "audio_base64": encode_audio(audio_bytes),
         }
+
+    @api.get("/scores/{student_id}")
+    def get_scores(student_id: str) -> dict[str, object]:
+        result = leaderboard(repository, student_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        return result
+
+    @api.put("/scores/{student_id}/achievements")
+    def record_score_achievement(
+        student_id: str,
+        achievement: ScoreAchievementRequest,
+        x_scheduler_token: str | None = Header(default=None, alias="X-Scheduler-Token"),
+    ) -> dict[str, object]:
+        expected_token = os.environ.get("AEGIS_SCHEDULER_TOKEN")
+        if not expected_token or not x_scheduler_token or not hmac.compare_digest(x_scheduler_token, expected_token):
+            raise HTTPException(status_code=403, detail="A configured staff token is required")
+        if repository.get_student(student_id) is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        repository.save_score_achievement(student_id, achievement.achievement_id,
+                                          achievement.kind, achievement.title.strip(), achievement.week_number)
+        return {"student_id": student_id, **achievement.model_dump()}
 
     @api.get("/progress/{student_id}", response_model=StudentTwin)
     def get_progress(student_id: str) -> StudentTwin:
