@@ -235,6 +235,15 @@ class PostgresStudentRepository:
                         week_number INTEGER NOT NULL CHECK(week_number >= 1),
                         PRIMARY KEY (student_id, achievement_id)
                     );
+                    CREATE TABLE IF NOT EXISTS student_score_lectures (
+                        student_id TEXT NOT NULL,
+                        course_id TEXT NOT NULL,
+                        semester TEXT NOT NULL,
+                        lecture_number INTEGER NOT NULL CHECK(lecture_number >= 1),
+                        completed_week INTEGER NOT NULL CHECK(completed_week >= 1),
+                        source TEXT NOT NULL DEFAULT 'verified',
+                        PRIMARY KEY (student_id, course_id, semester, lecture_number)
+                    );
                     CREATE TABLE IF NOT EXISTS weekly_plan_items (
                         task_id TEXT PRIMARY KEY,
                         student_id TEXT NOT NULL,
@@ -379,7 +388,9 @@ class PostgresStudentRepository:
                     ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS week7_exam_mark DOUBLE PRECISION CHECK(week7_exam_mark BETWEEN 0 AND 30);
                     ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS week12_exam_mark DOUBLE PRECISION CHECK(week12_exam_mark BETWEEN 0 AND 20);
                     ALTER TABLE course_gradebook_entries ADD COLUMN IF NOT EXISTS final_exam_mark DOUBLE PRECISION CHECK(final_exam_mark BETWEEN 0 AND 40);
-                    UPDATE course_gradebook_entries SET coursework_mark=COALESCE(coursework_mark, assignment_score * 0.10), week7_exam_mark=COALESCE(week7_exam_mark, midterm_score * 0.30), week12_exam_mark=COALESCE(week12_exam_mark, 0), final_exam_mark=COALESCE(final_exam_mark, final_score * 0.40);
+                    UPDATE course_gradebook_entries SET coursework_mark=COALESCE(coursework_mark, assignment_score * 0.10), week7_exam_mark=COALESCE(week7_exam_mark, midterm_score * 0.30), week12_exam_mark=COALESCE(week12_exam_mark, 0), final_exam_mark=COALESCE(final_exam_mark, final_score * 0.40)
+                    WHERE coursework_mark IS NULL AND week7_exam_mark IS NULL
+                      AND week12_exam_mark IS NULL AND final_exam_mark IS NULL;
                     """
                 )
 
@@ -1317,10 +1328,10 @@ class PostgresStudentRepository:
                       FROM course_gradebook_entries entry
                       WHERE entry.student_id = %s
                         AND entry.course_id = selected.course_code
+                        AND entry.semester IN (%s, 'Current semester')
                       ORDER BY CASE
                         WHEN entry.semester = %s THEN 0
                         WHEN entry.semester = 'Current semester' THEN 1
-                        ELSE 2
                       END, entry.updated_at DESC
                       LIMIT 1
                     ) g ON TRUE
@@ -1330,6 +1341,7 @@ class PostgresStudentRepository:
                         student.student_id,
                         student.student_id,
                         student.student_id,
+                        self.semester,
                         self.semester,
                     ),
                 )
@@ -1369,6 +1381,71 @@ class PostgresStudentRepository:
             "SELECT achievement_id, kind, title, week_number FROM student_score_achievements WHERE student_id = %s ORDER BY week_number, achievement_id",
             (student_id,),
         )
+
+    def get_score_lectures(self, student_id: str) -> list[dict[str, Any]]:
+        return self._fetch_all(
+            """SELECT course_id, lecture_number, completed_week
+               FROM student_score_lectures
+               WHERE student_id = %s AND semester = %s
+               ORDER BY completed_week, course_id, lecture_number""",
+            (student_id, self.semester),
+        )
+
+    def get_scoreboard_activity(self) -> list[dict[str, Any]]:
+        """Load leaderboard counts in batches, avoiding a query per student."""
+        profiles = self._fetch_all(
+            "SELECT student_id::text AS student_id, full_name AS name FROM students", ()
+        )
+        by_id = {
+            row["student_id"]: {**row, "lectures": 0, "good_exams": 0,
+                                "projects": 0, "awards": 0}
+            for row in profiles
+        }
+        for row in self._fetch_all(
+            """SELECT student_id, COUNT(*) AS lectures
+               FROM student_score_lectures
+               WHERE semester = %s AND completed_week <= %s
+               GROUP BY student_id""",
+            (self.semester, self.current_week),
+        ):
+            if row["student_id"] in by_id:
+                by_id[row["student_id"]]["lectures"] = int(row["lectures"])
+        for row in self._fetch_all(
+            """SELECT enrollment.student_id::text AS student_id,
+                      COUNT(*) FILTER (WHERE grade.week7_exam_mark >= 21) AS week7,
+                      COUNT(*) FILTER (WHERE grade.week12_exam_mark >= 14) AS week12,
+                      COUNT(*) FILTER (WHERE grade.final_exam_mark >= 28) AS final
+               FROM student_courses enrollment
+               JOIN LATERAL (
+                   SELECT entry.week7_exam_mark, entry.week12_exam_mark, entry.final_exam_mark
+                   FROM course_gradebook_entries entry
+                   WHERE entry.student_id = enrollment.student_id::text
+                     AND entry.course_id = enrollment.course_code
+                     AND entry.semester IN (%s, 'Current semester')
+                   ORDER BY CASE WHEN entry.semester = %s THEN 0 ELSE 1 END,
+                            entry.updated_at DESC
+                   LIMIT 1
+               ) grade ON TRUE
+               WHERE enrollment.status = 'Current'
+               GROUP BY enrollment.student_id""",
+            (self.semester, self.semester),
+        ):
+            if row["student_id"] in by_id:
+                by_id[row["student_id"]]["good_exams"] = (
+                    (int(row["week7"]) if self.current_week >= 7 else 0)
+                    + (int(row["week12"]) if self.current_week >= 12 else 0)
+                    + (int(row["final"]) if self.current_week >= 16 else 0)
+                )
+        for row in self._fetch_all(
+            """SELECT student_id, kind, COUNT(*) AS count
+               FROM student_score_achievements
+               WHERE week_number <= %s
+               GROUP BY student_id, kind""",
+            (self.current_week,),
+        ):
+            if row["student_id"] in by_id:
+                by_id[row["student_id"]]["projects" if row["kind"] == "project" else "awards"] = int(row["count"])
+        return list(by_id.values())
 
     def save_score_achievement(self, student_id: str, achievement_id: str, kind: str, title: str, week_number: int) -> None:
         with self._connect() as connection:
