@@ -138,38 +138,66 @@
           </nav>
 
           <section id="workspace-panel" class="dashboard-page workspace-panel">
+            <div class="workspace-welcome">
+              <div>
+                <p class="workspace-kicker">Student workspace <span id="workspace-week"></span></p>
+                <h3 id="workspace-greeting">Welcome</h3>
+                <p>Pick a course to see your progress and open your tools.</p>
+              </div>
+              <button id="workspace-calendar-button" class="secondary-button" type="button">View calendar <span aria-hidden="true">→</span></button>
+            </div>
             <section class="course-section" aria-labelledby="courses-title">
               <div class="section-heading">
-                <h3 id="courses-title">Courses</h3>
+                <div><p class="workspace-kicker">Enrolled courses</p><h3 id="courses-title">Choose a course workspace</h3></div>
                 <span id="course-count" class="count-badge"></span>
               </div>
               <div id="course-list" class="course-list"></div>
             </section>
 
-            <div class="action-grid">
-              <button id="create-workspace-button" class="secondary-button action-button" type="button">
-                <span class="action-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M12 12v4M10 14h4"></path></svg>
-                </span>
-                <span class="action-copy">
-                  <span>Create / open folder</span>
-                </span>
-              </button>
-              <button id="open-vscode-button" class="primary-button action-button" type="button">
-                <span class="action-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-5.5 6L8 18M16 6l5.5 6-5.5 6"></path></svg>
-                </span>
-                <span class="action-copy">
-                  <span>Open in VS Code</span>
-                </span>
-              </button>
+            <section class="course-focus" aria-labelledby="focus-course-name">
+              <div class="focus-heading">
+                <div><p class="workspace-kicker">Selected course</p><h3 id="focus-course-name">Choose a course</h3></div>
+                <span id="focus-course-health" class="focus-health">Progress loading</span>
+              </div>
+              <div class="focus-metrics">
+                <div><span>Lectures studied</span><strong id="focus-lectures">—</strong></div>
+                <div><span>Assessments graded</span><strong id="focus-assessments">—</strong></div>
+                <div><span>Study next</span><strong id="focus-next">Loading course progress…</strong></div>
+              </div>
+              <div class="focus-actions">
+                <button id="create-workspace-button" class="secondary-button action-button" type="button">
+                  <span class="action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M12 12v4M10 14h4"></path></svg></span>
+                  <span class="action-copy"><strong>Create / open folder</strong><small>Course files and assignments</small></span>
+                </button>
+                <button id="open-vscode-button" class="primary-button action-button" type="button">
+                  <span class="action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-5.5 6L8 18M16 6l5.5 6-5.5 6"></path></svg></span>
+                  <span class="action-copy"><strong>Open in VS Code</strong><small>Launch the selected course</small></span>
+                </button>
+                <button id="course-progress-button" class="secondary-button action-button" type="button">
+                  <span class="action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18V9m6 9V5m6 13v-7m4 7H2"></path></svg></span>
+                  <span class="action-copy"><strong>View progress</strong><small>Lectures, marks, and trends</small></span>
+                </button>
+              </div>
+              <p id="action-status" class="message" role="status" aria-live="polite"></p>
+            </section>
+
+            <div class="workspace-overview">
+              <section class="overview-card" aria-labelledby="upcoming-title">
+                <div class="overview-heading"><h3 id="upcoming-title">Coming up</h3><button id="upcoming-calendar-button" class="text-button" type="button">Open calendar →</button></div>
+                <div id="workspace-upcoming" class="overview-list"><p class="overview-empty">Loading upcoming work…</p></div>
+              </section>
+              <section class="overview-card" aria-labelledby="recommendation-title">
+                <div class="overview-heading"><h3 id="recommendation-title">Study guidance</h3><span class="count-badge">Advisor AI</span></div>
+                <p id="workspace-recommendation" class="recommendation-copy">Loading your latest recommendation…</p>
+                <button id="workspace-advisor-button" class="secondary-button" type="button">Ask Advisor AI <span aria-hidden="true">→</span></button>
+              </section>
             </div>
-            <p id="action-status" class="message" role="status" aria-live="polite"></p>
           </section>
 
           <section id="advisor-panel" class="dashboard-page advisor-panel" hidden>
             <div class="advisor-heading">
-              <div>
+              <div class="advisor-title-group">
+                <button id="advisor-back-button" class="back-button" type="button" aria-label="Back to workspace">← <span>Workspace</span></button>
                 <h3>Advisor AI</h3>
               </div>
               <div class="advisor-controls">

@@ -48,6 +48,7 @@ const actionStatus = document.querySelector('#action-status');
 const courseList = document.querySelector('#course-list');
 const createWorkspaceButton = document.querySelector('#create-workspace-button');
 const openVsCodeButton = document.querySelector('#open-vscode-button');
+const advisorBackButton = document.querySelector('#advisor-back-button');
 const scoreButton = document.querySelector('#score-button');
 const scorePanel = document.querySelector('#score-panel');
 
@@ -88,6 +89,7 @@ let selectedCourse = null;
 let advisorHistory = [];
 let activeRecording = null;
 let currentTwin = null;
+let progressState = 'loading';
 let scoreRequestId = 0;
 
 function closeScorePanel() {
@@ -205,8 +207,8 @@ function setMessage(element, text, isError = false) {
 
 function setBusy(isBusy) {
   loginButton.disabled = isBusy;
-  createWorkspaceButton.disabled = isBusy;
-  openVsCodeButton.disabled = isBusy;
+  createWorkspaceButton.disabled = isBusy || !currentStudent?.courses.length;
+  openVsCodeButton.disabled = isBusy || !currentStudent?.courses.length;
 }
 
 
@@ -223,6 +225,63 @@ function selectCourse(course) {
     button.setAttribute('aria-pressed', String(button.dataset.course === course));
   }
   setMessage(actionStatus, '');
+  renderWorkspaceOverview();
+}
+
+function renderWorkspaceOverview() {
+  if (!currentStudent) return;
+  const course = currentTwin?.courses.find((item) => item.course_name === selectedCourse);
+  document.querySelector('#focus-course-name').textContent = selectedCourse || 'Choose a course';
+  document.querySelector('#workspace-week').textContent = currentTwin
+    ? `· ${currentTwin.semester} · Week ${currentTwin.current_week}` : '';
+  document.querySelector('#focus-course-health').textContent = course?.metrics?.course_health == null
+    ? (progressState === 'error' || currentTwin ? 'Progress unavailable' : 'Progress loading') : `${displayPercentage(course.metrics.course_health)} academic health`;
+  const availableLectures = course?.lectures.filter((item) => item.available_week <= currentTwin.current_week) || [];
+  document.querySelector('#focus-lectures').textContent = course
+    ? `${course.completed_lectures.length} / ${availableLectures.length}` : '—';
+  document.querySelector('#focus-assessments').textContent = course
+    ? `${course.assessments.filter((item) => item.mark != null).length} / ${course.assessments.length}` : '—';
+  const nextLecture = course?.unstudied_lectures.find((item) => item.available_week <= currentTwin.current_week);
+  const nextAssessment = course?.assessments
+    .filter((item) => item.mark == null && item.due_week >= currentTwin.current_week)
+    .sort((left, right) => left.due_week - right.due_week)[0];
+  document.querySelector('#focus-next').textContent = nextLecture?.title
+    || (nextAssessment ? `${nextAssessment.name} · Week ${nextAssessment.due_week}` : course ? 'Caught up for now' : progressState === 'error' ? 'Progress unavailable' : 'Loading course progress…');
+
+  const latest = currentTwin?.recent_interventions.find((item) => item.status === 'active' || item.status === 'escalated');
+  document.querySelector('#workspace-recommendation').textContent = latest?.message
+    || currentTwin?.current_recommendation
+    || (currentTwin ? 'Keep studying your available lectures and check the calendar for upcoming work.' : progressState === 'error' ? 'Progress is unavailable right now. You can still open your course tools and calendar.' : 'Loading your latest recommendation…');
+
+  const upcoming = document.querySelector('#workspace-upcoming');
+  upcoming.replaceChildren();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const events = allCalendarEvents()
+    .filter((event) => !event.completed && new Date(event.startAt) >= today)
+    .slice(0, 3);
+  if (events.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'overview-empty';
+    empty.textContent = currentTwin || progressState === 'error' ? 'Nothing upcoming yet. Add a study session in your calendar.' : 'Loading upcoming work…';
+    upcoming.append(empty);
+  }
+  for (const event of events) {
+    const row = document.createElement('div');
+    row.className = 'overview-event';
+    const details = document.createElement('div');
+    const kind = document.createElement('span');
+    kind.className = 'overview-event-kind';
+    kind.textContent = eventTypeLabel(event);
+    const title = document.createElement('strong');
+    title.textContent = event.title;
+    details.append(kind, title);
+    const date = document.createElement('time');
+    date.dateTime = event.startAt;
+    date.textContent = new Date(event.startAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    row.append(details, date);
+    upcoming.append(row);
+  }
 }
 
 
@@ -364,9 +423,11 @@ async function loadProgress(studentId) {
     const twin = await apiRequest(`/progress/${encodeURIComponent(studentId)}`);
     if (!currentStudent || currentStudent.student_id !== studentId) return;
     currentTwin = twin;
+    progressState = 'ready';
     renderProgress(twin);
     const scheduled = scheduleUrgentStudySessions();
     renderCalendar();
+    renderWorkspaceOverview();
     if (scheduled.length > 0) {
       showToasts([{
         type: 'study',
@@ -378,7 +439,9 @@ async function loadProgress(studentId) {
   } catch (error) {
     if (!currentStudent || currentStudent.student_id !== studentId) return;
     currentTwin = null;
+    progressState = 'error';
     renderCalendar();
+    renderWorkspaceOverview();
     setMessage(document.querySelector('#progress-status'), error.message, true);
   }
 }
@@ -415,6 +478,7 @@ function saveCalendarEvents() {
   } catch (_error) {
     // Keep the planner usable for this session when local storage is unavailable.
   }
+  renderWorkspaceOverview();
 }
 
 function semesterStart(currentWeek) {
@@ -1174,10 +1238,12 @@ function renderStudent(student) {
   closeScorePanel();
   document.querySelector('#score-value').textContent = '—';
   currentTwin = null;
+  progressState = 'loading';
   calendarCustomEvents = loadCalendarEvents(student.student_id);
   calendarSelectedDate = new Date();
   calendarMonth = new Date(calendarSelectedDate.getFullYear(), calendarSelectedDate.getMonth(), 1);
-  document.querySelector('#welcome-title').textContent = `Welcome, ${student.name}`;
+  document.querySelector('#welcome-title').textContent = `${student.name} · Year ${student.year}`;
+  document.querySelector('#workspace-greeting').textContent = `Welcome, ${student.name}`;
   document.querySelector('#student-major').textContent = student.major;
   document.querySelector('#student-year').textContent = `Year ${student.year}`;
   document.querySelector('#student-gpa').textContent = Number(student.gpa).toFixed(2);
@@ -1211,6 +1277,7 @@ function renderStudent(student) {
   } else {
     selectedCourse = null;
     setMessage(actionStatus, 'No enrolled courses are available.');
+    renderWorkspaceOverview();
   }
 }
 
@@ -1266,6 +1333,21 @@ createWorkspaceButton.addEventListener('click', () => {
 
 openVsCodeButton.addEventListener('click', () => {
   runWorkspaceAction('/workspace/vscode', 'Opening the course in VS Code...');
+});
+
+document.querySelector('#course-progress-button').addEventListener('click', () => showDashboardSection('progress'));
+document.querySelector('#workspace-calendar-button').addEventListener('click', () => showDashboardSection('calendar'));
+document.querySelector('#upcoming-calendar-button').addEventListener('click', () => showDashboardSection('calendar'));
+document.querySelector('#workspace-advisor-button').addEventListener('click', () => {
+  showDashboardSection('advisor');
+  if (!advisorInput.value.trim() && selectedCourse) {
+    advisorInput.value = `Help me plan my next steps in ${selectedCourse}.`;
+  }
+  advisorInput.focus();
+});
+advisorBackButton.addEventListener('click', () => {
+  showDashboardSection('workspace');
+  workspaceTab.focus();
 });
 
 
@@ -1558,6 +1640,7 @@ document.querySelector('#sign-out-button').addEventListener('click', () => {
   currentStudent = null;
   selectedCourse = null;
   currentTwin = null;
+  progressState = 'loading';
   calendarCustomEvents = [];
   calendarSelectedDate = new Date();
   calendarMonth = new Date(calendarSelectedDate.getFullYear(), calendarSelectedDate.getMonth(), 1);
