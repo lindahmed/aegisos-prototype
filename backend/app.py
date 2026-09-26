@@ -3,14 +3,18 @@ import hashlib
 import hmac
 import json
 import os
+import logging
+from io import BytesIO
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Callable, Literal
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+import httpx
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pypdf import PdfReader
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(PROJECT_ROOT / ".env", override=False)
@@ -53,6 +57,7 @@ from backend.progress_agent.graph import (
 from backend.simulation.what_if import run_assessment_grade_scenario
 from database.repository import Student, StudentRepository
 from database.postgres_repository import PostgresStudentRepository
+from database.portal_pdfs import PortalPdfStore
 from workspace.manager import ToolUnavailableError, WorkspaceManager
 
 
@@ -144,6 +149,8 @@ GRADE_SCALE = [
 ]
 
 GRADE_POINTS = {letter: points for letter, points, _ in GRADE_SCALE}
+PDF_MAX_BYTES = 10 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 def _weighted_total(record: dict[str, object]) -> float:
@@ -606,8 +613,8 @@ def create_app(
     api.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_methods=["GET", "POST", "PUT"],
-        allow_headers=["Content-Type"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Content-Type", "Authorization"],
     )
 
     staff_names = {"104217": "Dr. Omar Fathallah"}
@@ -616,6 +623,90 @@ def create_app(
         for identifier in os.environ.get("AEGIS_STAFF_IDS", "104217").split(",")
         if identifier.strip()
     }
+    pdf_store = PortalPdfStore(repository)
+    pdf_storage_root = material_storage_root / "portal-pdfs"
+
+    def portal_actor(authorization: str | None = Header(default=None)) -> dict[str, str]:
+        """Resolve a Supabase access token to a server-checked portal identity."""
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Sign in to access PDFs")
+        token = authorization[7:].strip()
+        if not token:
+            raise HTTPException(status_code=401, detail="Sign in to access PDFs")
+        supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+        if not supabase_url or not anon_key:
+            raise HTTPException(status_code=503, detail="Supabase Auth is not configured on the API")
+        try:
+            response = httpx.get(
+                f"{supabase_url}/auth/v1/user",
+                headers={"apikey": anon_key, "Authorization": f"Bearer {token}"},
+                timeout=5,
+            )
+        except httpx.RequestError as error:
+            raise HTTPException(status_code=503, detail="Authentication service unavailable") from error
+        if response.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
+        user = response.json()
+        email = str(user.get("email") or "").lower()
+        metadata = user.get("app_metadata") or {}
+        auth_user_id = str(user.get("id") or "")
+        for role, domain in (("staff", "staff.aegisos.local"),
+                             ("student", "students.aegisos.local")):
+            suffix = f"@{domain}"
+            if email.endswith(suffix):
+                actor_id = email[:-len(suffix)]
+                if not actor_id or "@" in actor_id:
+                    break
+                if (role == "staff" and actor_id in allowed_staff_ids
+                        and metadata.get("portal_role") == "staff"
+                        and metadata.get("portal_id") == actor_id):
+                    return {"role": role, "id": actor_id}
+                if role == "student":
+                    student_linked = (
+                        metadata.get("portal_role") == "student"
+                        and metadata.get("portal_id") == actor_id
+                    ) or pdf_store.is_registered_student_auth(auth_user_id, actor_id)
+                    if student_linked and repository.get_student(actor_id) is not None:
+                        return {"role": role, "id": actor_id}
+        raise HTTPException(status_code=403, detail="Account is not authorized for this portal")
+
+    def require_staff(actor: dict[str, str] = Depends(portal_actor)) -> str:
+        if actor["role"] != "staff":
+            raise HTTPException(status_code=403, detail="Staff access required")
+        return actor["id"]
+
+    def require_student(actor: dict[str, str] = Depends(portal_actor)) -> str:
+        if actor["role"] != "student":
+            raise HTTPException(status_code=403, detail="Student access required")
+        return actor["id"]
+
+    def public_pdf(pdf: dict[str, object]) -> dict[str, object]:
+        return {
+            key: (value.isoformat() if isinstance(value, datetime) else value)
+            for key, value in pdf.items()
+            if key not in {"storage_path"}
+        }
+
+    def checked_pdf(pdf_id: str, actor_id: str, role: str) -> dict[str, object]:
+        # Visibility is checked against the current enrollment at every request.
+        visible = pdf_store.list_staff(actor_id) if role == "staff" else pdf_store.list_student(actor_id)
+        pdf = next((item for item in visible if item["pdf_id"] == pdf_id), None)
+        if pdf is None:
+            raise HTTPException(status_code=404, detail="PDF not found")
+        return pdf
+
+    def pdf_response(pdf: dict[str, object], download: bool) -> FileResponse:
+        source = (pdf_storage_root / str(pdf["storage_path"])).resolve()
+        if not source.is_relative_to(pdf_storage_root) or not source.is_file():
+            raise HTTPException(status_code=404, detail="PDF file unavailable")
+        return FileResponse(
+            source,
+            media_type="application/pdf",
+            filename=str(pdf["original_filename"]) if download else None,
+            content_disposition_type="attachment" if download else "inline",
+            headers={"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox"},
+        )
 
     def messaging_participant(actor_type: str, actor_id: str) -> dict[str, str]:
         normalized_id = actor_id.strip()
@@ -738,6 +829,102 @@ def create_app(
         message_ids = [message_id for message_id in request.message_ids if message_id in visible]
         repository.mark_portal_messages_read(request.actor_type, actor["id"], message_ids)
         return {"read": message_ids}
+
+    @api.get("/portal/pdfs/staff/courses")
+    def get_pdf_instructor_courses(instructor_id: str = Depends(require_staff)) -> dict[str, object]:
+        return {"courses": pdf_store.instructor_courses(instructor_id)}
+
+    @api.get("/portal/pdfs/staff")
+    def list_staff_pdfs(instructor_id: str = Depends(require_staff)) -> dict[str, object]:
+        return {"pdfs": [public_pdf(item) for item in pdf_store.list_staff(instructor_id)]}
+
+    @api.post("/portal/pdfs/staff", status_code=201)
+    async def upload_staff_pdf(
+        file: UploadFile = File(...),
+        title: str = Form(...),
+        description: str = Form(""),
+        course_id: str = Form(""),
+        instructor_id: str = Depends(require_staff),
+    ) -> dict[str, object]:
+        clean_title = title.strip()
+        clean_description = description.strip()
+        clean_course_id = course_id.strip() or None
+        if not clean_title or len(clean_title) > 160:
+            raise HTTPException(status_code=422, detail="Title must be 1–160 characters")
+        if len(clean_description) > 2000:
+            raise HTTPException(status_code=422, detail="Description must be at most 2000 characters")
+        if clean_course_id and clean_course_id not in {
+            item["course_id"] for item in pdf_store.instructor_courses(instructor_id)
+        }:
+            raise HTTPException(status_code=403, detail="You are not assigned to this course")
+        original_name = (file.filename or "").replace("\\", "/").split("/")[-1]
+        if not original_name.lower().endswith(".pdf") or not original_name or len(original_name) > 255:
+            raise HTTPException(status_code=422, detail="Choose a PDF file")
+        if file.content_type not in ("application/pdf", "application/octet-stream"):
+            raise HTTPException(status_code=422, detail="Choose a PDF file")
+        contents = await file.read(PDF_MAX_BYTES + 1)
+        await file.close()
+        if len(contents) > PDF_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="PDF must be 10 MB or smaller")
+        if not contents.startswith(b"%PDF-"):
+            raise HTTPException(status_code=422, detail="File is not a valid PDF")
+        try:
+            reader = PdfReader(BytesIO(contents), strict=True)
+            if reader.is_encrypted or len(reader.pages) < 1:
+                raise ValueError("Encrypted or empty PDF")
+        except Exception as error:
+            raise HTTPException(status_code=422, detail="File is not a valid, readable PDF") from error
+        pdf_id = str(uuid4())
+        storage_path = f"{pdf_id}.pdf"
+        pdf_storage_root.mkdir(parents=True, exist_ok=True)
+        destination = pdf_storage_root / storage_path
+        destination.write_bytes(contents)
+        record = {
+            "pdf_id": pdf_id,
+            "instructor_id": instructor_id,
+            "course_id": clean_course_id,
+            "title": clean_title,
+            "description": clean_description or None,
+            "original_filename": original_name,
+            "storage_path": storage_path,
+            "size_bytes": len(contents),
+            "uploaded_at": datetime.now(UTC).isoformat(),
+        }
+        try:
+            pdf_store.insert(record)
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
+        result = pdf_store.get(pdf_id)
+        return {"pdf": public_pdf(result or record)}
+
+    @api.get("/portal/pdfs/student")
+    def list_student_pdfs(student_id: str = Depends(require_student)) -> dict[str, object]:
+        return {"pdfs": [public_pdf(item) for item in pdf_store.list_student(student_id)]}
+
+    @api.get("/portal/pdfs/student/{pdf_id}/file")
+    def get_student_pdf_file(
+        pdf_id: str, download: bool = False, student_id: str = Depends(require_student)
+    ) -> FileResponse:
+        return pdf_response(checked_pdf(pdf_id, student_id, "student"), download)
+
+    @api.get("/portal/pdfs/staff/{pdf_id}/file")
+    def get_staff_pdf_file(
+        pdf_id: str, download: bool = False, instructor_id: str = Depends(require_staff)
+    ) -> FileResponse:
+        return pdf_response(checked_pdf(pdf_id, instructor_id, "staff"), download)
+
+    @api.delete("/portal/pdfs/staff/{pdf_id}", status_code=204)
+    def delete_staff_pdf(pdf_id: str, instructor_id: str = Depends(require_staff)) -> None:
+        pdf = checked_pdf(pdf_id, instructor_id, "staff")
+        if not pdf_store.delete_owned(pdf_id, instructor_id):
+            raise HTTPException(status_code=404, detail="PDF not found")
+        source = (pdf_storage_root / str(pdf["storage_path"])).resolve()
+        if source.is_relative_to(pdf_storage_root):
+            try:
+                source.unlink(missing_ok=True)
+            except OSError:
+                logger.exception("Could not remove deleted PDF file %s", pdf_id)
 
     @api.get("/portal/courses")
     def get_portal_courses() -> dict[str, object]:

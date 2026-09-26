@@ -11,12 +11,7 @@ The login page is a two-step flow:
 2. **Enter your credentials** — the form labels adapt to the chosen role (Registration Number + PIN for
    students, Employee Number + Password for staff).
 
-### Demo credentials (mock authentication, no real university connection)
-
-| Role    | ID           | Password   |
-| ------- | ------------ | ---------- |
-| Student | `220104417`  | `1234`     |
-| Staff   | `104217`     | `demo1234` |
+Both roles now sign in through Supabase Auth using the hidden ID based email described below. The account must exist in the configured Supabase project; the former demo passwords are not portal credentials.
 
 ## Tech stack
 
@@ -74,3 +69,17 @@ The portal grade pages now read and write through the existing FastAPI backend i
 - `GET /portal/students/{student_id}/grades`
 
 This gives the staff portal and student portal one shared database path for grade entry and grade viewing.
+
+## Instructor PDFs
+
+The Staff Portal's **Course Materials** page uploads PDFs (maximum 10 MB) to the FastAPI server's private material directory. The Student Portal's **Documents** page lists eligible PDFs and refreshes when focused or every 30 seconds. Course PDFs are visible only to students with a `Current` enrollment; PDFs without a course are visible to all signed-in students. View and download requests check permissions again on the server.
+
+Setup:
+
+1. Configure the backend with `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `AEGIS_STAFF_IDS`, and `AEGIS_MATERIAL_STORAGE_ROOT` (see the repository root `.env.example`). Put the material directory on a persistent private volume in production. Every API replica must access the same volume.
+2. Configure this Vite app from `aast-portal/.env.example` with the same Supabase project and the backend URL. Restart the Vite server after changing env values.
+3. Start the backend; its database initialization creates `portal_pdfs` and `portal_instructor_courses` in PostgreSQL or SQLite. For a manual PostgreSQL deployment, run `database/migrations/add_portal_pdfs.sql` once before deploying the new backend.
+4. Create each staff user in Supabase Auth using the administrator interface with email `<employee_id>@staff.aegisos.local`. Set **app_metadata** (administrator controlled, not user metadata) to `{"portal_role":"staff","portal_id":"<employee_id>"}`. Add the employee ID to `AEGIS_STAFF_IDS`. Existing student Auth accounts must be linked to `user_profiles` in PostgreSQL; the local SQLite prototype requires administrator set `app_metadata` of `{"portal_role":"student","portal_id":"<student_id>"}` on each student account.
+5. Assign real course codes to instructors in the database, for example `INSERT INTO portal_instructor_courses (instructor_id, course_id) VALUES ('104217', 'CAI3101') ON CONFLICT DO NOTHING;`. Use a `course_id` present in the database's `courses` table (or `course_offerings` for SQLite). Staff can upload course PDFs only for assigned courses. A PDF with no course is shared with all signed-in students.
+
+The old staff demo password endpoint remains for existing integrations, but portal sign-in now uses Supabase Auth for staff. The PDF endpoints never accept the demo password. To verify locally, sign in as an assigned instructor, upload a PDF, then sign in as one enrolled and one unenrolled student and compare the Documents page. `python -m pytest backend/test_portal_pdfs.py -q` exercises upload, storage, visibility, view, download, permissions, deletion, and invalid files.

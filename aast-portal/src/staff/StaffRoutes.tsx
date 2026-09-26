@@ -4,6 +4,7 @@ import { ToastProvider } from '@staff/components/ui/Toast'
 import { CaseManagementProvider } from '@staff/context/CaseManagementContext'
 import Dashboard from '@staff/pages/Dashboard'
 import MyCourses from '@staff/pages/MyCourses'
+import PdfMaterials from '@staff/pages/PdfMaterials'
 import CourseDetail from '@staff/pages/CourseDetail'
 import StudentList from '@staff/pages/StudentList'
 import StudentDetail from '@staff/pages/StudentDetail'
@@ -36,6 +37,7 @@ export default function StaffRoutes() {
       >
         <Route path="/" element={<Dashboard />} />
         <Route path="/courses" element={<MyCourses />} />
+        <Route path="/materials" element={<PdfMaterials />} />
         <Route path="/courses/:id" element={<CourseDetail />} />
         <Route path="/students" element={<StudentList />} />
         <Route path="/students/:id" element={<StudentDetail />} />

@@ -48,7 +48,7 @@ const navGroups = [
       { to: '/students', label: 'Student List', icon: Users },
       { to: '/attendance', label: 'Attendance', icon: ClipboardCheck },
       { to: '/grades', label: 'Grades', icon: GraduationCap },
-      { to: '/courses', label: 'Course Materials', icon: FolderOpen },
+      { to: '/materials', label: 'Course Materials', icon: FolderOpen },
     ],
   },
   {

@@ -1,10 +1,10 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import {
-  loginPortalStaff,
   validateStudentId,
   type ValidatedStudent,
 } from "@/lib/portalGrades";
 import { supabase, idToHiddenEmail } from "@/lib/supabaseClient";
+import { getInstructorCourses } from "@/lib/portalPdfs";
 
 export type PortalRole = "student" | "staff";
 
@@ -104,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         const student = await validateStudentId(normalizedId);
         if (student === null) {
+          await supabase.auth.signOut();
           return {
             success: false,
             error:
@@ -129,8 +130,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: true };
       }
 
-      const staffLogin = await loginPortalStaff(normalizedId, password);
-      if (!staffLogin.valid) return { success: false, error: "Incorrect ID or password." };
+      const { error: staffAuthError } = await supabase.auth.signInWithPassword({
+        email: idToHiddenEmail("staff", normalizedId),
+        password,
+      });
+      if (staffAuthError) return { success: false, error: "Incorrect ID or password." };
+      try {
+        await getInstructorCourses();
+      } catch (error) {
+        await supabase.auth.signOut();
+        throw error;
+      }
       const nextSession: StoredSession = {
         role: "staff",
         portalId: normalizedId,
@@ -152,6 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    void supabase.auth.signOut();
     sessionStorage.removeItem(STORAGE_KEY);
     setSession({
       role: null,

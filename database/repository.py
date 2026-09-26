@@ -354,6 +354,24 @@ class StudentRepository:
                     ON portal_messages(sender_type, sender_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_portal_messages_recipient
                     ON portal_messages(recipient_type, recipient_id, created_at);
+                CREATE TABLE IF NOT EXISTS portal_instructor_courses (
+                    instructor_id TEXT NOT NULL,
+                    course_id TEXT NOT NULL REFERENCES course_offerings(course_id),
+                    PRIMARY KEY (instructor_id, course_id)
+                );
+                CREATE TABLE IF NOT EXISTS portal_pdfs (
+                    pdf_id TEXT PRIMARY KEY,
+                    instructor_id TEXT NOT NULL,
+                    course_id TEXT REFERENCES course_offerings(course_id),
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    original_filename TEXT NOT NULL,
+                    storage_path TEXT NOT NULL UNIQUE,
+                    size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+                    uploaded_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_portal_pdfs_course ON portal_pdfs(course_id, uploaded_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_portal_pdfs_instructor ON portal_pdfs(instructor_id, uploaded_at DESC);
                 """
             )
             course_columns = {
