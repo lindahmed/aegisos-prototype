@@ -1,19 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title">
-  <title id="title">Uni Track desktop wallpaper</title>
+  <title id="title">UniTrack desktop wallpaper</title>
   <defs>
-    <radialGradient id="glow" cx="50%" cy="44%" r="64%">
-      <stop offset="0" stop-color="#183c70"/>
-      <stop offset="0.48" stop-color="#101b35"/>
-      <stop offset="1" stop-color="#070b16"/>
+    <radialGradient id="background" cx="51%" cy="46%" r="75%">
+      <stop offset="0" stop-color="#15365f"/>
+      <stop offset="0.55" stop-color="#0b1c36"/>
+      <stop offset="1" stop-color="#070f1e"/>
     </radialGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3b82f6" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#38bdf8" stop-opacity="0.65"/>
+      <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
+    </linearGradient>
   </defs>
-  <rect width="1920" height="1080" fill="url(#glow)"/>
-  <g opacity="0.16" stroke="#7dd3fc" fill="none">
-    <circle cx="960" cy="490" r="330"/>
-    <circle cx="960" cy="490" r="420"/>
-    <path d="M0 820 520 520l440 310 460-390 500 310"/>
+  <rect width="1920" height="1080" fill="url(#background)"/>
+  <g fill="none" stroke="#60a5fa" stroke-opacity="0.12">
+    <circle cx="960" cy="525" r="360"/>
+    <circle cx="960" cy="525" r="480"/>
+    <circle cx="960" cy="525" r="610"/>
   </g>
-  <image href="unitrack-logo.jpeg" x="710" y="180" width="500" height="389" preserveAspectRatio="xMidYMid meet"/>
-  <text x="960" y="715" text-anchor="middle" fill="#f8fafc" font-family="sans-serif" font-size="72" font-weight="700" letter-spacing="8">UNI TRACK</text>
-  <text x="960" y="770" text-anchor="middle" fill="#bae6fd" font-family="sans-serif" font-size="28" letter-spacing="4">LEARN • BUILD • ADVANCE</text>
+  <path d="M0 875c326-144 584-106 829-4s531 92 1091-152" fill="none" stroke="#38bdf8" stroke-opacity="0.08" stroke-width="2"/>
+  <rect x="552" y="416" width="234" height="234" rx="48" fill="#f8fafc"/>
+  <rect x="552" y="416" width="234" height="234" rx="48" fill="none" stroke="#93c5fd" stroke-opacity="0.55" stroke-width="3"/>
+  <image href="unitrack-mark.png" x="578" y="442" width="182" height="182" preserveAspectRatio="xMidYMid meet"/>
+  <text x="832" y="550" fill="#f8fafc" font-family="Inter, Segoe UI, sans-serif" font-size="94" font-weight="700" letter-spacing="-4">UniTrack</text>
+  <rect x="832" y="580" width="500" height="3" rx="1.5" fill="url(#accent)"/>
 </svg>

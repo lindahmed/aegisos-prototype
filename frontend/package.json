@@ -1,7 +1,7 @@
 {
   "name": "uni-track-desktop",
   "version": "1.0.0",
-  "description": "Student-facing launcher for the Uni Track prototype",
+  "description": "Student-facing launcher for UniTrack",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -9,7 +9,7 @@
     "check": "node --check main.js && node --check preload.js && node --check renderer.js"
   },
   "keywords": [],
-  "author": "Uni Track team",
+  "author": "UniTrack team",
   "license": "ISC",
   "type": "commonjs",
   "engines": {

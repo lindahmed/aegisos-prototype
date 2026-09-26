@@ -1,7 +1,6 @@
 const apiBaseUrl = window.aegis.apiBaseUrl;
 const academicApiBaseUrl = window.aegis.academicApiBaseUrl || apiBaseUrl;
 const themeToggleButtons = document.querySelectorAll('[data-theme-toggle]');
-const dashboardHomeButtons = document.querySelectorAll('[data-dashboard-home]');
 
 const THEME_STORAGE_KEY = 'aegisos-theme';
 
@@ -168,7 +167,7 @@ async function apiRequest(path, options = {}) {
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     });
   } catch (_error) {
-    throw new Error('Uni Track backend is unavailable. Start the app with desktop/start-aegis.sh.');
+    throw new Error('UniTrack is unavailable. Start the app with desktop/start-aegis.sh.');
   }
 
   const payload = await response.json().catch(() => ({}));
@@ -223,7 +222,7 @@ function selectCourse(course) {
   for (const button of courseList.querySelectorAll('.course-button')) {
     button.setAttribute('aria-pressed', String(button.dataset.course === course));
   }
-  setMessage(actionStatus, `Selected: ${course}`);
+  setMessage(actionStatus, '');
 }
 
 
@@ -1274,10 +1273,6 @@ workspaceTab.addEventListener('click', () => showDashboardSection('workspace'));
 advisorTab.addEventListener('click', () => showDashboardSection('advisor'));
 progressTab.addEventListener('click', () => showDashboardSection('progress'));
 calendarTab.addEventListener('click', () => showDashboardSection('calendar'));
-
-for (const button of dashboardHomeButtons) {
-  button.addEventListener('click', () => showDashboardSection('workspace'));
-}
 
 document.querySelector('#calendar-previous-button').addEventListener('click', () => {
   calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1);

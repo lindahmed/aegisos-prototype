@@ -7,7 +7,7 @@
       content="default-src 'self'; connect-src http://127.0.0.1:8000 https://backend-production-6069.up.railway.app; img-src 'self' data:; media-src 'self' data: blob:; style-src 'self'; script-src 'self'"
     >
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Uni Track</title>
+    <title>UniTrack</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
@@ -17,23 +17,19 @@
           <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">&#9728;</span>
           <span data-theme-label>Light mode</span>
         </button>
-        <img class="brand-mark" src="assets/unitrack-logo.jpeg" alt="Uni Track logo">
-        <p class="eyebrow">Personal student environment</p>
-        <h1>Uni Track</h1>
-        <p class="brand-copy">
-          One focused place for your courses, local workspaces, development tools, and AI advising.
-        </p>
-        <div class="runtime-status">
-          <span class="status-dot" aria-hidden="true"></span>
-          Ubuntu + XFCE workspace
+        <div class="brand-lockup">
+          <span class="brand-mark-frame"><img class="brand-mark" src="assets/unitrack-mark.png" alt="UniTrack mark"></span>
+          <h1>UniTrack</h1>
         </div>
+        <p class="brand-copy">
+          Your courses, tools, and academic progress in one place.
+        </p>
       </aside>
 
       <section class="content-panel">
         <section id="login-view" class="view login-view" aria-labelledby="login-title">
-          <p class="eyebrow">Student access</p>
-          <h2 id="login-title">Open your workspace</h2>
-          <p class="intro">Enter a prototype student ID to load the matching SQLite profile.</p>
+          <h2 id="login-title">Student sign in</h2>
+          <p class="intro">Enter your student ID to open your workspace.</p>
           <form id="login-form">
             <label for="student-id">Student ID</label>
             <input
@@ -44,29 +40,21 @@
               value="231027905"
               required
             >
-            <p class="field-hint">Demo IDs: 231027905, 231027906, 231027907</p>
             <button id="login-button" class="primary-button" type="submit">
-              Load student dashboard
+              Continue
             </button>
           </form>
           <p id="login-status" class="message" role="status" aria-live="polite"></p>
         </section>
 
-        <section id="dashboard-view" class="view dashboard-view" aria-labelledby="welcome-title" hidden>
-          <header class="app-topbar">
-            <div class="app-topbar-brand">
-              <img class="app-topbar-logo" src="assets/unitrack-logo.jpeg" alt="Uni Track logo">
-              <span class="app-topbar-name">Uni Track</span>
-            </div>
-            <div class="app-topbar-sync" aria-hidden="true">
-              <span class="sync-ping"><span class="sync-ping-core"></span></span>
-              <span>Academic Cloud: Synced</span>
-            </div>
-          </header>
+        <section id="dashboard-view" class="view dashboard-view" aria-label="UniTrack workspace" hidden>
           <header class="dashboard-header">
-            <div>
-              <p class="eyebrow">Student dashboard</p>
-              <h2 id="welcome-title">Welcome</h2>
+            <div class="dashboard-identity">
+              <span class="app-topbar-logo-frame"><img class="app-topbar-logo" src="assets/unitrack-mark.png" alt="UniTrack mark"></span>
+              <div>
+                <span class="app-topbar-name">UniTrack</span>
+                <h2 id="welcome-title">Welcome</h2>
+              </div>
             </div>
             <div class="header-actions">
               <div class="score-wrap">
@@ -116,28 +104,19 @@
           <dl class="student-stats">
             <div class="stat-card">
               <div class="stat-card-head">
-                <dt>Major specialization</dt>
-                <span class="stat-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5Z"></path><path d="M6 12v5c0 1.5 2.5 3 6 3s6-1.5 6-3v-5"></path></svg>
-                </span>
+                <dt>Major</dt>
               </div>
               <dd id="student-major">-</dd>
             </div>
             <div class="stat-card">
               <div class="stat-card-head">
-                <dt>Academic standing</dt>
-                <span class="stat-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"></rect><path d="M3 9.5h18M8 3v3M16 3v3"></path></svg>
-                </span>
+                <dt>Year</dt>
               </div>
               <dd id="student-year">-</dd>
             </div>
             <div class="stat-card">
               <div class="stat-card-head">
-                <dt>Cumulative GPA</dt>
-                <span class="stat-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.5" r="5"></circle><path d="m8.2 12.8-1.6 7.4L12 17l5.4 3.2-1.6-7.4"></path></svg>
-                </span>
+                <dt>GPA</dt>
               </div>
               <dd id="student-gpa">-</dd>
             </div>
@@ -161,10 +140,7 @@
           <section id="workspace-panel" class="dashboard-page workspace-panel">
             <section class="course-section" aria-labelledby="courses-title">
               <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Enrolled courses</p>
-                  <h3 id="courses-title">Choose a course workspace</h3>
-                </div>
+                <h3 id="courses-title">Courses</h3>
                 <span id="course-count" class="count-badge"></span>
               </div>
               <div id="course-list" class="course-list"></div>
@@ -177,7 +153,6 @@
                 </span>
                 <span class="action-copy">
                   <span>Create / open folder</span>
-                  <small>Prepare assignments and labs</small>
                 </span>
               </button>
               <button id="open-vscode-button" class="primary-button action-button" type="button">
@@ -186,7 +161,6 @@
                 </span>
                 <span class="action-copy">
                   <span>Open in VS Code</span>
-                  <small>Launch the selected course</small>
                 </span>
               </button>
             </div>
@@ -194,12 +168,8 @@
           </section>
 
           <section id="advisor-panel" class="dashboard-page advisor-panel" hidden>
-            <button class="page-back-button" type="button" data-dashboard-home>
-              <span aria-hidden="true">&#8592;</span> Back to dashboard
-            </button>
             <div class="advisor-heading">
               <div>
-                <p class="eyebrow">LangGraph + Gemini</p>
                 <h3>Advisor AI</h3>
               </div>
               <div class="advisor-controls">
@@ -241,12 +211,8 @@
           </section>
 
           <section id="progress-panel" class="dashboard-page progress-panel" hidden>
-            <button class="page-back-button" type="button" data-dashboard-home>
-              <span aria-hidden="true">&#8592;</span> Back to dashboard
-            </button>
             <div class="advisor-heading">
               <div>
-                <p class="eyebrow">Student Digital Twin</p>
                 <h3>Semester progress</h3>
               </div>
               <span id="progress-week" class="count-badge">Loading</span>
@@ -260,12 +226,8 @@
           </section>
 
           <section id="calendar-panel" class="dashboard-page calendar-panel" hidden>
-            <button class="page-back-button" type="button" data-dashboard-home>
-              <span aria-hidden="true">&#8592;</span> Back to dashboard
-            </button>
             <div class="calendar-heading">
               <div>
-                <p class="eyebrow">Academic + personal planner</p>
                 <h3>My calendar</h3>
               </div>
               <div class="calendar-actions">
@@ -280,9 +242,10 @@
               </div>
             </div>
 
-            <p class="calendar-note">
-              Exams are placed on Monday at 9:00 AM and assignment deadlines on Sunday at 10:00 PM of their academic week because the academic system provides week numbers rather than exact dates.
-            </p>
+            <details class="calendar-note">
+              <summary>About estimated dates</summary>
+              <p>Exams appear on Monday at 9:00 AM and assignment deadlines on Sunday at 10:00 PM when the academic system supplies only a week number.</p>
+            </details>
 
             <div class="calendar-toolbar">
               <button id="calendar-previous-button" class="calendar-nav-button" type="button" aria-label="Previous month">&#8249;</button>
@@ -319,12 +282,8 @@
           </section>
 
           <section id="messages-panel" class="dashboard-page messages-panel" hidden>
-            <button class="page-back-button" type="button" data-dashboard-home>
-              <span aria-hidden="true">&#8592;</span> Back to dashboard
-            </button>
             <div class="messages-heading">
               <div>
-                <p class="eyebrow">Campus conversations</p>
                 <h3>Inbox</h3>
               </div>
               <button id="new-message-button" class="secondary-button" type="button">
@@ -368,7 +327,6 @@
       <section class="calendar-dialog" role="dialog" aria-modal="true" aria-labelledby="calendar-dialog-title">
         <div class="calendar-dialog-heading">
           <div>
-            <p class="eyebrow">Personal planner</p>
             <h3 id="calendar-dialog-title">Add calendar event</h3>
           </div>
           <button id="calendar-modal-close" class="calendar-close-button" type="button" aria-label="Close">&#10005;</button>

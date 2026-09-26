@@ -11,7 +11,7 @@ BACKEND_LOG="$STATE_DIR/backend.log"
 BACKEND_PID=""
 
 if [[ -z "${DATABASE_URL:-}" ]] && ! grep -qE '^DATABASE_URL=[^[:space:]]+' "$PROJECT_ROOT/.env" 2>/dev/null; then
-    echo "Uni Track requires DATABASE_URL for the Supabase-backed backend." >&2
+    echo "UniTrack requires DATABASE_URL for the Supabase-backed backend." >&2
     exit 1
 fi
 
@@ -26,18 +26,18 @@ if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
 fi
 
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-    echo "Uni Track requires Node.js 22 and npm. Run vm/setup.sh first." >&2
+    echo "UniTrack requires Node.js 22 and npm. Run vm/setup.sh first." >&2
     exit 1
 fi
 
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 if [[ "$NODE_MAJOR" != "22" ]]; then
-    echo "Uni Track requires Node.js 22; found $(node --version). Run vm/setup.sh first." >&2
+    echo "UniTrack requires Node.js 22; found $(node --version). Run vm/setup.sh first." >&2
     exit 1
 fi
 
 if [[ ! -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
-    echo "Uni Track Python environment is missing. Run vm/setup.sh first." >&2
+    echo "UniTrack Python environment is missing. Run vm/setup.sh first." >&2
     exit 1
 fi
 
@@ -75,7 +75,7 @@ if ! curl --silent --fail "$API_URL/health" >/dev/null 2>&1; then
             break
         fi
         if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
-            echo "Uni Track backend failed to start. See $BACKEND_LOG" >&2
+            echo "UniTrack backend failed to start. See $BACKEND_LOG" >&2
             exit 1
         fi
         sleep 0.5
@@ -83,10 +83,10 @@ if ! curl --silent --fail "$API_URL/health" >/dev/null 2>&1; then
 fi
 
 if ! curl --silent --fail "$API_URL/health" >/dev/null 2>&1; then
-    echo "Uni Track backend did not become ready. See $BACKEND_LOG" >&2
+    echo "UniTrack backend did not become ready. See $BACKEND_LOG" >&2
     exit 1
 fi
 
-echo "Starting Uni Track EDU..."
+echo "Starting UniTrack..."
 cd "$FRONTEND_DIR"
 AEGIS_API_URL="$API_URL" npm start

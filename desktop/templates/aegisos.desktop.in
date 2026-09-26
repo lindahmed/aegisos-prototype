@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=Uni Track
-Comment=Open the personalized Uni Track student workspace
+Name=UniTrack
+Comment=Open your UniTrack student workspace
 Exec=__START_SCRIPT__
 Icon=__ICON__
 Terminal=false

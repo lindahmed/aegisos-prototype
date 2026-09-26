@@ -9,8 +9,8 @@ function createWindow() {
     minWidth: 1000,
     minHeight: 720,
     backgroundColor: '#070f1e',
-    title: 'Uni Track',
-    icon: path.join(__dirname, 'assets', 'unitrack-logo.jpeg'),
+    title: 'UniTrack',
+    icon: path.join(__dirname, 'assets', 'unitrack-mark.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
