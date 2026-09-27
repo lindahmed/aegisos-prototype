@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import {
   validateStudentId,
   type ValidatedStudent,
@@ -40,6 +40,12 @@ interface StoredSession {
 }
 
 const STORAGE_KEY = "aast-portal-auth";
+const SIGNED_OUT: StoredSession = {
+  role: null,
+  portalId: null,
+  academicStudentId: null,
+  student: null,
+};
 
 function readStoredSession(): StoredSession {
   const stored = sessionStorage.getItem(STORAGE_KEY);
@@ -77,6 +83,25 @@ function readStoredSession(): StoredSession {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState(readStoredSession);
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, authSession) => {
+      setSession((current) => {
+        if (!current.role || !current.portalId) return current;
+        const user = authSession?.user;
+        const expectedEmail = idToHiddenEmail(current.role, current.portalId);
+        if (user?.email?.toLowerCase() === expectedEmail &&
+            (current.role !== "staff" ||
+              (user.app_metadata?.portal_role === "staff" &&
+               user.app_metadata?.portal_id === current.portalId))) {
+          return current;
+        }
+        sessionStorage.removeItem(STORAGE_KEY);
+        return SIGNED_OUT;
+      });
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   const login = async (
     selectedRole: PortalRole,
