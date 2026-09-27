@@ -72,14 +72,15 @@ This gives the staff portal and student portal one shared database path for grad
 
 ## Instructor PDFs
 
-The Staff Portal's **Course Materials** page uploads PDFs (maximum 10 MB) to the FastAPI server's private material directory. The Student Portal's **Documents** page lists eligible PDFs and refreshes when focused or every 30 seconds. Course PDFs are visible only to students with a `Current` enrollment; PDFs without a course are visible to all signed-in students. View and download requests check permissions again on the server.
+`backend.portal_pdf_service` handles PDFs separately from the academic API. The Staff Portal's **Course Materials** page accepts PDFs up to 10 MB. Students see them in **Services → New Moodle** as well as **Documents**; both refresh on focus or every 30 seconds. PDF files and JSON metadata live in `workspace/materials/portal-pdfs` by default. No database connection, migration, or academic table change is used.
 
-Setup:
+The current audience is **All students**. Course-specific uploads are disabled until a trusted instructor/course assignment source is provided; they are never silently made public. Only the owning instructor can view or delete a staff PDF. Any confirmed, academic-API-recognized student account can view a general PDF. All file endpoints check Supabase Auth on the server.
 
-1. Configure the backend with `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `AEGIS_STAFF_IDS`, and `AEGIS_MATERIAL_STORAGE_ROOT` (see the repository root `.env.example`). Put the material directory on a persistent private volume in production. Every API replica must access the same volume.
-2. Configure this Vite app from `aast-portal/.env.example` with the same Supabase project and the backend URL. Restart the Vite server after changing env values.
-3. Start the backend; its database initialization creates `portal_pdfs` and `portal_instructor_courses` in PostgreSQL or SQLite. For a manual PostgreSQL deployment, run `database/migrations/add_portal_pdfs.sql` once before deploying the new backend.
-4. Create each staff user in Supabase Auth using the administrator interface with email `<employee_id>@staff.aegisos.local`. Set **app_metadata** (administrator controlled, not user metadata) to `{"portal_role":"staff","portal_id":"<employee_id>"}`. Add the employee ID to `AEGIS_STAFF_IDS`. Existing student Auth accounts must be linked to `user_profiles` in PostgreSQL; the local SQLite prototype requires administrator set `app_metadata` of `{"portal_role":"student","portal_id":"<student_id>"}` on each student account.
-5. Assign real course codes to instructors in the database, for example `INSERT INTO portal_instructor_courses (instructor_id, course_id) VALUES ('104217', 'CAI3101') ON CONFLICT DO NOTHING;`. Use a `course_id` present in the database's `courses` table (or `course_offerings` for SQLite). Staff can upload course PDFs only for assigned courses. A PDF with no course is shared with all signed-in students.
+Local setup:
 
-The old staff demo password endpoint remains for existing integrations, but portal sign-in now uses Supabase Auth for staff. The PDF endpoints never accept the demo password. To verify locally, sign in as an assigned instructor, upload a PDF, then sign in as one enrolled and one unenrolled student and compare the Documents page. `python -m pytest backend/test_portal_pdfs.py -q` exercises upload, storage, visibility, view, download, permissions, deletion, and invalid files.
+1. In the repository root `.env`, set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `AEGIS_STAFF_IDS` (see `.env.example`). The student and staff portals must use the same Supabase project. Do not put the service-role key in the Vite app.
+2. In `aast-portal/.env`, set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_PDF_API_BASE_URL=http://127.0.0.1:8000`. Leave `VITE_API_BASE_URL` unset to keep academic data on the original Railway API. Restart Vite after changing `.env`.
+3. From the repository root, run `python -m uvicorn backend.portal_pdf_service:app --host 127.0.0.1 --port 8000`. Separately run `npm run dev -- --host 127.0.0.1 --port 5174` in `aast-portal`.
+4. Sign in as staff and upload a PDF. Sign in as a student and open **Services → New Moodle** to see it. Run `python -m pytest backend/test_portal_pdf_service.py -q` for automated upload, persistence, visibility, download, deletion, permission, and invalid-file checks.
+
+For students on other devices, deploy this PDF service at a network-accessible HTTPS URL, set `VITE_PDF_API_BASE_URL` to that URL, set `AEGIS_PORTAL_ORIGINS` to the portal origin, and use a persistent private volume for `AEGIS_PDF_STORAGE_ROOT`. A `127.0.0.1` URL works only on the same machine; ephemeral host storage would lose uploaded files.

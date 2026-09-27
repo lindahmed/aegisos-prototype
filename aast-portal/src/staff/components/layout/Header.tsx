@@ -7,6 +7,7 @@ import {
   CalendarDays,
   ClipboardCheck,
   FileClock,
+  FolderOpen,
   GraduationCap,
   ChevronDown,
   ClipboardList,
@@ -24,11 +25,13 @@ import {
 import { staff, notifications } from '@staff/data/mockData'
 import { useAuth } from '@staff/context/AuthContext'
 import LanguageToggle from '@/components/LanguageToggle'
+import { useIconNavTooltip } from '@/components/useIconNavTooltip'
 import { useLanguage } from '@/context/LanguageContext'
 
 const primaryNav = [
   { to: '/', label: 'Dashboard', icon: Home },
   { to: '/courses', label: 'Courses', icon: BookOpen },
+  { to: '/materials', label: 'PDF Materials', icon: FolderOpen },
   { to: '/attendance', label: 'Attendance', icon: ClipboardCheck },
   { to: '/grades', label: 'Grades', icon: GraduationCap },
   { to: '/exams', label: 'Exams', icon: FileClock },
@@ -44,8 +47,10 @@ const primaryNav = [
 
 function NavigationLinks({ mobile = false }: { mobile?: boolean }) {
   const { t } = useLanguage()
+  const { show, hide, tooltipNode } = useIconNavTooltip()
 
   return (
+    <>
     <nav
       aria-label={t('Staff navigation')}
       className={mobile
@@ -57,23 +62,28 @@ function NavigationLinks({ mobile = false }: { mobile?: boolean }) {
           key={item.to}
           to={item.to}
           end={item.to === '/'}
-          title={t(item.label)}
           aria-label={t(item.label)}
-          data-tooltip={mobile ? undefined : t(item.label)}
+          onPointerEnter={(event) => { if (event.pointerType === 'mouse') show(event.currentTarget, t(item.label)) }}
+          onPointerLeave={(event) => { if (event.pointerType === 'mouse') hide() }}
+          onFocus={(event) => show(event.currentTarget, t(item.label))}
+          onBlur={hide}
+          onClick={(event) => show(event.currentTarget, t(item.label), window.matchMedia('(hover: none)').matches)}
           className={({ isActive }) =>
             (mobile
-              ? 'flex min-w-[4.5rem] flex-col items-center gap-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold '
+              ? 'flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border '
               : 'nav-icon-link ') +
             (isActive
               ? (mobile ? 'border-teal-600 bg-teal-600 text-white' : 'nav-icon-link-active')
-              : (mobile ? 'border-border bg-white text-text-secondary hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700' : ''))
+              : (mobile ? 'border-transparent bg-white text-text-secondary hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700' : ''))
           }
         >
           <item.icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
-          <span className={mobile ? '' : 'sr-only'}>{t(item.label)}</span>
+          <span className="sr-only">{t(item.label)}</span>
         </NavLink>
       ))}
     </nav>
+    {tooltipNode}
+    </>
   )
 }
 

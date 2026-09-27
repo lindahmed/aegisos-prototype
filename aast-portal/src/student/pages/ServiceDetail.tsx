@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -9,7 +9,11 @@ import {
   Info,
   LayoutGrid,
   Lightbulb,
+  FileText,
+  Eye,
+  Download,
 } from 'lucide-react'
+import { getStudentPdfs, openPortalPdf, type PortalPdf } from '@/lib/portalPdfs'
 import { services } from '@student/data/servicesData'
 import PageHeader from '@student/components/layout/PageHeader'
 import Card from '@student/components/ui/Card'
@@ -66,6 +70,53 @@ function RedirectPanel({ destinationLabel, note }: { destinationLabel: string; n
       </p>
     </Card>
   )
+}
+
+function NewMoodleMaterials() {
+  const [pdfs, setPdfs] = useState<PortalPdf[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const { showToast } = useToast()
+
+  useEffect(() => {
+    let active = true
+    const refresh = () => {
+      if (document.visibilityState === 'hidden') return
+      getStudentPdfs()
+        .then((items) => { if (active) { setPdfs(items); setError('') } })
+        .catch((reason: Error) => { if (active) setError(reason.message) })
+        .finally(() => { if (active) setLoading(false) })
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    const timer = window.setInterval(refresh, 30_000)
+    return () => { active = false; window.removeEventListener('focus', refresh); window.clearInterval(timer) }
+  }, [])
+
+  async function fileAction(pdf: PortalPdf, download: boolean) {
+    try { await openPortalPdf(pdf, 'student', download) }
+    catch (reason) { showToast(reason instanceof Error ? reason.message : 'Could not open PDF.', 'error') }
+  }
+
+  if (loading) return <p role="status" className="text-sm text-text-secondary">Loading materials…</p>
+  if (error) return <p role="alert" className="rounded-md border border-error/30 bg-red-50 px-4 py-3 text-sm text-error">{error}</p>
+  if (pdfs.length === 0) return <EmptyState icon={<FileText className="h-5 w-5" />} title="No materials posted yet" description="Files uploaded by your instructors will appear here automatically." />
+
+  return <div className="space-y-3">
+    {pdfs.map((pdf) => <Card key={pdf.pdf_id}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="font-medium text-text-primary">{pdf.title}</p>
+          {pdf.description && <p className="mt-1 text-sm text-text-secondary">{pdf.description}</p>}
+          <p className="mt-2 text-xs text-text-muted">{pdf.course_name ?? 'All students'} · Uploaded {new Date(pdf.uploaded_at).toLocaleDateString()}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" icon={<Eye className="h-3.5 w-3.5" />} onClick={() => void fileAction(pdf, false)}>View</Button>
+          <Button size="sm" icon={<Download className="h-3.5 w-3.5" />} onClick={() => void fileAction(pdf, true)}>Download</Button>
+        </div>
+      </div>
+    </Card>)}
+  </div>
 }
 
 function ViewerPanel({ records }: { records: { label: string; value: string }[] }) {
@@ -233,7 +284,9 @@ export default function ServiceDetail() {
       </button>
 
       <div className="mx-auto max-w-2xl">
-        {service.kind === 'redirect' && (
+        {service.slug === 'new-moodle' && <NewMoodleMaterials />}
+
+        {service.kind === 'redirect' && service.slug !== 'new-moodle' && (
           <RedirectPanel destinationLabel={service.destinationLabel ?? service.name} note={service.redirectNote} />
         )}
 

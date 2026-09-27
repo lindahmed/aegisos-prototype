@@ -88,7 +88,7 @@ export default function PdfMaterials() {
           <label className="block text-sm font-medium text-text-primary">Description (optional)
             <textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={3} className="mt-1 w-full rounded-md border border-border-strong bg-white px-3 py-2 text-sm" />
           </label>
-          <label className="block text-sm font-medium text-text-primary">Course (optional)
+          <label className="block text-sm font-medium text-text-primary">Audience
             <select value={courseId} onChange={(event) => setCourseId(event.target.value)} className="mt-1 w-full rounded-md border border-border-strong bg-white px-3 py-2 text-sm">
               <option value="">All students</option>
               {courses.map((course) => <option key={course.course_id} value={course.course_id}>{course.course_id} · {course.course_name}</option>)}

@@ -4,7 +4,6 @@ import {
   type ValidatedStudent,
 } from "@/lib/portalGrades";
 import { supabase, idToHiddenEmail } from "@/lib/supabaseClient";
-import { getInstructorCourses } from "@/lib/portalPdfs";
 
 export type PortalRole = "student" | "staff";
 
@@ -130,16 +129,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: true };
       }
 
-      const { error: staffAuthError } = await supabase.auth.signInWithPassword({
+      const { data: staffAuth, error: staffAuthError } = await supabase.auth.signInWithPassword({
         email: idToHiddenEmail("staff", normalizedId),
         password,
       });
       if (staffAuthError) return { success: false, error: "Incorrect ID or password." };
-      try {
-        await getInstructorCourses();
-      } catch (error) {
+      if (staffAuth.user?.app_metadata?.portal_role !== "staff" ||
+          staffAuth.user?.app_metadata?.portal_id !== normalizedId) {
         await supabase.auth.signOut();
-        throw error;
+        return { success: false, error: "This account is not authorized for staff access." };
       }
       const nextSession: StoredSession = {
         role: "staff",

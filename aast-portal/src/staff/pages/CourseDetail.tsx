@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { FileText, Presentation, Link2, Clock, MapPin, Users, ArrowLeft, Megaphone } from 'lucide-react'
+import { FileText, Presentation, Link2, Clock, MapPin, Users, ArrowLeft, Megaphone, Upload } from 'lucide-react'
 import { courseSections, students } from '@staff/data/mockData'
 import PageHeader from '@staff/components/layout/PageHeader'
 import Card from '@staff/components/ui/Card'
@@ -71,23 +71,34 @@ export default function CourseDetail() {
               )}
 
               {activeTab === 'Materials' && (
-                course.materials.length > 0 ? (
-                  <div className="divide-y divide-border">
-                    {course.materials.map((m, i) => {
-                      const Icon = materialIcon[m.type]
-                      return (
-                        <div key={i} className="flex items-center gap-3 py-3 first:pt-0">
-                          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-teal-50 text-teal-600">
-                            <Icon className="h-4 w-4" />
-                          </div>
-                          <p className="text-sm font-medium text-text-primary">{m.name}</p>
-                        </div>
-                      )
-                    })}
+                <div>
+                  <div className="mb-4 flex flex-col gap-3 rounded-lg border border-teal-100 bg-teal-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-text-primary">Share a PDF with students</p>
+                      <p className="mt-1 text-xs text-text-secondary">Choose an assigned course on the upload page to make it available to enrolled students.</p>
+                    </div>
+                    <Link to="/materials" className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700">
+                      <Upload className="h-4 w-4" /> Upload PDF
+                    </Link>
                   </div>
-                ) : (
-                  <EmptyState icon={<FileText className="h-5 w-5" />} title="No materials posted yet" />
-                )
+                  {course.materials.length > 0 ? (
+                    <div className="divide-y divide-border">
+                      {course.materials.map((m, i) => {
+                        const Icon = materialIcon[m.type]
+                        return (
+                          <div key={i} className="flex items-center gap-3 py-3 first:pt-0">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-teal-50 text-teal-600">
+                              <Icon className="h-4 w-4" />
+                            </div>
+                            <p className="text-sm font-medium text-text-primary">{m.name}</p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <EmptyState icon={<FileText className="h-5 w-5" />} title="No materials posted yet" />
+                  )}
+                </div>
               )}
 
               {activeTab === 'Assignments' && (
