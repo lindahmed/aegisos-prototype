@@ -70,7 +70,7 @@ class PortalPdfStore:
             return self._read(
                 """SELECT pdf.*, c.course_title AS course_name FROM portal_pdfs pdf
                    LEFT JOIN courses c ON c.course_code = pdf.course_id
-                   WHERE pdf.course_id IS NULL OR EXISTS (
+                   WHERE EXISTS (
                        SELECT 1 FROM student_courses enrollment
                        WHERE enrollment.student_id::text = %s
                          AND enrollment.course_code = pdf.course_id
@@ -81,7 +81,7 @@ class PortalPdfStore:
         return self._read(
             """SELECT pdf.*, offering.course_name FROM portal_pdfs pdf
                LEFT JOIN course_offerings offering ON offering.course_id = pdf.course_id
-               WHERE pdf.course_id IS NULL OR EXISTS (
+               WHERE EXISTS (
                    SELECT 1 FROM courses enrollment
                    WHERE enrollment.student_id = ?
                      AND enrollment.course_name = offering.course_name

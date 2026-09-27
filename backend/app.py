@@ -843,17 +843,19 @@ def create_app(
         file: UploadFile = File(...),
         title: str = Form(...),
         description: str = Form(""),
-        course_id: str = Form(""),
+        course_id: str = Form(...),
         instructor_id: str = Depends(require_staff),
     ) -> dict[str, object]:
         clean_title = title.strip()
         clean_description = description.strip()
-        clean_course_id = course_id.strip() or None
+        clean_course_id = course_id.strip()
         if not clean_title or len(clean_title) > 160:
             raise HTTPException(status_code=422, detail="Title must be 1–160 characters")
         if len(clean_description) > 2000:
             raise HTTPException(status_code=422, detail="Description must be at most 2000 characters")
-        if clean_course_id and clean_course_id not in {
+        if not clean_course_id:
+            raise HTTPException(status_code=422, detail="Choose a course for this PDF")
+        if clean_course_id not in {
             item["course_id"] for item in pdf_store.instructor_courses(instructor_id)
         }:
             raise HTTPException(status_code=403, detail="You are not assigned to this course")

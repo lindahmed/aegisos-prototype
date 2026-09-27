@@ -37,7 +37,7 @@ export default function PdfMaterials() {
 
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!file || !title.trim()) { setError('Choose a PDF and enter a title.'); return }
+    if (!file || !title.trim() || !courseId) { setError('Choose a course, PDF, and title.'); return }
     if (file.size > 10 * 1024 * 1024 || !file.name.toLowerCase().endsWith('.pdf')) {
       setError('Choose a PDF file no larger than 10 MB.')
       return
@@ -89,8 +89,8 @@ export default function PdfMaterials() {
             <textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={3} className="mt-1 w-full rounded-md border border-border-strong bg-white px-3 py-2 text-sm" />
           </label>
           <label className="block text-sm font-medium text-text-primary">Audience
-            <select value={courseId} onChange={(event) => setCourseId(event.target.value)} className="mt-1 w-full rounded-md border border-border-strong bg-white px-3 py-2 text-sm">
-              <option value="">All students</option>
+            <select value={courseId} onChange={(event) => setCourseId(event.target.value)} required className="mt-1 w-full rounded-md border border-border-strong bg-white px-3 py-2 text-sm">
+              <option value="" disabled>Select a course</option>
               {courses.map((course) => <option key={course.course_id} value={course.course_id}>{course.course_id} · {course.course_name}</option>)}
             </select>
           </label>

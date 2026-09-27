@@ -1,8 +1,7 @@
 import { API_BASE_URL } from '@/lib/portalGrades'
 import { supabase } from '@/lib/supabaseClient'
 
-// PDF files live on a separate service; academic/student data keeps its original API.
-const PDF_API_BASE_URL = import.meta.env.VITE_PDF_API_BASE_URL?.replace(/\/+$/, '') || API_BASE_URL
+const PDF_API_BASE_URL = API_BASE_URL
 
 export interface PortalPdf {
   pdf_id: string
@@ -31,7 +30,7 @@ async function authenticatedRequest(path: string, init?: RequestInit): Promise<R
       headers: { ...init?.headers, Authorization: `Bearer ${session.access_token}` },
     })
   } catch {
-    throw new Error('PDF service is unavailable. Please try again when the file server is running.')
+    throw new Error('PDF service is unavailable. Please try again shortly.')
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { detail?: string } | null

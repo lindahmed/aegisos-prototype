@@ -125,23 +125,25 @@ def test_rejects_unassigned_course_invalid_and_oversize_files(portal):
     assert upload(client, actor="other-staff").status_code == 403
     assert client.post(
         "/portal/pdfs/staff", headers=headers("staff"),
-        data={"title": "Bad"}, files={"file": ("bad.pdf", b"not a PDF", "application/pdf")},
+        data={"title": "Bad", "course_id": "ai"},
+        files={"file": ("bad.pdf", b"not a PDF", "application/pdf")},
     ).status_code == 422
     assert client.post(
         "/portal/pdfs/staff", headers=headers("staff"),
-        data={"title": "Bad"}, files={"file": ("bad.txt", pdf_bytes(), "text/plain")},
+        data={"title": "Bad", "course_id": "ai"},
+        files={"file": ("bad.txt", pdf_bytes(), "text/plain")},
     ).status_code == 422
     assert client.post(
         "/portal/pdfs/staff", headers=headers("staff"),
-        data={"title": "Too large"},
+        data={"title": "Too large", "course_id": "ai"},
         files={"file": ("large.pdf", pdf_bytes() + b"x" * (10 * 1024 * 1024), "application/pdf")},
     ).status_code == 413
     assert client.get("/portal/pdfs/staff", headers=headers("invalid")).status_code == 401
     assert client.get("/portal/pdfs/staff", headers=headers("forged-staff")).status_code == 403
 
 
-def test_general_pdf_visible_to_all_students(portal):
+def test_pdf_requires_a_course(portal):
     client, _ = portal
     response = upload(client, course="")
-    assert response.status_code == 201
-    assert len(client.get("/portal/pdfs/student", headers=headers("other-student")).json()["pdfs"]) == 1
+    assert response.status_code == 422
+    assert client.get("/portal/pdfs/student", headers=headers("other-student")).json()["pdfs"] == []
