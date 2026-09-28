@@ -13,9 +13,11 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController studentIdController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
   final ApiService apiService = ApiService();
 
   bool isLoading = false;
+  bool obscurePassword = true;
   String? errorMessage;
 
   Future<void> login() async {
@@ -25,6 +27,11 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => errorMessage = 'Enter your student ID.');
       return;
     }
+    final password = passwordController.text;
+    if (password.isEmpty) {
+      setState(() => errorMessage = 'Enter your password.');
+      return;
+    }
 
     setState(() {
       isLoading = true;
@@ -32,7 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final student = await apiService.getStudent(studentId);
+      final student = await apiService.loginStudent(studentId, password);
       if (!mounted) return;
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
@@ -55,6 +62,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     studentIdController.dispose();
+    passwordController.dispose();
     apiService.close();
     super.dispose();
   }
@@ -154,15 +162,47 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 20),
                           TextField(
+                            key: const Key('login-student-id'),
                             controller: studentIdController,
                             keyboardType: TextInputType.text,
-                            textInputAction: TextInputAction.done,
+                            textInputAction: TextInputAction.next,
                             autofillHints: const [AutofillHints.username],
-                            onSubmitted: isLoading ? null : (_) => login(),
                             decoration: InputDecoration(
                               labelText: 'Student ID',
                               hintText: 'STU001',
                               prefixIcon: const Icon(Icons.badge_outlined),
+                              filled: true,
+                              fillColor: colors.surfaceContainerHighest,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(18),
+                                borderSide: BorderSide.none,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          TextField(
+                            key: const Key('login-password'),
+                            controller: passwordController,
+                            obscureText: obscurePassword,
+                            textInputAction: TextInputAction.done,
+                            autofillHints: const [AutofillHints.password],
+                            onSubmitted: isLoading ? null : (_) => login(),
+                            decoration: InputDecoration(
+                              labelText: 'Password',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                tooltip: obscurePassword
+                                    ? 'Show password'
+                                    : 'Hide password',
+                                onPressed: () => setState(
+                                  () => obscurePassword = !obscurePassword,
+                                ),
+                                icon: Icon(
+                                  obscurePassword
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                              ),
                               filled: true,
                               fillColor: colors.surfaceContainerHighest,
                               border: OutlineInputBorder(
@@ -187,6 +227,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           SizedBox(
                             height: 54,
                             child: FilledButton.icon(
+                              key: const Key('login-submit'),
                               onPressed: isLoading ? null : login,
                               style: FilledButton.styleFrom(
                                 backgroundColor: uniTrackBlue,

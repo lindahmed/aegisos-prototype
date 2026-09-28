@@ -8,6 +8,65 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('student login sends the password and returns the student', () async {
+    final service = ApiService(
+      client: MockClient((request) async {
+        expect(request.method, 'POST');
+        expect(
+          request.url.toString(),
+          'https://api.example.test/student/login',
+        );
+        expect(jsonDecode(request.body), {
+          'student_id': '231027905',
+          'password': 'secret-password',
+        });
+        return http.Response(
+          jsonEncode({
+            'student_id': '231027905',
+            'name': 'Test Student',
+            'major': 'Computer Science',
+            'year': 3,
+            'gpa': 3.8,
+            'courses': <String>[],
+          }),
+          200,
+        );
+      }),
+      baseUrl: 'https://api.example.test',
+    );
+
+    final student = await service.loginStudent(
+      ' 231027905 ',
+      'secret-password',
+    );
+    expect(student.studentId, '231027905');
+    service.close();
+  });
+
+  test('student login reports incorrect credentials', () async {
+    final service = ApiService(
+      client: MockClient(
+        (_) async => http.Response(
+          '{"detail":"Incorrect student ID or password."}',
+          401,
+        ),
+      ),
+      baseUrl: 'https://api.example.test',
+    );
+
+    await expectLater(
+      service.loginStudent('231027905', 'wrong'),
+      throwsA(
+        isA<ApiException>().having(
+          (error) => error.message,
+          'message',
+          'Incorrect student ID or password.',
+        ),
+      ),
+    );
+    service.close();
+  });
+
   test('coalesces in-flight reads and reuses a fresh response', () async {
     var requestCount = 0;
     final firstResponse = Completer<http.Response>();

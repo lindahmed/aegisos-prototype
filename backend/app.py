@@ -118,6 +118,11 @@ class PortalStaffLoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class StudentLoginRequest(BaseModel):
+    student_id: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+
+
 class WeeklyPlanStatusRequest(BaseModel):
     status: Literal["pending", "completed"]
 
@@ -747,6 +752,17 @@ def create_app(
     @api.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @api.post("/student/login")
+    def login_student(request: StudentLoginRequest) -> dict[str, object]:
+        student = repository.authenticate_student(
+            request.student_id, request.password
+        )
+        if student is None:
+            raise HTTPException(
+                status_code=401, detail="Incorrect student ID or password."
+            )
+        return student.as_dict()
 
     @api.get("/student/{student_id}")
     def get_student(student_id: str) -> dict[str, object]:

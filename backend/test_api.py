@@ -75,6 +75,34 @@ def test_unknown_student_is_rejected(tmp_path: Path) -> None:
     assert response.status_code == 404
 
 
+def test_student_login_checks_the_database_password(tmp_path: Path) -> None:
+    database_path = tmp_path / "aegisos.db"
+    client = TestClient(
+        create_app(
+            db_path=database_path,
+            workspace_root=tmp_path / "students",
+        )
+    )
+    from database.repository import StudentRepository
+
+    repository = StudentRepository(database_path)
+    repository.set_student_password("231027905", "correct-password")
+
+    accepted = client.post(
+        "/student/login",
+        json={"student_id": "231027905", "password": "correct-password"},
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["student_id"] == "231027905"
+
+    rejected = client.post(
+        "/student/login",
+        json={"student_id": "231027905", "password": "wrong-password"},
+    )
+    assert rejected.status_code == 401
+    assert rejected.json()["detail"] == "Incorrect student ID or password."
+
+
 def test_student_and_professor_messages_share_one_inbox(tmp_path: Path) -> None:
     client = make_client(tmp_path)
 

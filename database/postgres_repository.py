@@ -468,6 +468,31 @@ class PostgresStudentRepository:
             ),
         )
 
+    def authenticate_student(self, student_id: str, password: str) -> Student | None:
+        """Verify a student against the existing Supabase Auth password hash."""
+        normalized_id = student_id.strip()
+        if not normalized_id or not password:
+            return None
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT 1
+                    FROM public.students s
+                    JOIN auth.users u
+                      ON split_part(lower(u.email), '@', 1) =
+                         lower(s.student_id::text)
+                    WHERE s.student_id::text = %s
+                      AND u.encrypted_password IS NOT NULL
+                      AND u.encrypted_password = crypt(%s, u.encrypted_password)
+                    LIMIT 1
+                    """,
+                    (normalized_id, password),
+                )
+                if cursor.fetchone() is None:
+                    return None
+        return self.get_student(normalized_id)
+
     def get_registered_students(self) -> list[Student]:
         with self._connect() as connection:
             with connection.cursor() as cursor:

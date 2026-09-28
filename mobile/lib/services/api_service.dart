@@ -33,7 +33,7 @@ class ApiService {
   /// --dart-define=API_BASE_URL=https://api.example.com
   static const String defaultBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://web-production-3a6ad.up.railway.app',
+    defaultValue: 'https://backend-production-6069.up.railway.app',
   );
 
   /// One keep-alive client is reused across login and every student screen.
@@ -136,6 +136,66 @@ class ApiService {
 
     throw ApiException(
       'The server could not sign you in (${response.statusCode}).',
+    );
+  }
+
+  Future<Student> loginStudent(String studentId, String password) async {
+    final normalizedId = studentId.trim();
+    if (normalizedId.isEmpty) {
+      throw const ApiException('Enter your student ID.');
+    }
+    if (password.isEmpty) {
+      throw const ApiException('Enter your password.');
+    }
+
+    final parsedBaseUrl = Uri.parse(baseUrl);
+    final uri = parsedBaseUrl.replace(
+      pathSegments: [
+        ...parsedBaseUrl.pathSegments.where((segment) => segment.isNotEmpty),
+        'student',
+        'login',
+      ],
+    );
+
+    late http.Response response;
+    try {
+      response = await _client
+          .post(
+            uri,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'student_id': normalizedId,
+              'password': password,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+    } on Exception {
+      throw const ApiException(
+        'Could not reach UNI Track. Check your connection and try again.',
+      );
+    }
+
+    if (response.statusCode == 200) {
+      try {
+        return Student.fromJson(
+          jsonDecode(response.body) as Map<String, dynamic>,
+        );
+      } on FormatException {
+        throw const ApiException('The server returned an invalid response.');
+      } on TypeError {
+        throw const ApiException(
+          'The server returned an invalid student record.',
+        );
+      }
+    }
+    if (response.statusCode == 401) {
+      throw const ApiException('Incorrect student ID or password.');
+    }
+    throw ApiException(
+      _errorDetail(
+        response,
+        'The server could not sign you in (${response.statusCode}).',
+      ),
     );
   }
 

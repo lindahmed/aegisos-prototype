@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import hmac
 import json
+import secrets
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -55,6 +58,11 @@ class StudentRepository:
                     major TEXT NOT NULL,
                     year INTEGER NOT NULL,
                     gpa REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS student_credentials (
+                    student_id TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    FOREIGN KEY (student_id) REFERENCES students(student_id)
                 );
                 CREATE TABLE IF NOT EXISTS courses (
                     student_id TEXT NOT NULL,
@@ -566,6 +574,53 @@ class StudentRepository:
             gpa=row["gpa"],
             courses=tuple(course["course_name"] for course in course_rows),
         )
+
+    def set_student_password(self, student_id: str, password: str) -> None:
+        """Set a local-development password without storing it in plain text."""
+        normalized_id = student_id.strip()
+        if not normalized_id or not password:
+            raise ValueError("Student ID and password are required")
+        salt = secrets.token_bytes(16)
+        iterations = 390_000
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt, iterations
+        )
+        encoded = f"pbkdf2_sha256${iterations}${salt.hex()}${digest.hex()}"
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO student_credentials (student_id, password_hash)
+                   VALUES (?, ?)
+                   ON CONFLICT(student_id) DO UPDATE
+                   SET password_hash = excluded.password_hash""",
+                (normalized_id, encoded),
+            )
+
+    def authenticate_student(self, student_id: str, password: str) -> Student | None:
+        normalized_id = student_id.strip()
+        if not normalized_id or not password:
+            return None
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT password_hash FROM student_credentials WHERE student_id = ?",
+                (normalized_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            algorithm, iterations, salt_hex, expected_hex = row["password_hash"].split("$")
+            if algorithm != "pbkdf2_sha256":
+                return None
+            actual = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                bytes.fromhex(salt_hex),
+                int(iterations),
+            )
+        except (TypeError, ValueError):
+            return None
+        if not hmac.compare_digest(actual.hex(), expected_hex):
+            return None
+        return self.get_student(normalized_id)
 
     def get_registered_students(self) -> list[Student]:
         with self._connect() as connection:

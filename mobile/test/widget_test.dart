@@ -12,7 +12,21 @@ void main() {
     expect(find.text('UNI TRACK'), findsOneWidget);
     expect(find.text('Guide. Track. Evolve.'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Student ID'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Password'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Sign in'), findsOneWidget);
+  });
+
+  testWidgets('requires a password after the student ID', (tester) async {
+    await tester.pumpWidget(const UniTrackApp());
+
+    await tester.enterText(
+      find.byKey(const Key('login-student-id')),
+      '231027905',
+    );
+    await tester.tap(find.byKey(const Key('login-submit')));
+    await tester.pump();
+
+    expect(find.text('Enter your password.'), findsOneWidget);
   });
 
   testWidgets('requires a student ID before calling the API', (tester) async {

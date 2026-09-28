@@ -357,7 +357,7 @@ class _GradeCard extends StatelessWidget {
             ),
           ),
           Divider(height: 1, color: _border),
-                    IntrinsicHeight(
+          IntrinsicHeight(
             child: Row(
               children: [
                 Expanded(
@@ -387,16 +387,6 @@ class _GradeCard extends StatelessWidget {
         ],
       ),
     );
-  }
-
-   static String _detailLine(StudentGradeRecord record) {
-    if (record.gradeSource == 'transcript') {
-      return 'Stored transcript grade · component marks are not available';
-    }
-    if (record.gradeSource == 'none') {
-      return 'No grade has been posted for this course yet';
-    }
-    return 'Final grade posted';
   }
 }
 
