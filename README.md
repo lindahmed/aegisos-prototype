@@ -15,7 +15,7 @@ The Android app should talk to the FastAPI backend, not directly to the database
 
 ## Desktop message attachments
 
-Open Inbox, choose a classmate, and click the paperclip beside the message field to share a document. The composer shows the filename and size and lets you remove it before sending. A document can be sent alone or with a message; the recipient downloads it from the conversation.
+Open Inbox to see classmates in your major; search by name or student ID. Enter another registered student’s full ID to open a conversation with them immediately. Click the paperclip beside the message field to share a document. The composer shows the filename and size and lets you remove it before sending. A document can be sent alone or with a message; the recipient downloads it from the conversation.
 
 Supported formats are PDF, Word, Excel, PowerPoint, text, CSV, RTF, and OpenDocument, up to 10 MB per document. Document contents and metadata are stored together in the shared message database, so students on different computers connected to the same database can download them. The SQLite and PostgreSQL migrations run automatically when the backend starts; existing messages are preserved.
 

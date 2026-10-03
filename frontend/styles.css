@@ -840,6 +840,7 @@ button:disabled { cursor: wait; opacity: 0.55; }
 .calendar-agenda-heading h4 { font-size: 17px; }
 .calendar-legend, .calendar-delete-button, .calendar-completed { font-size: 13px; }
 .conversation-sidebar input, .message-compose-form textarea { font-size: 16px; }
+.message-search-help { margin: 8px 0; color: var(--text-faint); font-size: 12px; line-height: 1.45; }
 .message { font-size: 15px; }
 
 ::-webkit-scrollbar { width: 9px; }

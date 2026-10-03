@@ -321,8 +321,9 @@
             </div>
             <div class="messages-layout">
               <aside class="conversation-sidebar">
-                <label class="message-search-label" for="message-search">Find a classmate or professor</label>
-                <input id="message-search" type="search" placeholder="Search people" autocomplete="off">
+                <label class="message-search-label" for="message-search">Find a classmate by name or student ID</label>
+                <input id="message-search" type="search" placeholder="Name or student ID" autocomplete="off" aria-describedby="message-search-help">
+                <p id="message-search-help" class="message-search-help">Showing classmates in your major. Enter any registered student’s full ID to start a chat.</p>
                 <div id="conversation-list" class="conversation-list"></div>
               </aside>
               <section class="conversation-pane" aria-live="polite">

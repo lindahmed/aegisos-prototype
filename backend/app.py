@@ -726,6 +726,7 @@ def create_app(
                 "type": "student",
                 "id": student.student_id,
                 "name": student.name,
+                "major": student.major,
                 "subtitle": f"Year {student.year} · {student.major}",
             }
         if normalized_id not in allowed_staff_ids:
@@ -782,6 +783,7 @@ def create_app(
                 "type": "student",
                 "id": student.student_id,
                 "name": student.name,
+                "major": student.major,
                 "subtitle": f"Year {student.year} · {student.major}",
             }
             for student in repository.get_registered_students()

@@ -985,8 +985,15 @@ function renderConversationList() {
       subtitle: 'Messages sent to all students',
     });
   }
-  const visible = contacts.filter((contact) =>
-    `${contact.name} ${contact.subtitle}`.toLowerCase().includes(query));
+  const visible = contacts.filter((contact) => {
+    const isStudent = contact.type === 'student';
+    const sameMajor = isStudent
+      && contact.major?.trim().toLowerCase() === currentStudent?.major?.trim().toLowerCase();
+    const matchesQuery = `${contact.name} ${contact.id} ${contact.subtitle}`
+      .toLowerCase().includes(query);
+    const exactStudentId = isStudent && contact.id.toLowerCase() === query;
+    return isStudent ? exactStudentId || (sameMajor && matchesQuery) : matchesQuery;
+  });
   visible.sort((left, right) => {
     const leftLatest = messagesForContact(left).at(-1)?.created_at || '';
     const rightLatest = messagesForContact(right).at(-1)?.created_at || '';
@@ -997,7 +1004,9 @@ function renderConversationList() {
   if (visible.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'conversation-list-empty';
-    empty.textContent = query ? 'No people match your search.' : 'No contacts are available.';
+    empty.textContent = query
+      ? 'No classmate matches. Enter a registered student’s full ID to start a chat.'
+      : 'No classmates in your major are available yet.';
     conversationList.append(empty);
     return;
   }
@@ -1127,6 +1136,17 @@ function selectMessageConversation(contact) {
 }
 
 
+function openStudentConversationById() {
+  const enteredId = messageSearch.value.trim().toLowerCase();
+  if (!enteredId) return;
+  const exactMatch = messageContacts.find((contact) =>
+    contact.type === 'student' && contact.id.toLowerCase() === enteredId);
+  if (exactMatch && contactKey(selectedMessageContact || {}) !== contactKey(exactMatch)) {
+    selectMessageConversation(exactMatch);
+  }
+}
+
+
 async function refreshMessages(showErrors = false) {
   if (!currentStudent) return;
   try {
@@ -1144,6 +1164,7 @@ async function refreshMessages(showErrors = false) {
       ].find((contact) => contactKey(contact) === contactKey(selectedMessageContact)) || null;
     }
     renderConversationList();
+    if (!selectedMessageContact) openStudentConversationById();
     if (selectedMessageContact) {
       renderMessageThread();
       markSelectedConversationRead();
@@ -1261,11 +1282,26 @@ async function downloadMessageDocument(item, button) {
 
 inboxButton.addEventListener('click', () => showDashboardSection('messages'));
 document.querySelector('#new-message-button').addEventListener('click', () => {
+  selectedMessageContact = null;
+  clearMessageAttachment();
+  messageComposeInput.value = '';
+  messageComposeForm.hidden = true;
+  conversationTitle.textContent = 'Choose a conversation';
+  conversationSubtitle.textContent = 'Search classmates in your major or enter any student’s full ID.';
+  messageThread.replaceChildren();
+  const empty = document.createElement('div');
+  empty.className = 'message-thread-empty';
+  empty.innerHTML = '<strong>Start a conversation</strong><span>Choose a classmate or search any registered student by ID.</span>';
+  messageThread.append(empty);
   messageSearch.value = '';
+  setMessage(messageStatus, '');
   renderConversationList();
   messageSearch.focus();
 });
-messageSearch.addEventListener('input', renderConversationList);
+messageSearch.addEventListener('input', () => {
+  renderConversationList();
+  openStudentConversationById();
+});
 messageComposeForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!currentStudent || !selectedMessageContact || selectedMessageContact.type === 'broadcast') return;
