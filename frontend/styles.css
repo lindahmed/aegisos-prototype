@@ -841,6 +841,8 @@ button:disabled { cursor: wait; opacity: 0.55; }
 .calendar-legend, .calendar-delete-button, .calendar-completed { font-size: 13px; }
 .conversation-sidebar input, .message-compose-form textarea { font-size: 16px; }
 .message-search-help { margin: 8px 0; color: var(--text-faint); font-size: 12px; line-height: 1.45; }
+.message-search-status { margin: 8px 0; font-size: 13px; }
+.message-search-status:empty { display: none; }
 .message { font-size: 15px; }
 
 ::-webkit-scrollbar { width: 9px; }

@@ -634,6 +634,17 @@ class StudentRepository:
             student_ids = [row["student_id"] for row in connection.execute("SELECT student_id FROM students ORDER BY student_id")]
         return [student for student_id in student_ids if (student := self.get_student(student_id)) is not None]
 
+    def list_message_students(self) -> list[dict[str, str]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT student_id, name, major, year FROM students ORDER BY name, student_id"
+            ).fetchall()
+        return [
+            {"type": "student", "id": str(row["student_id"]), "name": row["name"],
+             "major": row["major"], "subtitle": f'Year {row["year"]} · {row["major"]}'}
+            for row in rows
+        ]
+
     def create_portal_message(
         self, message: dict[str, Any], *, attachment_content: bytes | None = None
     ) -> dict[str, Any]:

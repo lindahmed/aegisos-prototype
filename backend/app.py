@@ -779,15 +779,8 @@ def create_app(
     def get_message_contacts(actor_type: Literal["student", "staff"], actor_id: str) -> dict[str, object]:
         actor = messaging_participant(actor_type, actor_id)
         students = [
-            {
-                "type": "student",
-                "id": student.student_id,
-                "name": student.name,
-                "major": student.major,
-                "subtitle": f"Year {student.year} · {student.major}",
-            }
-            for student in repository.get_registered_students()
-            if not (actor_type == "student" and student.student_id == actor["id"])
+            student for student in repository.list_message_students()
+            if not (actor_type == "student" and student["id"] == actor["id"])
         ]
         contacts = students
         if actor_type == "student":

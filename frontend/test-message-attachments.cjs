@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const { _electron } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 const root = path.resolve(__dirname, '..');
@@ -39,6 +39,9 @@ async function main() {
     },
   });
   await waitForApi();
+  execFileSync(process.env.TEST_PYTHON || 'python', ['-c',
+    'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute("INSERT INTO students (student_id,name,major,year,gpa) VALUES (?,?,?,?,?)", ("231006157","Directory Test Student","Cybersecurity",3,3.5)); c.commit(); c.close()',
+    path.join(runDir, 'test.db')], { windowsHide: true });
   console.log('Isolated test API ready');
   electron = await _electron.launch({
     executablePath: require('electron'),
@@ -70,6 +73,59 @@ async function main() {
   const contacts = await (await fetch(`${api}/messages/contacts?actor_type=student&actor_id=231027905`)).json();
   const recipient = contacts.contacts.find(contact => contact.id === '231027906');
   const third = contacts.contacts.find(contact => contact.id === '231027907');
+  await page.locator('.conversation-item').filter({ hasText: recipient.name }).waitFor();
+  assert.equal(await page.locator('.conversation-item').filter({ hasText: third.name }).count(), 0);
+  console.log('PASS: same-major classmates appear and other majors are hidden by default');
+
+  // Simulate a running backend that returns the older contact shape without major.
+  await page.route('**/messages/contacts?**', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ ...contacts,
+      contacts: contacts.contacts.map(({ major, ...contact }) => contact) }),
+  }));
+  let releaseInbox;
+  let inboxReleased = false;
+  const delayedInbox = new Promise(resolve => { releaseInbox = resolve; });
+  await page.route('**/messages?**', async route => {
+    await delayedInbox;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ messages: [] }) });
+  });
+  await page.locator('#sign-out-button').click();
+  await login('231027905');
+  await page.locator('.conversation-item').filter({ hasText: recipient.name }).waitFor();
+  assert.equal(inboxReleased, false);
+  inboxReleased = true;
+  releaseInbox();
+  await page.unroute('**/messages?**');
+  await page.unroute('**/messages/contacts?**');
+  console.log('PASS: classmates load with older backend responses without waiting for the inbox');
+
+  // A failed inbox request must not prevent direct student-ID lookup.
+  await page.route('**/messages/contacts?**', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Directory unavailable' }),
+  }));
+  await page.route('**/messages?**', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Inbox unavailable' }),
+  }));
+  await page.locator('#sign-out-button').click();
+  await login('231027905');
+  await page.locator('#message-search').fill('2310006157');
+  await page.waitForFunction(() => document.querySelector('#message-search-status').textContent.includes('No registered student has ID 2310006157'));
+  await page.locator('#message-search').fill('231006157');
+  await page.waitForFunction(() => document.querySelector('#conversation-title').textContent === 'Directory Test Student');
+  assert(await page.locator('#message-compose-input').isVisible());
+  await page.locator('#message-compose-input').fill('Direct ID lookup works');
+  const directSend = page.waitForResponse(response => response.url().endsWith('/messages') && response.request().method() === 'POST');
+  await page.locator('#message-send-button').click();
+  assert.equal((await (await directSend).json()).message.recipient_id, '231006157');
+  await page.waitForFunction(() => !document.querySelector('#message-send-button').disabled);
+  const received = await (await fetch(`${api}/messages?actor_type=student&actor_id=231006157`)).json();
+  assert(received.messages.some(message => message.body === 'Direct ID lookup works'));
+  console.log('PASS: screenshot typo gives an explicit error; correct ID opens and sends even when directory and inbox fail');
+  await page.unroute('**/messages/contacts?**');
+  await page.unroute('**/messages?**');
+  await page.locator('#inbox-button').click();
+  await page.locator('#new-message-button').click();
+  await page.locator('.conversation-item').filter({ hasText: recipient.name }).waitFor();
   await page.locator('.conversation-item').filter({ hasText: recipient.name }).click();
   const paperclip = page.getByRole('button', { name: 'Attach document', exact: true });
   assert(await paperclip.isVisible(), 'Paperclip must be visible in the composer');
@@ -91,9 +147,11 @@ async function main() {
   await page.getByRole('button', { name: 'Remove attachment' }).click();
   assert(await page.locator('#message-attachment-preview').isHidden());
   await selectFile('lecture-notes.txt');
-  await page.locator('.conversation-item').filter({ hasText: third.name }).click();
+  await page.locator('#message-search').fill(third.id);
+  await page.waitForFunction(name => document.querySelector('#conversation-title').textContent === name, third.name);
   assert(await page.locator('#message-attachment-preview').isHidden(), 'Switching recipient must clear attachment');
-  await page.locator('.conversation-item').filter({ hasText: recipient.name }).click();
+  await page.locator('#message-search').fill(recipient.id);
+  await page.waitForFunction(name => document.querySelector('#conversation-title').textContent === name, recipient.name);
   console.log('PASS: selected-file preview, remove, and conversation switch');
 
   await selectFile('unsafe.exe');

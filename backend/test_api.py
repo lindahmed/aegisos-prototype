@@ -157,6 +157,27 @@ def test_student_and_professor_messages_share_one_inbox(tmp_path: Path) -> None:
     assert next(message for message in refreshed if message["message_id"] == direct_id)["read"] is True
 
 
+def test_message_directory_does_not_load_full_profiles(tmp_path, monkeypatch):
+    from database.repository import StudentRepository
+
+    def fail_if_loading_full_profiles(_self):
+        raise AssertionError("The messaging directory must use its lightweight query")
+
+    monkeypatch.setattr(StudentRepository, "get_registered_students", fail_if_loading_full_profiles)
+    client = make_client(tmp_path)
+    response = client.get("/messages/contacts", params={
+        "actor_type": "student", "actor_id": "231027905",
+    })
+    assert response.status_code == 200
+    students = {contact["id"]: contact for contact in response.json()["contacts"]
+                if contact["type"] == "student"}
+    assert "231027905" not in students
+    assert students["231027906"]["major"] == "Computer Science"
+    assert students["231027907"]["major"] == "Cybersecurity"
+    assert client.get("/student/231027907").status_code == 200
+    assert client.get("/student/2310006157").status_code == 404
+
+
 def test_professor_broadcast_reaches_every_student(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     response = client.post(

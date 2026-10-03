@@ -502,6 +502,20 @@ class PostgresStudentRepository:
                 ids = [row["student_id"] for row in cursor.fetchall()]
         return [student for student_id in ids if (student := self.get_student(student_id))]
 
+    def list_message_students(self) -> list[dict[str, str]]:
+        rows = self._fetch_all(
+            """SELECT s.student_id::text AS id, s.full_name AS name,
+                      m.major_name AS major, s.academic_level AS year
+               FROM students s JOIN majors m ON m.program_id = s.program_id
+               ORDER BY s.full_name, s.student_id""",
+            (),
+        )
+        return [
+            {"type": "student", "id": str(row["id"]), "name": row["name"],
+             "major": row["major"], "subtitle": f'Year {row["year"]} · {row["major"]}'}
+            for row in rows
+        ]
+
     def create_portal_message(
         self, message: dict[str, Any], *, attachment_content: bytes | None = None
     ) -> dict[str, Any]:

@@ -174,7 +174,9 @@ async function apiRequest(path, options = {}) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.detail || `Request failed (${response.status})`);
+    const error = new Error(payload.detail || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -196,7 +198,9 @@ async function academicApiRequest(path, options = {}) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.detail || `Request failed (${response.status})`);
+    const error = new Error(payload.detail || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -917,6 +921,7 @@ const conversationTitle = document.querySelector('#conversation-title');
 const conversationSubtitle = document.querySelector('#conversation-subtitle');
 const messageThread = document.querySelector('#message-thread');
 const messageSearch = document.querySelector('#message-search');
+const messageSearchStatus = document.querySelector('#message-search-status');
 const messageComposeForm = document.querySelector('#message-compose-form');
 const messageComposeInput = document.querySelector('#message-compose-input');
 const messageSendButton = document.querySelector('#message-send-button');
@@ -935,6 +940,10 @@ let messageContacts = [];
 let campusMessages = [];
 let selectedMessageContact = null;
 let messageTimer = null;
+let messageStudentLookupTimer = null;
+let messageStudentLookupSequence = 0;
+let messageStudentLookupId = null;
+const lookedUpMessageContacts = new Map();
 
 
 function contactKey(contact) {
@@ -987,11 +996,12 @@ function renderConversationList() {
   }
   const visible = contacts.filter((contact) => {
     const isStudent = contact.type === 'student';
+    const major = contact.major || contact.subtitle?.split('·').at(-1) || '';
     const sameMajor = isStudent
-      && contact.major?.trim().toLowerCase() === currentStudent?.major?.trim().toLowerCase();
+      && major.trim().toLowerCase() === currentStudent?.major?.trim().toLowerCase();
     const matchesQuery = `${contact.name} ${contact.id} ${contact.subtitle}`
       .toLowerCase().includes(query);
-    const exactStudentId = isStudent && contact.id.toLowerCase() === query;
+    const exactStudentId = isStudent && String(contact.id).toLowerCase() === query;
     return isStudent ? exactStudentId || (sameMajor && matchesQuery) : matchesQuery;
   });
   visible.sort((left, right) => {
@@ -1138,39 +1148,95 @@ function selectMessageConversation(contact) {
 
 function openStudentConversationById() {
   const enteredId = messageSearch.value.trim().toLowerCase();
-  if (!enteredId) return;
-  const exactMatch = messageContacts.find((contact) =>
-    contact.type === 'student' && contact.id.toLowerCase() === enteredId);
-  if (exactMatch && contactKey(selectedMessageContact || {}) !== contactKey(exactMatch)) {
-    selectMessageConversation(exactMatch);
+  if (!enteredId || !currentStudent || messageSending) return;
+  if (enteredId === String(currentStudent.student_id).toLowerCase()) {
+    setMessage(messageSearchStatus, 'This is your own student ID. Enter another student’s ID.', true);
+    return;
   }
+  const exactMatch = messageContacts.find((contact) =>
+    contact.type === 'student' && String(contact.id).toLowerCase() === enteredId);
+  if (exactMatch) {
+    cancelMessageStudentLookup();
+    if (!selectedMessageContact || contactKey(selectedMessageContact) !== contactKey(exactMatch)) {
+      selectMessageConversation(exactMatch);
+    }
+    return;
+  }
+  if (!/^\d{6,64}$/.test(enteredId) || messageStudentLookupId === enteredId) return;
+  cancelMessageStudentLookup();
+  messageStudentLookupId = enteredId;
+  const sequence = messageStudentLookupSequence;
+  const actorId = currentStudent.student_id;
+  setMessage(messageSearchStatus, 'Looking up student…');
+  messageStudentLookupTimer = setTimeout(async () => {
+    const stillCurrent = () => sequence === messageStudentLookupSequence
+      && currentStudent?.student_id === actorId
+      && messageSearch.value.trim().toLowerCase() === enteredId;
+    try {
+      const student = await academicApiRequest(`/student/${encodeURIComponent(enteredId)}`);
+      if (!stillCurrent()) return;
+      const contact = {
+        type: 'student', id: String(student.student_id), name: student.name,
+        major: student.major, subtitle: `Year ${student.year} · ${student.major}`,
+      };
+      lookedUpMessageContacts.set(contactKey(contact), contact);
+      if (!messageContacts.some((item) => contactKey(item) === contactKey(contact))) {
+        messageContacts.push(contact);
+      }
+      setMessage(messageSearchStatus, '');
+      selectMessageConversation(contact);
+    } catch (error) {
+      if (!stillCurrent()) return;
+      setMessage(messageSearchStatus, error.status === 404
+        ? `No registered student has ID ${enteredId}. Check the digits and try again.`
+        : `Student lookup failed: ${error.message}`, true);
+    }
+  }, 350);
+}
+
+
+function cancelMessageStudentLookup() {
+  clearTimeout(messageStudentLookupTimer);
+  messageStudentLookupTimer = null;
+  messageStudentLookupSequence += 1;
+  messageStudentLookupId = null;
+  setMessage(messageSearchStatus, '');
 }
 
 
 async function refreshMessages(showErrors = false) {
   if (!currentStudent) return;
+  const actorId = currentStudent.student_id;
   try {
-    const params = new URLSearchParams({ actor_type: 'student', actor_id: currentStudent.student_id });
-    const [contactsResponse, messagesResponse] = await Promise.all([
-      academicApiRequest(`/messages/contacts?${params}`),
-      academicApiRequest(`/messages?${params}`),
+    const params = new URLSearchParams({ actor_type: 'student', actor_id: actorId });
+    const [contactsResult, messagesResult] = await Promise.allSettled([
+      academicApiRequest(`/messages/contacts?${params}`).then((response) => {
+        if (currentStudent?.student_id !== actorId) return;
+        const merged = new Map(lookedUpMessageContacts);
+        for (const contact of response.contacts || []) merged.set(contactKey(contact), contact);
+        messageContacts = [...merged.values()];
+        if (selectedMessageContact && selectedMessageContact.type !== 'broadcast') {
+          selectedMessageContact = merged.get(contactKey(selectedMessageContact)) || null;
+        }
+        renderConversationList();
+        if (!selectedMessageContact) openStudentConversationById();
+      }),
+      academicApiRequest(`/messages?${params}`).then((response) => {
+        if (currentStudent?.student_id !== actorId) return;
+        campusMessages = response.messages || [];
+        renderConversationList();
+        if (selectedMessageContact) {
+          renderMessageThread();
+          markSelectedConversationRead();
+        }
+        updateInboxBadge();
+      }),
     ]);
-    messageContacts = contactsResponse.contacts || [];
-    campusMessages = messagesResponse.messages || [];
-    if (selectedMessageContact) {
-      selectedMessageContact = [
-        ...messageContacts,
-        { type: 'broadcast', id: 'all-students', name: 'Professor broadcasts', subtitle: 'Messages sent to all students' },
-      ].find((contact) => contactKey(contact) === contactKey(selectedMessageContact)) || null;
+    if (currentStudent?.student_id !== actorId) return;
+    if (showErrors) {
+      const failure = [contactsResult, messagesResult].find((result) => result.status === 'rejected');
+      setMessage(messageStatus, failure ? failure.reason.message : '', Boolean(failure));
     }
-    renderConversationList();
-    if (!selectedMessageContact) openStudentConversationById();
-    if (selectedMessageContact) {
-      renderMessageThread();
-      markSelectedConversationRead();
-    }
-    updateInboxBadge();
-    if (showErrors) setMessage(messageStatus, '');
   } catch (error) {
     if (showErrors) setMessage(messageStatus, error.message, true);
   }
@@ -1205,6 +1271,8 @@ function stopMessageSync() {
     clearInterval(messageTimer);
     messageTimer = null;
   }
+  cancelMessageStudentLookup();
+  lookedUpMessageContacts.clear();
   clearMessageAttachment();
 }
 
@@ -1282,6 +1350,8 @@ async function downloadMessageDocument(item, button) {
 
 inboxButton.addEventListener('click', () => showDashboardSection('messages'));
 document.querySelector('#new-message-button').addEventListener('click', () => {
+  if (messageSending) return;
+  cancelMessageStudentLookup();
   selectedMessageContact = null;
   clearMessageAttachment();
   messageComposeInput.value = '';
@@ -1299,6 +1369,7 @@ document.querySelector('#new-message-button').addEventListener('click', () => {
   messageSearch.focus();
 });
 messageSearch.addEventListener('input', () => {
+  cancelMessageStudentLookup();
   renderConversationList();
   openStudentConversationById();
 });
