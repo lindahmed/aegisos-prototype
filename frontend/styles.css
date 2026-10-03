@@ -819,7 +819,14 @@ button:disabled { cursor: wait; opacity: 0.55; }
 .campus-message-meta strong { color: var(--blue-soft); font-size: 11.5px; }
 .campus-message-meta time { color: var(--text-faint); font-size: 10px; }
 .campus-message p { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; }
-.message-compose-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--border); }
+.message-compose-form { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--border); }
+.message-attach-button { display: inline-flex; align-items: center; justify-content: center; width: 48px; padding: 10px; }
+.message-attach-button:focus-visible, .message-document:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.message-attachment-preview { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font-size: 13px; }
+.message-attachment-preview span { min-width: 0; overflow-wrap: anywhere; }
+.message-attachment-preview button { flex: none; padding: 4px 10px; font-size: 20px; }
+.message-document { display: flex; align-items: center; gap: 8px; max-width: 100%; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--blue-soft); font-size: 13px; text-align: left; overflow-wrap: anywhere; }
+.message-document:hover { border-color: var(--blue); }
 .message-compose-form textarea { min-height: 50px; max-height: 130px; resize: vertical; font-size: 13.5px; }
 .message-compose-form .primary-button { min-width: 92px; }
 .conversation-pane > .message { min-height: 0; margin: 0; padding: 0 18px 10px; }

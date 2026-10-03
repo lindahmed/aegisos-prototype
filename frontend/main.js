@@ -4,6 +4,7 @@ const path = require('path');
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
+    show: process.env.AEGIS_ELECTRON_TEST !== '1',
     width: 1440,
     height: 900,
     minWidth: 1000,

@@ -185,7 +185,10 @@ async function academicApiRequest(path, options = {}) {
   try {
     response = await fetch(`${academicApiBaseUrl}${path}`, {
       ...options,
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      headers: {
+        ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...(options.headers || {}),
+      },
     });
   } catch (_error) {
     throw new Error('The shared academic notification service is unavailable.');
@@ -918,6 +921,15 @@ const messageComposeForm = document.querySelector('#message-compose-form');
 const messageComposeInput = document.querySelector('#message-compose-input');
 const messageSendButton = document.querySelector('#message-send-button');
 const messageStatus = document.querySelector('#message-status');
+const messageAttachButton = document.querySelector('#message-attach-button');
+const messageAttachmentInput = document.querySelector('#message-attachment-input');
+const messageAttachmentPreview = document.querySelector('#message-attachment-preview');
+const messageAttachmentName = document.querySelector('#message-attachment-name');
+const messageAttachmentRemove = document.querySelector('#message-attachment-remove');
+const MESSAGE_DOCUMENT_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'rtf', 'odt', 'ods', 'odp']);
+const MESSAGE_DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
+let selectedMessageFile = null;
+let messageSending = false;
 const MESSAGE_POLL_MS = 15000;
 let messageContacts = [];
 let campusMessages = [];
@@ -1017,7 +1029,7 @@ function renderConversationList() {
     }
     const preview = document.createElement('span');
     preview.className = 'conversation-preview';
-    preview.textContent = latest?.body || contact.subtitle;
+    preview.textContent = latest?.body || latest?.attachment?.filename || contact.subtitle;
     copy.append(top, preview);
     button.append(avatar, copy);
     if (unread > 0) {
@@ -1059,6 +1071,15 @@ function renderMessageThread() {
     const body = document.createElement('p');
     body.textContent = item.body;
     bubble.append(meta, body);
+    if (item.attachment) {
+      const documentButton = document.createElement('button');
+      documentButton.type = 'button';
+      documentButton.className = 'message-document';
+      documentButton.textContent = `↓ ${item.attachment.filename} · ${formatDocumentSize(item.attachment.size_bytes)}`;
+      documentButton.setAttribute('aria-label', `Download ${item.attachment.filename}`);
+      documentButton.addEventListener('click', () => downloadMessageDocument(item, documentButton));
+      bubble.append(documentButton);
+    }
     messageThread.append(bubble);
   }
   messageThread.scrollTop = messageThread.scrollHeight;
@@ -1092,6 +1113,12 @@ async function markSelectedConversationRead() {
 
 
 function selectMessageConversation(contact) {
+  if (messageSending) return;
+  if (!selectedMessageContact || contactKey(contact) !== contactKey(selectedMessageContact)) {
+    clearMessageAttachment();
+    messageComposeInput.value = '';
+    setMessage(messageStatus, '');
+  }
   selectedMessageContact = contact;
   renderConversationList();
   renderMessageThread();
@@ -1134,6 +1161,17 @@ function startMessageSync() {
   messageContacts = [];
   campusMessages = [];
   selectedMessageContact = null;
+  clearMessageAttachment();
+  messageComposeInput.value = '';
+  messageComposeForm.hidden = true;
+  conversationTitle.textContent = 'Choose a conversation';
+  conversationSubtitle.textContent = 'Your classmates and professors are here.';
+  messageThread.replaceChildren();
+  const empty = document.createElement('div');
+  empty.className = 'message-thread-empty';
+  empty.innerHTML = '<strong>Start a conversation</strong><span>Select someone from the inbox to view or send messages.</span>';
+  messageThread.append(empty);
+  setMessage(messageStatus, '');
   messageSearch.value = '';
   updateInboxBadge();
   refreshMessages();
@@ -1145,6 +1183,78 @@ function stopMessageSync() {
   if (messageTimer) {
     clearInterval(messageTimer);
     messageTimer = null;
+  }
+  clearMessageAttachment();
+}
+
+
+function formatDocumentSize(bytes) {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.ceil(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+
+function clearMessageAttachment() {
+  selectedMessageFile = null;
+  messageAttachmentInput.value = '';
+  messageAttachmentPreview.hidden = true;
+  messageAttachmentName.textContent = '';
+  messageComposeInput.required = true;
+}
+
+
+messageAttachButton.addEventListener('click', () => {
+  if (!messageSending) messageAttachmentInput.click();
+});
+messageAttachmentRemove.addEventListener('click', () => {
+  clearMessageAttachment();
+  setMessage(messageStatus, '');
+  messageAttachButton.focus();
+});
+messageAttachmentInput.addEventListener('change', () => {
+  const file = messageAttachmentInput.files[0];
+  if (!file) return;
+  const extension = file.name.split('.').at(-1).toLowerCase();
+  let error = '';
+  if (!MESSAGE_DOCUMENT_EXTENSIONS.has(extension)) error = 'Choose a PDF, Word, spreadsheet, presentation, or text document.';
+  else if (!file.size) error = 'The selected document is empty.';
+  else if (file.size > MESSAGE_DOCUMENT_MAX_BYTES) error = 'Documents must be 10 MB or smaller.';
+  if (error) {
+    clearMessageAttachment();
+    setMessage(messageStatus, error, true);
+    return;
+  }
+  selectedMessageFile = file;
+  messageAttachmentName.textContent = `${file.name} · ${formatDocumentSize(file.size)}`;
+  messageAttachmentPreview.hidden = false;
+  messageComposeInput.required = false;
+  setMessage(messageStatus, '');
+});
+
+
+async function downloadMessageDocument(item, button) {
+  if (!currentStudent) return;
+  const studentId = currentStudent.student_id;
+  button.disabled = true;
+  try {
+    const params = new URLSearchParams({ actor_type: 'student', actor_id: studentId });
+    const response = await fetch(`${academicApiBaseUrl}/messages/${encodeURIComponent(item.message_id)}/attachment?${params}`);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || 'The document could not be downloaded.');
+    }
+    const blobUrl = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = item.attachment.filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    setMessage(messageStatus, 'Document downloaded.');
+  } catch (error) {
+    setMessage(messageStatus, error.message, true);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -1160,28 +1270,52 @@ messageComposeForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!currentStudent || !selectedMessageContact || selectedMessageContact.type === 'broadcast') return;
   const body = messageComposeInput.value.trim();
-  if (!body) return;
+  if ((!body && !selectedMessageFile) || messageSending) return;
+  const senderId = currentStudent.student_id;
+  const recipient = { ...selectedMessageContact };
+  const file = selectedMessageFile;
+  messageSending = true;
   messageSendButton.disabled = true;
-  setMessage(messageStatus, 'Sending…');
+  messageAttachButton.disabled = true;
+  messageAttachmentRemove.disabled = true;
+  messageComposeInput.disabled = true;
+  setMessage(messageStatus, file ? 'Sending document…' : 'Sending…');
   try {
-    await academicApiRequest('/messages', {
-      method: 'POST',
-      body: JSON.stringify({
-        sender_type: 'student',
-        sender_id: currentStudent.student_id,
-        recipient_type: selectedMessageContact.type,
-        recipient_id: selectedMessageContact.id,
-        body,
-      }),
-    });
+    if (file) {
+      const formData = new FormData();
+      formData.append('sender_type', 'student');
+      formData.append('sender_id', senderId);
+      formData.append('recipient_type', recipient.type);
+      formData.append('recipient_id', recipient.id);
+      formData.append('body', body);
+      formData.append('file', file);
+      await academicApiRequest('/messages/attachments', { method: 'POST', body: formData });
+    } else {
+      await academicApiRequest('/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          sender_type: 'student',
+          sender_id: senderId,
+          recipient_type: recipient.type,
+          recipient_id: recipient.id,
+          body,
+        }),
+      });
+    }
+    if (currentStudent?.student_id !== senderId) return;
     messageComposeInput.value = '';
+    clearMessageAttachment();
     await refreshMessages(true);
     renderMessageThread();
-    messageComposeInput.focus();
   } catch (error) {
-    setMessage(messageStatus, error.message, true);
+    if (currentStudent?.student_id === senderId) setMessage(messageStatus, error.message, true);
   } finally {
+    messageSending = false;
     messageSendButton.disabled = false;
+    messageAttachButton.disabled = false;
+    messageAttachmentRemove.disabled = false;
+    messageComposeInput.disabled = false;
+    if (currentStudent?.student_id === senderId) messageComposeInput.focus();
   }
 });
 

@@ -9,11 +9,12 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Callable, Literal
 from uuid import uuid4
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 import httpx
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pypdf import PdfReader
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -104,7 +105,7 @@ class PortalMessageCreateRequest(BaseModel):
     recipient_type: Literal["student", "staff"] | None = None
     recipient_id: str | None = Field(default=None, max_length=64)
     is_broadcast: bool = False
-    body: str = Field(min_length=1, max_length=4000)
+    body: str = Field(default="", max_length=4000)
 
 
 class PortalMessageReadRequest(BaseModel):
@@ -155,6 +156,8 @@ GRADE_SCALE = [
 
 GRADE_POINTS = {letter: points for letter, points, _ in GRADE_SCALE}
 PDF_MAX_BYTES = 10 * 1024 * 1024
+MESSAGE_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv", ".rtf", ".odt", ".ods", ".odp"}
+MESSAGE_DOCUMENT_MAX_BYTES = 10 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
 
@@ -803,9 +806,16 @@ def create_app(
 
     @api.post("/messages")
     def create_message(request: PortalMessageCreateRequest) -> dict[str, object]:
+        return save_message(request)
+
+    def save_message(
+        request: PortalMessageCreateRequest,
+        attachment: dict[str, object] | None = None,
+        attachment_content: bytes | None = None,
+    ) -> dict[str, object]:
         sender = messaging_participant(request.sender_type, request.sender_id)
         body = request.body.strip()
-        if not body:
+        if not body and not attachment:
             raise HTTPException(status_code=400, detail="Message cannot be empty")
         if request.is_broadcast:
             if request.sender_type != "staff":
@@ -829,11 +839,68 @@ def create_app(
                 "recipient_id": recipient_id,
                 "is_broadcast": request.is_broadcast,
                 "body": body,
+                "attachment": attachment,
                 "created_at": datetime.now(UTC).isoformat(),
                 "read": True,
-            }
+            },
+            attachment_content=attachment_content,
         )
         return {"message": enrich_message(message)}
+
+    @api.post("/messages/attachments")
+    async def send_message_document(
+        file: UploadFile = File(...),
+        sender_type: Literal["student", "staff"] = Form(...),
+        sender_id: str = Form(..., min_length=1, max_length=64),
+        recipient_type: Literal["student", "staff"] = Form(...),
+        recipient_id: str = Form(..., min_length=1, max_length=64),
+        body: str = Form("", max_length=4000),
+    ) -> dict[str, object]:
+        messaging_participant(sender_type, sender_id)
+        messaging_participant(recipient_type, recipient_id)
+        filename = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+        if not filename or len(filename) > 255 or any(ord(char) < 32 for char in filename):
+            raise HTTPException(status_code=400, detail="Choose a document with a valid filename")
+        if Path(filename).suffix.lower() not in MESSAGE_DOCUMENT_EXTENSIONS:
+            raise HTTPException(status_code=400, detail="Choose a PDF, Word, spreadsheet, presentation, or text document")
+        content = await file.read(MESSAGE_DOCUMENT_MAX_BYTES + 1)
+        await file.close()
+        if not content:
+            raise HTTPException(status_code=400, detail="The selected document is empty")
+        if len(content) > MESSAGE_DOCUMENT_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Documents must be 10 MB or smaller")
+        return save_message(
+            PortalMessageCreateRequest(
+                sender_type=sender_type, sender_id=sender_id,
+                recipient_type=recipient_type, recipient_id=recipient_id,
+                body=body,
+            ),
+            attachment={"filename": filename, "size_bytes": len(content)},
+            attachment_content=content,
+        )
+
+    @api.get("/messages/{message_id}/attachment")
+    def download_message_document(
+        message_id: str,
+        actor_type: Literal["student", "staff"],
+        actor_id: str,
+    ) -> Response:
+        actor = messaging_participant(actor_type, actor_id)
+        message = next((item for item in repository.list_portal_messages(actor_type, actor["id"])
+                        if item["message_id"] == message_id and item.get("attachment")), None)
+        if message is None:
+            raise HTTPException(status_code=404, detail="Document not found in your conversations")
+        content = repository.get_portal_message_attachment(message_id)
+        if content is None:
+            raise HTTPException(status_code=404, detail="This document is no longer available")
+        filename = quote(message["attachment"]["filename"], safe="")
+        return Response(
+            content, media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @api.put("/messages/read")
     def mark_messages_read(request: PortalMessageReadRequest) -> dict[str, object]:

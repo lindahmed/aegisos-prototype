@@ -13,6 +13,14 @@ Desktop Client  ──────┘            │
 
 The Android app should talk to the FastAPI backend, not directly to the database.
 
+## Desktop message attachments
+
+Open Inbox, choose a classmate, and click the paperclip beside the message field to share a document. The composer shows the filename and size and lets you remove it before sending. A document can be sent alone or with a message; the recipient downloads it from the conversation.
+
+Supported formats are PDF, Word, Excel, PowerPoint, text, CSV, RTF, and OpenDocument, up to 10 MB per document. Document contents and metadata are stored together in the shared message database, so students on different computers connected to the same database can download them. The SQLite and PostgreSQL migrations run automatically when the backend starts; existing messages are preserved.
+
+For the API checks, set `DATABASE_URL` to an empty string and `AEGIS_DB_PATH` to `.tmp/message-test-bootstrap.db`, then run `python -m pytest backend/test_message_attachments.py`. After installing frontend and backend dependencies, run `npm run test:messages` in `frontend` for the desktop flow. The desktop test requires a free local port 8001 and creates an isolated SQLite database and app profile under `.tmp`; it verifies file-picker activation, validation, upload retry, sending, and recipient downloads without using the configured production database. Set `TEST_PYTHON` if the backend Python executable is not named `python`.
+
 ## Desktop student scores
 
 The desktop dashboard shows a points button in the top right. Its panel shows the top five students, students closest to the signed-in student's score (including all ties), and that student's weekly activity. Scores are recomputed from recorded work, so repeated Progress Agent runs do not duplicate points.
