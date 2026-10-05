@@ -6,7 +6,9 @@
   "scripts": {
     "start": "electron .",
     "postinstall": "install-electron",
-    "check": "node --check main.js && node --check preload.js && node --check renderer.js"
+    "check": "node --check main.js && node --check preload.js && node --check renderer.js && node --check meetings/server.js && node --check meetings/desktop.js && node --check meetings/renderer.js",
+    "test": "node --test test/*.test.js",
+    "test:meetings": "electron test/electron-meetings.js"
   },
   "keywords": [],
   "author": "UniTrack team",
@@ -17,5 +19,8 @@
   },
   "devDependencies": {
     "electron": "^43.4.0"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
   }
 }
