@@ -21,7 +21,7 @@ function createWindow() {
   });
 
   Menu.setApplicationMenu(null);
-  mainWindow.loadFile('index.html');
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
   if (process.env.AEGIS_ELECTRON_SMOKE === '1') {
     mainWindow.webContents.once('did-finish-load', async () => {

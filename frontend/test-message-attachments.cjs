@@ -40,7 +40,7 @@ async function main() {
   });
   await waitForApi();
   execFileSync(process.env.TEST_PYTHON || 'python', ['-c',
-    'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute("INSERT INTO students (student_id,name,major,year,gpa) VALUES (?,?,?,?,?)", ("231006157","Directory Test Student","Cybersecurity",3,3.5)); c.commit(); c.close()',
+    'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.executemany("INSERT INTO students (student_id,name,major,year,gpa) VALUES (?,?,?,?,?)", [("231006157","Directory Test Student","Cybersecurity",3,3.5), ("231006158","New Chat Student","Artificial Intelligence",3,3.5)]); c.commit(); c.close()',
     path.join(runDir, 'test.db')], { windowsHide: true });
   console.log('Isolated test API ready');
   electron = await _electron.launch({
@@ -70,6 +70,8 @@ async function main() {
     await page.locator('#inbox-button').click();
   };
   await login('231027905');
+  assert.equal(await page.locator('#message-chats-tab').getAttribute('aria-pressed'), 'true');
+  await page.locator('#message-contacts-tab').click();
   const contacts = await (await fetch(`${api}/messages/contacts?actor_type=student&actor_id=231027905`)).json();
   const recipient = contacts.contacts.find(contact => contact.id === '231027906');
   const third = contacts.contacts.find(contact => contact.id === '231027907');
@@ -91,6 +93,7 @@ async function main() {
   });
   await page.locator('#sign-out-button').click();
   await login('231027905');
+  await page.locator('#message-contacts-tab').click();
   await page.locator('.conversation-item').filter({ hasText: recipient.name }).waitFor();
   assert.equal(inboxReleased, false);
   inboxReleased = true;
@@ -194,9 +197,24 @@ async function main() {
   await page.locator('[data-theme-toggle]').filter({ visible: true }).first().click();
   await screenshot('sender-light.png');
   await page.setViewportSize({ width: 1000, height: 720 });
+  await page.waitForFunction(() => {
+    const button = document.querySelector('#message-send-button').getBoundingClientRect();
+    const panel = document.querySelector('.messages-layout').getBoundingClientRect();
+    return button.bottom <= panel.bottom;
+  }).catch(async error => {
+    console.error(await page.evaluate(() => ['.messages-layout', '.conversation-pane', '#message-thread', '#message-compose-form', '#message-send-button'].map(selector => {
+      const element = document.querySelector(selector), rect = element.getBoundingClientRect(), style = getComputedStyle(element);
+      return { selector, y: rect.y, height: rect.height, bottom: rect.bottom, minHeight: style.minHeight, flex: style.flex };
+    })));
+    await screenshot('minimum-window-failed.png');
+    throw error;
+  });
   const clipBox = await paperclip.boundingBox();
   const sendBox = await page.locator('#message-send-button').boundingBox();
   assert(clipBox && sendBox && clipBox.x >= 0 && sendBox.x + sendBox.width <= 1000);
+  const layoutBox = await page.locator('.messages-layout').boundingBox();
+  assert(sendBox.y + sendBox.height <= layoutBox.y + layoutBox.height + 1,
+    `The send button must fit inside the chat panel: ${JSON.stringify({ sendBox, layoutBox })}`);
   await screenshot('minimum-window.png');
 
   await page.locator('#sign-out-button').click();
@@ -268,11 +286,81 @@ async function main() {
   assert((await page.locator('#message-thread').textContent()).includes('Newest incoming message'));
   assert((await page.locator('#message-thread').textContent()).includes('Latest message moves this chat to the top'));
   await page.locator('#message-search').fill('Mariam');
-  assert.equal(await page.locator('.conversation-item').first().getAttribute('data-contact-key'), 'student:231027907');
+  assert.equal(await page.locator('[data-contact-key="student:231027907"]').count(), 1);
+  assert.equal(await page.locator('[data-contact-key="student:231006157"]').count(), 1,
+    'Searching for a recipient must not hide other recent senders');
   await page.locator('#message-search').fill('');
   await page.unroute('**/messages/contacts?**');
   await screenshot('recent-chats.png');
   console.log('PASS: recent chats and history return after signing in again, even with an incomplete directory');
+
+  await sendText('231006158', 'My first message to you');
+  await page.waitForFunction(() => document.querySelector('.conversation-item')?.dataset.contactKey === 'student:231006158');
+  const firstTimeSender = page.locator('[data-contact-key="student:231006158"]');
+  assert((await firstTimeSender.textContent()).includes('New Chat Student'));
+  assert.equal(await firstTimeSender.locator('.conversation-unread').textContent(), '1');
+  await firstTimeSender.click();
+  assert((await page.locator('#message-thread').textContent()).includes('My first message to you'));
+  console.log('PASS: a first-ever sender from another major appears automatically by name without an ID or directory entry');
+
+  // Reproduce the reported problem with real timed sync, not a manual refresh.
+  await page.locator('#message-chats-tab').click();
+  await page.locator('#message-search').fill('231027905');
+  await page.waitForFunction(() => document.querySelector('#conversation-title').textContent === 'Yasmin Wael');
+  await page.locator('#message-search').fill('999999999');
+  await sendText('231027907', 'A live message from Mariam');
+  await page.waitForFunction(() => document.querySelector('.conversation-item')?.dataset.contactKey === 'student:231027907'
+    && document.querySelector('.conversation-item')?.textContent.includes('A live message from Mariam'));
+  const liveSender = page.locator('[data-contact-key="student:231027907"]');
+  assert((await liveSender.textContent()).includes(third.name));
+  assert(await liveSender.locator('.conversation-unread').isVisible());
+  await liveSender.click();
+  assert.equal(await page.locator('#message-search').inputValue(), '');
+  assert((await page.locator('#message-thread').textContent()).includes('A live message from Mariam'));
+  await page.waitForFunction(() => !document.querySelector('[data-contact-key="student:231027907"] .conversation-unread'));
+  console.log('PASS: automatic sync names the incoming sender while another ID is searched; one click opens history and clears unread');
+
+  // Reply using the keyboard, then check that the other student actually receives it.
+  await page.locator('#message-compose-input').fill('Live keyboard reply');
+  const keyboardSend = page.waitForResponse(response => response.url().endsWith('/messages') && response.request().method() === 'POST');
+  await page.locator('#message-compose-input').press('Enter');
+  assert.equal((await keyboardSend).status(), 200);
+  await page.waitForFunction(() => !document.querySelector('#message-send-button').disabled);
+  assert.equal(await page.locator('#message-status').textContent(), '', 'Successful delivery must clear Sending feedback');
+  const replyInbox = await (await fetch(`${api}/messages?actor_type=student&actor_id=231027907`)).json();
+  assert(replyInbox.messages.some(message => message.body === 'Live keyboard reply' && message.sender_id === '231027906'));
+  await page.locator('#message-compose-input').fill('Two lines');
+  await page.locator('#message-compose-input').press('Shift+Enter');
+  assert((await page.locator('#message-compose-input').inputValue()).includes('\n'));
+  await page.locator('#message-compose-input').fill('');
+  console.log('PASS: Enter sends a real reply and Shift+Enter inserts a line break');
+
+  // Longer history should stay in place while the reader scrolls back.
+  for (let i = 0; i < 15; i++) await sendText('231027907', `History message ${i}`);
+  await page.waitForFunction(() => document.querySelector('#message-thread').textContent.includes('History message 14'));
+  await page.locator('#message-thread').evaluate(thread => { thread.scrollTop = 0; });
+  await sendText('231027907', 'Read this after older history');
+  await page.locator('#message-jump-latest').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#message-thread').evaluate(thread => thread.scrollTop), 0);
+  await page.locator('#message-jump-latest').click();
+  await page.locator('#message-jump-latest').waitFor({ state: 'hidden' });
+  assert(await page.locator('#message-thread').evaluate(thread => thread.scrollHeight - thread.scrollTop - thread.clientHeight < 60));
+  console.log('PASS: new messages preserve the reader’s position and the jump button opens the latest message');
+
+  await page.route('**/messages?**', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Temporary inbox outage' }),
+  }));
+  await page.waitForFunction(() => document.querySelector('#message-sync-status').textContent.includes('Temporary inbox outage'));
+  assert((await page.locator('[data-contact-key="student:231027907"]').textContent()).includes(third.name));
+  await page.unroute('**/messages?**');
+  await page.waitForFunction(() => document.querySelector('#message-sync-status').textContent.includes('Chats are up to date'));
+  console.log('PASS: sync outages are visible, history stays available, and reconnect happens automatically');
+  const stableChat = await page.locator('.conversation-item').first().elementHandle();
+  await page.waitForTimeout(6500);
+  assert(await stableChat.evaluate(button => button.isConnected), 'Unchanged chats must keep their buttons during background sync');
+  console.log('PASS: automatic refresh preserves unchanged chat buttons for reliable clicks');
+  await page.locator('#message-chats-tab').click();
+  await screenshot('interactive-chats.png');
   assert.deepEqual(errors, [], 'No renderer errors');
   console.log(`Desktop attachment checks passed. Screenshots: ${runDir}`);
 }

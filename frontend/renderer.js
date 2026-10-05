@@ -926,6 +926,11 @@ const messageComposeForm = document.querySelector('#message-compose-form');
 const messageComposeInput = document.querySelector('#message-compose-input');
 const messageSendButton = document.querySelector('#message-send-button');
 const messageStatus = document.querySelector('#message-status');
+const messageSyncStatus = document.querySelector('#message-sync-status');
+const messageChatsTab = document.querySelector('#message-chats-tab');
+const messageContactsTab = document.querySelector('#message-contacts-tab');
+const messageChatsCount = document.querySelector('#message-chats-count');
+const messageJumpLatest = document.querySelector('#message-jump-latest');
 const messageAttachButton = document.querySelector('#message-attach-button');
 const messageAttachmentInput = document.querySelector('#message-attachment-input');
 const messageAttachmentPreview = document.querySelector('#message-attachment-preview');
@@ -936,10 +941,20 @@ const MESSAGE_DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
 let selectedMessageFile = null;
 let messageSending = false;
 const MESSAGE_POLL_MS = 15000;
+const MESSAGE_ACTIVE_POLL_MS = 3000;
+const MESSAGE_DIRECTORY_POLL_MS = 60000;
 let messageContacts = [];
 let campusMessages = [];
 let selectedMessageContact = null;
 let messageTimer = null;
+let messageListMode = 'chats';
+let messageSyncGeneration = 0;
+let messageRefreshTask = null;
+let messageDirectoryUpdatedAt = 0;
+let renderedMessageThreadKey = null;
+let renderedMessageThreadSignature = '';
+let renderedConversationListSignature = '';
+const pendingMessageReads = new Set();
 let messageStudentLookupTimer = null;
 let messageStudentLookupSequence = 0;
 let messageStudentLookupId = null;
@@ -959,8 +974,8 @@ function messagesForContact(contact) {
   return campusMessages.filter((message) => {
     if (message.is_broadcast) return false;
     return (
-      (message.sender_type === contact.type && message.sender_id === contact.id)
-      || (message.recipient_type === contact.type && message.recipient_id === contact.id)
+      (message.sender_type === contact.type && String(message.sender_id) === String(contact.id))
+      || (message.recipient_type === contact.type && String(message.recipient_id) === String(contact.id))
     );
   });
 }
@@ -1009,14 +1024,32 @@ function formatMessageTime(value) {
 
 
 function updateInboxBadge() {
-  const unread = campusMessages.filter((message) => !message.read).length;
+  const unread = campusMessages.filter((message) => !message.read && !isOutgoingMessage(message)).length;
   inboxBadge.hidden = unread === 0;
   inboxBadge.textContent = String(unread);
+  messageChatsCount.hidden = unread === 0;
+  messageChatsCount.textContent = String(unread);
+}
+
+
+function isOutgoingMessage(message) {
+  return message.sender_type === 'student'
+    && String(message.sender_id) === String(currentStudent?.student_id);
+}
+
+
+function setMessageListMode(mode) {
+  messageListMode = mode;
+  messageChatsTab.setAttribute('aria-pressed', String(mode === 'chats'));
+  messageContactsTab.setAttribute('aria-pressed', String(mode === 'contacts'));
+  renderConversationList();
 }
 
 
 function renderConversationList() {
   const query = messageSearch.value.trim().toLowerCase();
+  const previousTopContact = conversationList.querySelector('.conversation-item')?.dataset.contactKey;
+  const previousScrollTop = conversationList.scrollTop;
   const activity = new Map();
   for (const message of campusMessages) {
     const outgoing = message.sender_type === 'student'
@@ -1039,7 +1072,11 @@ function renderConversationList() {
       .toLowerCase().includes(query);
     const exactStudentId = isStudent && String(contact.id).toLowerCase() === query;
     const hasHistory = activity.has(contactKey(contact));
-    return isStudent ? exactStudentId || ((sameMajor || hasHistory) && matchesQuery) : matchesQuery;
+    // Search is for starting a new chat; it must never hide an incoming sender.
+    if (hasHistory) return true;
+    if (selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact)) return true;
+    if (messageListMode === 'chats' && !query) return false;
+    return isStudent ? exactStudentId || (sameMajor && matchesQuery) : matchesQuery;
   });
   visible.sort((left, right) => {
     const leftLatest = activity.get(contactKey(left))?.latest;
@@ -1050,13 +1087,24 @@ function renderConversationList() {
       || contactKey(left).localeCompare(contactKey(right));
   });
 
+  const signature = JSON.stringify([messageListMode, Boolean(query),
+    selectedMessageContact && contactKey(selectedMessageContact), visible.map((contact) => {
+      const { latest, unread } = activity.get(contactKey(contact)) || {};
+      return [contactKey(contact), contact.name, contact.subtitle, unread, latest?.message_id,
+        latest?.body, latest?.attachment?.filename, latest?.created_at];
+    })]);
+  if (signature === renderedConversationListSignature) return;
+  renderedConversationListSignature = signature;
+
   conversationList.replaceChildren();
   if (visible.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'conversation-list-empty';
     empty.textContent = query
       ? 'No classmate matches. Enter a registered student’s full ID to start a chat.'
-      : 'No classmates in your major are available yet.';
+      : messageListMode === 'chats'
+        ? 'Your chats will appear here automatically when someone messages you. Choose New message to start a chat.'
+        : 'No classmates in your major are available yet.';
     conversationList.append(empty);
     return;
   }
@@ -1064,7 +1112,7 @@ function renderConversationList() {
   let section = '';
   for (const contact of visible) {
     const { latest, unread = 0 } = activity.get(contactKey(contact)) || {};
-    const nextSection = latest ? 'Recent chats' : 'Contacts';
+    const nextSection = latest ? 'Recent chats' : query ? 'Search results' : 'Classmates & professors';
     if (section !== nextSection) {
       section = nextSection;
       const heading = document.createElement('h5');
@@ -1076,6 +1124,8 @@ function renderConversationList() {
     button.type = 'button';
     button.className = `conversation-item${unread ? ' unread' : ''}${selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact) ? ' active' : ''}`;
     button.dataset.contactKey = contactKey(contact);
+    button.setAttribute('aria-pressed', String(Boolean(selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact))));
+    button.setAttribute('aria-label', `${contact.name}${unread ? `, ${unread} unread messages` : ''}`);
     button.addEventListener('click', () => selectMessageConversation(contact));
     const avatar = document.createElement('span');
     avatar.className = `conversation-avatar ${contact.type}`;
@@ -1096,7 +1146,8 @@ function renderConversationList() {
     }
     const preview = document.createElement('span');
     preview.className = 'conversation-preview';
-    preview.textContent = latest?.body || latest?.attachment?.filename || contact.subtitle;
+    const previewText = latest?.body || latest?.attachment?.filename || contact.subtitle;
+    preview.textContent = latest && isOutgoingMessage(latest) ? `You: ${previewText}` : previewText;
     copy.append(top, preview);
     button.append(avatar, copy);
     if (unread > 0) {
@@ -1107,10 +1158,20 @@ function renderConversationList() {
     }
     conversationList.append(button);
   }
+  if (previousTopContact === conversationList.querySelector('.conversation-item')?.dataset.contactKey) {
+    conversationList.scrollTop = previousScrollTop;
+  } else {
+    conversationList.scrollTop = 0;
+  }
 }
 
 
-function renderMessageThread() {
+function isMessageThreadAtBottom() {
+  return messageThread.scrollHeight - messageThread.scrollTop - messageThread.clientHeight < 60;
+}
+
+
+function renderMessageThread(forceScroll = false) {
   if (!selectedMessageContact) return;
   const thread = messagesForContact(selectedMessageContact).sort((left, right) =>
     messageTimestamp(left) - messageTimestamp(right)
@@ -1118,6 +1179,19 @@ function renderMessageThread() {
   conversationTitle.textContent = selectedMessageContact.name;
   conversationSubtitle.textContent = selectedMessageContact.subtitle;
   messageComposeForm.hidden = selectedMessageContact.type === 'broadcast';
+  const key = contactKey(selectedMessageContact);
+  const signature = JSON.stringify(thread.map((item) => [item.message_id, item.body, item.attachment, item.created_at]));
+  if (key === renderedMessageThreadKey && signature === renderedMessageThreadSignature) {
+    if (forceScroll) {
+      messageThread.scrollTop = messageThread.scrollHeight;
+      messageJumpLatest.hidden = true;
+    }
+    return;
+  }
+  const scrollToBottom = forceScroll || key !== renderedMessageThreadKey || isMessageThreadAtBottom();
+  const oldScrollTop = messageThread.scrollTop;
+  renderedMessageThreadKey = key;
+  renderedMessageThreadSignature = signature;
   messageThread.replaceChildren();
   if (thread.length === 0) {
     const empty = document.createElement('div');
@@ -1127,7 +1201,7 @@ function renderMessageThread() {
     return;
   }
   for (const item of thread) {
-    const outgoing = item.sender_type === 'student' && item.sender_id === currentStudent.student_id;
+    const outgoing = isOutgoingMessage(item);
     const bubble = document.createElement('article');
     bubble.className = `campus-message ${outgoing ? 'outgoing' : 'incoming'}${item.is_broadcast ? ' broadcast' : ''}`;
     const meta = document.createElement('div');
@@ -1151,18 +1225,22 @@ function renderMessageThread() {
     }
     messageThread.append(bubble);
   }
-  messageThread.scrollTop = messageThread.scrollHeight;
+  messageThread.scrollTop = scrollToBottom ? messageThread.scrollHeight : oldScrollTop;
+  messageJumpLatest.hidden = scrollToBottom;
 }
 
 
 async function markSelectedConversationRead() {
   if (!currentStudent || !selectedMessageContact || messagesPanel.hidden
-      || document.visibilityState !== 'visible') return;
+      || document.visibilityState !== 'visible' || !isMessageThreadAtBottom()) return;
+  const actorId = currentStudent.student_id;
+  const generation = messageSyncGeneration;
   const unreadIds = messagesForContact(selectedMessageContact)
-    .filter((message) => !message.read)
+    .filter((message) => !message.read && !isOutgoingMessage(message))
     .map((message) => message.message_id);
   if (unreadIds.length === 0) return;
   const unreadSet = new Set(unreadIds);
+  for (const id of unreadIds) pendingMessageReads.add(id);
   campusMessages = campusMessages.map((message) =>
     unreadSet.has(message.message_id) ? { ...message, read: true } : message);
   renderConversationList();
@@ -1172,12 +1250,17 @@ async function markSelectedConversationRead() {
       method: 'PUT',
       body: JSON.stringify({
         actor_type: 'student',
-        actor_id: currentStudent.student_id,
+        actor_id: actorId,
         message_ids: unreadIds,
       }),
     });
   } catch (_error) {
-    // The next sync restores the authoritative read state.
+    if (generation !== messageSyncGeneration) return;
+    for (const id of unreadIds) pendingMessageReads.delete(id);
+    campusMessages = campusMessages.map((message) =>
+      unreadSet.has(message.message_id) ? { ...message, read: false } : message);
+    renderConversationList();
+    updateInboxBadge();
   }
 }
 
@@ -1190,8 +1273,11 @@ function selectMessageConversation(contact) {
     setMessage(messageStatus, '');
   }
   selectedMessageContact = contact;
+  cancelMessageStudentLookup();
+  messageSearch.value = '';
+  messageJumpLatest.hidden = true;
   renderConversationList();
-  renderMessageThread();
+  renderMessageThread(true);
   markSelectedConversationRead();
   if (contact.type !== 'broadcast') messageComposeInput.focus();
 }
@@ -1204,7 +1290,7 @@ function openStudentConversationById() {
     setMessage(messageSearchStatus, 'This is your own student ID. Enter another student’s ID.', true);
     return;
   }
-  const exactMatch = messageContacts.find((contact) =>
+  const exactMatch = conversationContacts().find((contact) =>
     contact.type === 'student' && String(contact.id).toLowerCase() === enteredId);
   if (exactMatch) {
     cancelMessageStudentLookup();
@@ -1257,24 +1343,39 @@ function cancelMessageStudentLookup() {
 
 async function refreshMessages(showErrors = false) {
   if (!currentStudent) return;
+  showErrors = showErrors === true;
+  if (messageRefreshTask?.generation === messageSyncGeneration) return messageRefreshTask.promise;
   const actorId = currentStudent.student_id;
-  try {
+  const generation = messageSyncGeneration;
+  const isCurrent = () => generation === messageSyncGeneration && currentStudent?.student_id === actorId;
+  const existingIds = new Set(campusMessages.map((message) => message.message_id));
+  const task = { generation, promise: null };
+  messageRefreshTask = task;
+  task.promise = (async () => {
     const params = new URLSearchParams({ actor_type: 'student', actor_id: actorId });
+    const loadDirectory = !messageDirectoryUpdatedAt || Date.now() - messageDirectoryUpdatedAt >= MESSAGE_DIRECTORY_POLL_MS;
     const [contactsResult, messagesResult] = await Promise.allSettled([
-      academicApiRequest(`/messages/contacts?${params}`).then((response) => {
-        if (currentStudent?.student_id !== actorId) return;
+      loadDirectory ? academicApiRequest(`/messages/contacts?${params}`, { signal: AbortSignal.timeout(12000) }).then((response) => {
+        if (!isCurrent()) return;
         const merged = new Map(lookedUpMessageContacts);
         for (const contact of response.contacts || []) merged.set(contactKey(contact), contact);
         messageContacts = [...merged.values()];
+        messageDirectoryUpdatedAt = Date.now();
         if (selectedMessageContact && selectedMessageContact.type !== 'broadcast') {
           selectedMessageContact = merged.get(contactKey(selectedMessageContact)) || selectedMessageContact;
         }
         renderConversationList();
         if (!selectedMessageContact) openStudentConversationById();
-      }),
-      academicApiRequest(`/messages?${params}`).then((response) => {
-        if (currentStudent?.student_id !== actorId) return;
-        campusMessages = response.messages || [];
+      }) : Promise.resolve(),
+      academicApiRequest(`/messages?${params}`, { signal: AbortSignal.timeout(12000) }).then((response) => {
+        if (!isCurrent()) return;
+        if (!Array.isArray(response.messages)) throw new Error('The message service returned an invalid inbox. Please restart the backend.');
+        const receivedIds = new Set(response.messages.map((message) => message.message_id));
+        const addedDuringSync = campusMessages.filter((message) => !existingIds.has(message.message_id) && !receivedIds.has(message.message_id));
+        campusMessages = [...response.messages, ...addedDuringSync].map((message) => {
+          if (message.read) pendingMessageReads.delete(message.message_id);
+          return pendingMessageReads.has(message.message_id) ? { ...message, read: true } : message;
+        });
         renderConversationList();
         if (selectedMessageContact) {
           renderMessageThread();
@@ -1283,14 +1384,31 @@ async function refreshMessages(showErrors = false) {
         updateInboxBadge();
       }),
     ]);
-    if (currentStudent?.student_id !== actorId) return;
+    if (!isCurrent()) return;
+    const inboxFailed = messagesResult.status === 'rejected';
+    setMessage(messageSyncStatus, inboxFailed
+      ? `Messages could not sync: ${messagesResult.reason.message} Retrying automatically…`
+      : contactsResult.status === 'rejected'
+        ? 'Chats are up to date · Classmate directory is reconnecting…'
+        : 'Chats are up to date · Updates automatically', inboxFailed);
     if (showErrors) {
       const failure = [contactsResult, messagesResult].find((result) => result.status === 'rejected');
       setMessage(messageStatus, failure ? failure.reason.message : '', Boolean(failure));
     }
-  } catch (error) {
-    if (showErrors) setMessage(messageStatus, error.message, true);
-  }
+  })().finally(() => {
+    if (!isCurrent()) return;
+    if (messageRefreshTask === task) messageRefreshTask = null;
+    scheduleMessageSync();
+  });
+  return task.promise;
+}
+
+
+function scheduleMessageSync() {
+  clearTimeout(messageTimer);
+  if (!currentStudent) return;
+  const active = !messagesPanel.hidden && document.visibilityState === 'visible';
+  messageTimer = setTimeout(() => refreshMessages(), active ? MESSAGE_ACTIVE_POLL_MS : MESSAGE_POLL_MS);
 }
 
 
@@ -1299,6 +1417,10 @@ function startMessageSync() {
   messageContacts = [];
   campusMessages = [];
   selectedMessageContact = null;
+  renderedMessageThreadKey = null;
+  renderedMessageThreadSignature = '';
+  messageDirectoryUpdatedAt = 0;
+  messageJumpLatest.hidden = true;
   clearMessageAttachment();
   messageComposeInput.value = '';
   messageComposeForm.hidden = true;
@@ -1311,15 +1433,19 @@ function startMessageSync() {
   messageThread.append(empty);
   setMessage(messageStatus, '');
   messageSearch.value = '';
+  setMessageListMode('chats');
+  setMessage(messageSyncStatus, 'Connecting to your chats…');
   updateInboxBadge();
   refreshMessages();
-  messageTimer = setInterval(refreshMessages, MESSAGE_POLL_MS);
 }
 
 
 function stopMessageSync() {
+  messageSyncGeneration += 1;
+  messageRefreshTask = null;
+  pendingMessageReads.clear();
   if (messageTimer) {
-    clearInterval(messageTimer);
+    clearTimeout(messageTimer);
     messageTimer = null;
   }
   cancelMessageStudentLookup();
@@ -1400,10 +1526,30 @@ async function downloadMessageDocument(item, button) {
 
 
 inboxButton.addEventListener('click', () => showDashboardSection('messages'));
+messageChatsTab.addEventListener('click', () => {
+  cancelMessageStudentLookup();
+  messageSearch.value = '';
+  setMessageListMode('chats');
+  conversationList.scrollTop = 0;
+});
+messageContactsTab.addEventListener('click', () => setMessageListMode('contacts'));
+messageJumpLatest.addEventListener('click', () => {
+  messageThread.scrollTop = messageThread.scrollHeight;
+  messageJumpLatest.hidden = true;
+  markSelectedConversationRead();
+});
+messageThread.addEventListener('scroll', () => {
+  if (isMessageThreadAtBottom()) {
+    messageJumpLatest.hidden = true;
+    markSelectedConversationRead();
+  }
+});
 document.querySelector('#new-message-button').addEventListener('click', () => {
   if (messageSending) return;
   cancelMessageStudentLookup();
   selectedMessageContact = null;
+  renderedMessageThreadKey = null;
+  messageJumpLatest.hidden = true;
   clearMessageAttachment();
   messageComposeInput.value = '';
   messageComposeForm.hidden = true;
@@ -1416,7 +1562,7 @@ document.querySelector('#new-message-button').addEventListener('click', () => {
   messageThread.append(empty);
   messageSearch.value = '';
   setMessage(messageStatus, '');
-  renderConversationList();
+  setMessageListMode('contacts');
   messageSearch.focus();
 });
 messageSearch.addEventListener('input', () => {
@@ -1424,12 +1570,18 @@ messageSearch.addEventListener('input', () => {
   renderConversationList();
   openStudentConversationById();
 });
+messageComposeInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  if (!messageSending) messageComposeForm.requestSubmit();
+});
 messageComposeForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!currentStudent || !selectedMessageContact || selectedMessageContact.type === 'broadcast') return;
   const body = messageComposeInput.value.trim();
   if ((!body && !selectedMessageFile) || messageSending) return;
   const senderId = currentStudent.student_id;
+  const generation = messageSyncGeneration;
   const recipient = { ...selectedMessageContact };
   const file = selectedMessageFile;
   messageSending = true;
@@ -1461,7 +1613,7 @@ messageComposeForm.addEventListener('submit', async (event) => {
         }),
       });
     }
-    if (currentStudent?.student_id !== senderId) return;
+    if (currentStudent?.student_id !== senderId || messageSyncGeneration !== generation) return;
     if (sent.message) {
       campusMessages = [...campusMessages.filter((message) => message.message_id !== sent.message.message_id), sent.message];
     }
@@ -1470,18 +1622,18 @@ messageComposeForm.addEventListener('submit', async (event) => {
     messageComposeInput.value = '';
     clearMessageAttachment();
     renderConversationList();
-    renderMessageThread();
-    await refreshMessages(true);
-    renderMessageThread();
+    renderMessageThread(true);
+    setMessage(messageStatus, '');
+    refreshMessages();
   } catch (error) {
-    if (currentStudent?.student_id === senderId) setMessage(messageStatus, error.message, true);
+    if (currentStudent?.student_id === senderId && messageSyncGeneration === generation) setMessage(messageStatus, error.message, true);
   } finally {
     messageSending = false;
     messageSendButton.disabled = false;
     messageAttachButton.disabled = false;
     messageAttachmentRemove.disabled = false;
     messageComposeInput.disabled = false;
-    if (currentStudent?.student_id === senderId) messageComposeInput.focus();
+    if (currentStudent?.student_id === senderId && messageSyncGeneration === generation) messageComposeInput.focus();
   }
 });
 

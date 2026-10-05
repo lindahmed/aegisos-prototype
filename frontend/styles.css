@@ -766,9 +766,16 @@ button:disabled { cursor: wait; opacity: 0.55; }
 .inbox-button { position: relative; }
 .messages-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .messages-heading h3 { margin: 2px 0 0; }
+.message-sync-status { margin: 5px 0 0; color: var(--text-faint); font-size: 12px; }
+.message-sync-status.error { color: var(--red); }
+.message-list-tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+.message-list-tabs button { flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-dim); font: inherit; font-size: 14px; cursor: pointer; }
+.message-list-tabs button[aria-pressed="true"] { background: var(--surface-3); border-color: var(--border-focus); color: var(--text); }
+.message-list-tabs span { margin-left: 5px; padding: 2px 6px; border-radius: 999px; background: var(--blue); color: white; font-size: 11px; }
 .messages-layout {
   display: grid;
   grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 480px;
   height: calc(100% - 96px);
   overflow: hidden;
@@ -776,12 +783,13 @@ button:disabled { cursor: wait; opacity: 0.55; }
   border-radius: var(--radius-lg);
   background: var(--surface-2);
 }
-.conversation-sidebar { display: flex; min-width: 0; flex-direction: column; padding: 18px 14px; border-right: 1px solid var(--border); background: var(--surface-1); }
+.conversation-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 18px 14px; border-right: 1px solid var(--border); background: var(--surface-1); }
 .message-search-label { margin: 0 4px 8px; color: var(--text-dim); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .conversation-sidebar input { margin-bottom: 14px; padding: 10px 12px; font-size: 13px; }
 .conversation-list { flex: 1; min-height: 0; overflow-y: auto; }
 .conversation-list-heading { margin: 14px 10px 8px; color: var(--text-dim); font-size: 12px; font-weight: 600; }
 .conversation-item.unread .conversation-preview { color: var(--text); font-weight: 600; }
+.conversation-item.unread { border-left: 3px solid var(--blue); }
 .conversation-item {
   display: flex;
   align-items: center;
@@ -802,7 +810,7 @@ button:disabled { cursor: wait; opacity: 0.55; }
 .conversation-copy { display: block; flex: 1; min-width: 0; }
 .conversation-name-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .conversation-name-row strong, .conversation-preview { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-name-row strong { font-size: 13.5px; }
+.conversation-name-row strong { min-width: 0; font-size: 13.5px; }
 .conversation-name-row time { flex: none; color: var(--text-faint); font-size: 10px; }
 .conversation-preview { margin-top: 4px; color: var(--text-faint); font-size: 11.5px; }
 .conversation-unread { display: grid; flex: none; min-width: 20px; height: 20px; padding: 0 6px; place-items: center; border-radius: 999px; background: var(--blue); color: white; font-size: 10.5px; font-weight: 800; }
@@ -832,6 +840,7 @@ button:disabled { cursor: wait; opacity: 0.55; }
 .message-compose-form textarea { min-height: 50px; max-height: 130px; resize: vertical; font-size: 13.5px; }
 .message-compose-form .primary-button { min-width: 92px; }
 .conversation-pane > .message { min-height: 0; margin: 0; padding: 0 18px 10px; }
+.message-jump-latest { align-self: center; margin: 0 0 10px; padding: 7px 14px; }
 
 .score-summary, .score-row, .notif-item-title, .calendar-empty,
 .calendar-agenda-card h5, .toast-title, .conversation-name-row strong,
@@ -964,6 +973,9 @@ body.is-authenticated .messages-panel:not([hidden]) {
   min-height: 460px;
   overflow: hidden;
 }
+body.is-authenticated .messages-heading { flex: none; }
+body.is-authenticated .messages-layout { flex: 1; height: auto; min-height: 0; }
+body.is-authenticated .message-thread { min-height: 0; }
 body.is-authenticated .advisor-panel:not([hidden]) {
   display: flex;
   flex-direction: column;
