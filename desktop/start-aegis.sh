@@ -89,4 +89,4 @@ fi
 
 echo "Starting UniTrack..."
 cd "$FRONTEND_DIR"
-AEGIS_API_URL="$API_URL" npm start
+AEGIS_API_URL="$API_URL" AEGIS_ACADEMIC_API_URL="$API_URL" npm start
