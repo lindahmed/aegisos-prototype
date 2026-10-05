@@ -779,14 +779,20 @@ button:disabled { cursor: wait; opacity: 0.55; }
   border-radius: var(--radius-lg);
   background: var(--surface-2);
 }
-.conversation-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 12px; padding: 18px 14px; border-right: 1px solid var(--border); background: var(--surface-1); }
+.conversation-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 18px 14px; border-right: 1px solid var(--border); background: var(--surface-1); }
 .recent-message-section, .contact-section { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
-.recent-message-section { flex: 0 1 42%; max-height: 48%; }
+.recent-message-section { flex: 1 1 0; }
 .contact-section { flex: 1 1 0; }
 .conversation-section-heading { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px; }
 .conversation-section-heading h5, .contact-list-heading { margin: 0 4px 8px; color: var(--text-dim); font-size: 12px; font-weight: 700; }
 .conversation-section-heading h5 { margin: 0 0 8px; }
 .contact-list-heading { flex: none; }
+.contact-section-heading { display: flex; flex: none; align-items: center; gap: 8px; margin-bottom: 10px; }
+.contact-section-heading .contact-list-heading { margin: 0; font-size: 14px; }
+.contact-back-button { flex: none; padding: 6px 8px; }
+.sidebar-navigation-button { display: flex; flex: none; align-items: center; gap: 9px; width: 100%; margin-top: 12px; padding: 11px 13px; text-align: left; }
+.sidebar-navigation-button span:nth-of-type(1) { flex: 1; }
+.sidebar-navigation-button span:last-child { font-size: 22px; line-height: 1; }
 .message-search-label { flex: none; margin: 0 4px 8px; color: var(--text-dim); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .conversation-sidebar input { flex: none; margin-bottom: 8px; padding: 10px 12px; font-size: 13px; }
 .conversation-list { min-height: 0; overflow-y: auto; }

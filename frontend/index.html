@@ -328,12 +328,20 @@
                     <span id="recent-messages-unread" class="conversation-unread" hidden></span>
                   </div>
                   <div id="recent-message-list" class="conversation-list recent-message-list" aria-label="Recent messages"></div>
+                  <button id="open-contacts-button" class="secondary-button sidebar-navigation-button" type="button">
+                    <svg class="btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <span>Contacts</span>
+                    <span aria-hidden="true">›</span>
+                  </button>
                 </section>
-                <section class="contact-section" aria-labelledby="contact-list-heading">
-                  <h5 id="contact-list-heading" class="contact-list-heading">Contacts</h5>
+                <section class="contact-section" aria-labelledby="contact-list-heading" hidden>
+                  <div class="contact-section-heading">
+                    <button id="back-to-recent-button" class="text-button contact-back-button" type="button" aria-label="Back to recent chats">← Back</button>
+                    <h5 id="contact-list-heading" class="contact-list-heading">Contacts</h5>
+                  </div>
                   <label class="message-search-label" for="message-search">Find a classmate by name or student ID</label>
                   <input id="message-search" type="search" placeholder="Name or student ID" autocomplete="off" aria-describedby="message-search-help">
-                  <p id="message-search-help" class="message-search-help">Your contacts are listed separately from recent messages.</p>
+                  <p id="message-search-help" class="message-search-help">Classmates in your major and professors are listed below. Enter any registered student’s full ID to start a chat.</p>
                   <p id="message-search-status" class="message message-search-status" role="status" aria-live="polite"></p>
                   <div id="contacts-list" class="conversation-list contact-list" aria-label="Contacts"></div>
                 </section>

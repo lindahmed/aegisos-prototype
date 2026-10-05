@@ -69,8 +69,24 @@ async function main() {
     await page.locator('#dashboard-view').waitFor({ state: 'visible' });
     await page.locator('#inbox-button').click();
   };
+  const openContacts = async () => {
+    if (await page.locator('.contact-section').isHidden()) {
+      await page.locator('#open-contacts-button').click();
+    }
+    await page.locator('.contact-section').waitFor({ state: 'visible' });
+  };
+  const backToRecent = async () => {
+    if (await page.locator('.recent-message-section').isHidden()) {
+      await page.locator('#back-to-recent-button').click();
+    }
+    await page.locator('.recent-message-section').waitFor({ state: 'visible' });
+  };
   await login('231027905');
   assert((await page.locator('#recent-message-list').textContent()).includes('Recent messages will appear here'));
+  assert(await page.locator('#open-contacts-button').isVisible());
+  assert(await page.locator('.contact-section').isHidden());
+  await openContacts();
+  assert(await page.locator('.recent-message-section').isHidden());
   const contacts = await (await fetch(`${api}/messages/contacts?actor_type=student&actor_id=231027905`)).json();
   const recipient = contacts.contacts.find(contact => contact.id === '231027906');
   const third = contacts.contacts.find(contact => contact.id === '231027907');
@@ -79,6 +95,9 @@ async function main() {
   assert.equal(await page.locator('#recent-message-list .conversation-item').count(), 0,
     'A directory contact must stay separate until there is conversation history');
   console.log('PASS: the contacts directory and recent-message list are separate; the directory defaults to same-major classmates');
+  await backToRecent();
+  assert(await page.locator('.contact-section').isHidden());
+  console.log('PASS: Contacts opens from the bottom-left button and Back returns to recent chats');
 
   // Simulate a running backend that returns the older contact shape without major.
   await page.route('**/messages/contacts?**', route => route.fulfill({
@@ -94,6 +113,7 @@ async function main() {
   });
   await page.locator('#sign-out-button').click();
   await login('231027905');
+  await openContacts();
   await page.locator('#contacts-list .conversation-item').filter({ hasText: recipient.name }).waitFor();
   assert.equal(inboxReleased, false);
   inboxReleased = true;
@@ -111,6 +131,7 @@ async function main() {
   }));
   await page.locator('#sign-out-button').click();
   await login('231027905');
+  await openContacts();
   await page.locator('#message-search').fill('2310006157');
   await page.waitForFunction(() => document.querySelector('#message-search-status').textContent.includes('No registered student has ID 2310006157'));
   await page.locator('#message-search').fill('231006157');
@@ -128,6 +149,7 @@ async function main() {
   await page.unroute('**/messages?**');
   await page.locator('#inbox-button').click();
   await page.locator('#new-message-button').click();
+  assert(await page.locator('.contact-section').isVisible());
   await page.locator('#contacts-list .conversation-item').filter({ hasText: recipient.name }).waitFor();
   await page.locator('#contacts-list .conversation-item').filter({ hasText: recipient.name }).click();
   const paperclip = page.getByRole('button', { name: 'Attach document', exact: true });
@@ -264,6 +286,7 @@ async function main() {
   await page.locator('#new-message-button').click();
   await sendText('231006157', 'Latest message moves this chat to the top');
   await page.evaluate(() => refreshMessages());
+  await backToRecent();
   const topChat = page.locator('#recent-message-list .conversation-item').first();
   assert.equal(await topChat.getAttribute('data-contact-key'), 'student:231006157');
   assert((await topChat.textContent()).includes('Latest message moves this chat to the top'));
@@ -285,6 +308,7 @@ async function main() {
   await page.locator('#recent-message-list .conversation-item').first().click();
   assert((await page.locator('#message-thread').textContent()).includes('Newest incoming message'));
   assert((await page.locator('#message-thread').textContent()).includes('Latest message moves this chat to the top'));
+  await openContacts();
   await page.locator('#message-search').fill('Mariam');
   assert.equal(await page.locator('#contacts-list .conversation-item').count(), 0,
     'Searching contacts must not add recent conversations to the directory');
@@ -292,6 +316,7 @@ async function main() {
   assert.equal(await page.locator('#recent-message-list [data-contact-key="student:231006157"]').count(), 1,
     'Searching contacts must not filter or hide recent messages');
   await page.locator('#message-search').fill('');
+  await backToRecent();
   await page.unroute('**/messages/contacts?**');
   await screenshot('recent-chats.png');
   console.log('PASS: recent chats and history return after signing in again, even with an incomplete directory');
@@ -308,6 +333,7 @@ async function main() {
   console.log('PASS: a first-ever sender from another major appears automatically by name without an ID or directory entry');
 
   // Reproduce the reported problem with real timed sync, not a manual refresh.
+  await openContacts();
   await page.locator('#message-search').fill('231027905');
   await page.waitForFunction(() => document.querySelector('#conversation-title').textContent === 'Yasmin Wael');
   await page.locator('#message-search').fill('999999999');
@@ -316,6 +342,7 @@ async function main() {
     && document.querySelector('#recent-message-list .conversation-item')?.textContent.includes('A live message from Mariam'));
   const liveSender = page.locator('#recent-message-list [data-contact-key="student:231027907"]');
   assert((await liveSender.textContent()).includes(third.name));
+  await backToRecent();
   assert(await liveSender.locator('.conversation-unread').isVisible());
   await liveSender.click();
   assert.equal(await page.locator('#message-search').inputValue(), '');

@@ -916,6 +916,10 @@ document.addEventListener('visibilitychange', () => {
 
 const inboxButton = document.querySelector('#inbox-button');
 const inboxBadge = document.querySelector('#inbox-badge');
+const recentMessageSection = document.querySelector('.recent-message-section');
+const contactSection = document.querySelector('.contact-section');
+const openContactsButton = document.querySelector('#open-contacts-button');
+const backToRecentButton = document.querySelector('#back-to-recent-button');
 const recentMessageList = document.querySelector('#recent-message-list');
 const contactsList = document.querySelector('#contacts-list');
 const conversationTitle = document.querySelector('#conversation-title');
@@ -1037,6 +1041,15 @@ function isOutgoingMessage(message) {
 }
 
 
+function showMessageSidebar(view, focusSearch = false) {
+  const showContacts = view === 'contacts';
+  recentMessageSection.hidden = showContacts;
+  contactSection.hidden = !showContacts;
+  if (showContacts && focusSearch) messageSearch.focus();
+  if (!showContacts) backToRecentButton.blur();
+}
+
+
 function renderConversationList() {
   const query = messageSearch.value.trim().toLowerCase();
   const activity = new Map();
@@ -1062,9 +1075,7 @@ function renderConversationList() {
         || left.name.localeCompare(right.name)
         || contactKey(left).localeCompare(contactKey(right));
     });
-  const recentKeys = new Set(recentContacts.map(contactKey));
   const visibleContacts = allContacts.filter((contact) => {
-    if (recentKeys.has(contactKey(contact))) return false;
     const isStudent = contact.type === 'student';
     const major = contact.major || contact.subtitle?.split('·').at(-1) || '';
     const sameMajor = isStudent
@@ -1072,7 +1083,6 @@ function renderConversationList() {
     const matchesQuery = `${contact.name} ${contact.id} ${contact.subtitle}`
       .toLowerCase().includes(query);
     const exactStudentId = isStudent && String(contact.id).toLowerCase() === query;
-    if (selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact)) return true;
     return isStudent ? exactStudentId || (sameMajor && matchesQuery) : matchesQuery;
   });
   visibleContacts.sort((left, right) =>
@@ -1431,6 +1441,7 @@ function startMessageSync() {
   messageThread.append(empty);
   setMessage(messageStatus, '');
   messageSearch.value = '';
+  showMessageSidebar('recent');
   setMessage(messageSyncStatus, 'Connecting to your chats…');
   updateInboxBadge();
   refreshMessages();
@@ -1523,6 +1534,14 @@ async function downloadMessageDocument(item, button) {
 
 
 inboxButton.addEventListener('click', () => showDashboardSection('messages'));
+openContactsButton.addEventListener('click', () => showMessageSidebar('contacts', true));
+backToRecentButton.addEventListener('click', () => {
+  cancelMessageStudentLookup();
+  messageSearch.value = '';
+  renderConversationList();
+  showMessageSidebar('recent');
+  openContactsButton.focus();
+});
 messageJumpLatest.addEventListener('click', () => {
   messageThread.scrollTop = messageThread.scrollHeight;
   messageJumpLatest.hidden = true;
@@ -1553,7 +1572,7 @@ document.querySelector('#new-message-button').addEventListener('click', () => {
   messageSearch.value = '';
   setMessage(messageStatus, '');
   renderConversationList();
-  messageSearch.focus();
+  showMessageSidebar('contacts', true);
 });
 messageSearch.addEventListener('input', () => {
   cancelMessageStudentLookup();
