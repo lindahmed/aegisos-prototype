@@ -966,6 +966,38 @@ function messagesForContact(contact) {
 }
 
 
+function conversationContacts() {
+  const contacts = new Map();
+  for (const message of campusMessages) {
+    if (message.is_broadcast) {
+      contacts.set('broadcast:all-students', {
+        type: 'broadcast', id: 'all-students', name: 'Professor broadcasts',
+        subtitle: 'Messages sent to all students',
+      });
+      continue;
+    }
+    const outgoing = message.sender_type === 'student'
+      && String(message.sender_id) === String(currentStudent?.student_id);
+    const type = outgoing ? message.recipient_type : message.sender_type;
+    const id = outgoing ? message.recipient_id : message.sender_id;
+    if (!type || !id) continue;
+    const contact = {
+      type, id: String(id),
+      name: (outgoing ? message.recipient_name : message.sender_name) || `Student ${id}`,
+      subtitle: type === 'staff' ? 'Professor' : `Student ID ${id}`,
+    };
+    contacts.set(contactKey(contact), contact);
+  }
+  for (const contact of messageContacts) contacts.set(contactKey(contact), contact);
+  return [...contacts.values()];
+}
+
+
+function messageTimestamp(message) {
+  return Date.parse(message?.created_at) || 0;
+}
+
+
 function formatMessageTime(value) {
   const date = new Date(value);
   const today = new Date();
@@ -985,16 +1017,20 @@ function updateInboxBadge() {
 
 function renderConversationList() {
   const query = messageSearch.value.trim().toLowerCase();
-  const contacts = [...messageContacts];
-  if (campusMessages.some((message) => message.is_broadcast)) {
-    contacts.unshift({
-      type: 'broadcast',
-      id: 'all-students',
-      name: 'Professor broadcasts',
-      subtitle: 'Messages sent to all students',
+  const activity = new Map();
+  for (const message of campusMessages) {
+    const outgoing = message.sender_type === 'student'
+      && String(message.sender_id) === String(currentStudent?.student_id);
+    const key = message.is_broadcast ? 'broadcast:all-students' : contactKey({
+      type: outgoing ? message.recipient_type : message.sender_type,
+      id: outgoing ? message.recipient_id : message.sender_id,
     });
+    const entry = activity.get(key) || { latest: null, unread: 0 };
+    if (!entry.latest || messageTimestamp(message) >= messageTimestamp(entry.latest)) entry.latest = message;
+    if (!message.read && !outgoing) entry.unread += 1;
+    activity.set(key, entry);
   }
-  const visible = contacts.filter((contact) => {
+  const visible = conversationContacts().filter((contact) => {
     const isStudent = contact.type === 'student';
     const major = contact.major || contact.subtitle?.split('·').at(-1) || '';
     const sameMajor = isStudent
@@ -1002,12 +1038,16 @@ function renderConversationList() {
     const matchesQuery = `${contact.name} ${contact.id} ${contact.subtitle}`
       .toLowerCase().includes(query);
     const exactStudentId = isStudent && String(contact.id).toLowerCase() === query;
-    return isStudent ? exactStudentId || (sameMajor && matchesQuery) : matchesQuery;
+    const hasHistory = activity.has(contactKey(contact));
+    return isStudent ? exactStudentId || ((sameMajor || hasHistory) && matchesQuery) : matchesQuery;
   });
   visible.sort((left, right) => {
-    const leftLatest = messagesForContact(left).at(-1)?.created_at || '';
-    const rightLatest = messagesForContact(right).at(-1)?.created_at || '';
-    return rightLatest.localeCompare(leftLatest);
+    const leftLatest = activity.get(contactKey(left))?.latest;
+    const rightLatest = activity.get(contactKey(right))?.latest;
+    return Number(Boolean(rightLatest)) - Number(Boolean(leftLatest))
+      || messageTimestamp(rightLatest) - messageTimestamp(leftLatest)
+      || left.name.localeCompare(right.name)
+      || contactKey(left).localeCompare(contactKey(right));
   });
 
   conversationList.replaceChildren();
@@ -1021,13 +1061,21 @@ function renderConversationList() {
     return;
   }
 
+  let section = '';
   for (const contact of visible) {
-    const thread = messagesForContact(contact);
-    const latest = thread.at(-1);
-    const unread = thread.filter((message) => !message.read).length;
+    const { latest, unread = 0 } = activity.get(contactKey(contact)) || {};
+    const nextSection = latest ? 'Recent chats' : 'Contacts';
+    if (section !== nextSection) {
+      section = nextSection;
+      const heading = document.createElement('h5');
+      heading.className = 'conversation-list-heading';
+      heading.textContent = section;
+      conversationList.append(heading);
+    }
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `conversation-item${selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact) ? ' active' : ''}`;
+    button.className = `conversation-item${unread ? ' unread' : ''}${selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact) ? ' active' : ''}`;
+    button.dataset.contactKey = contactKey(contact);
     button.addEventListener('click', () => selectMessageConversation(contact));
     const avatar = document.createElement('span');
     avatar.className = `conversation-avatar ${contact.type}`;
@@ -1064,7 +1112,9 @@ function renderConversationList() {
 
 function renderMessageThread() {
   if (!selectedMessageContact) return;
-  const thread = messagesForContact(selectedMessageContact);
+  const thread = messagesForContact(selectedMessageContact).sort((left, right) =>
+    messageTimestamp(left) - messageTimestamp(right)
+      || String(left.message_id).localeCompare(String(right.message_id)));
   conversationTitle.textContent = selectedMessageContact.name;
   conversationSubtitle.textContent = selectedMessageContact.subtitle;
   messageComposeForm.hidden = selectedMessageContact.type === 'broadcast';
@@ -1106,7 +1156,8 @@ function renderMessageThread() {
 
 
 async function markSelectedConversationRead() {
-  if (!currentStudent || !selectedMessageContact) return;
+  if (!currentStudent || !selectedMessageContact || messagesPanel.hidden
+      || document.visibilityState !== 'visible') return;
   const unreadIds = messagesForContact(selectedMessageContact)
     .filter((message) => !message.read)
     .map((message) => message.message_id);
@@ -1216,7 +1267,7 @@ async function refreshMessages(showErrors = false) {
         for (const contact of response.contacts || []) merged.set(contactKey(contact), contact);
         messageContacts = [...merged.values()];
         if (selectedMessageContact && selectedMessageContact.type !== 'broadcast') {
-          selectedMessageContact = merged.get(contactKey(selectedMessageContact)) || null;
+          selectedMessageContact = merged.get(contactKey(selectedMessageContact)) || selectedMessageContact;
         }
         renderConversationList();
         if (!selectedMessageContact) openStudentConversationById();
@@ -1388,6 +1439,7 @@ messageComposeForm.addEventListener('submit', async (event) => {
   messageComposeInput.disabled = true;
   setMessage(messageStatus, file ? 'Sending document…' : 'Sending…');
   try {
+    let sent;
     if (file) {
       const formData = new FormData();
       formData.append('sender_type', 'student');
@@ -1396,9 +1448,9 @@ messageComposeForm.addEventListener('submit', async (event) => {
       formData.append('recipient_id', recipient.id);
       formData.append('body', body);
       formData.append('file', file);
-      await academicApiRequest('/messages/attachments', { method: 'POST', body: formData });
+      sent = await academicApiRequest('/messages/attachments', { method: 'POST', body: formData });
     } else {
-      await academicApiRequest('/messages', {
+      sent = await academicApiRequest('/messages', {
         method: 'POST',
         body: JSON.stringify({
           sender_type: 'student',
@@ -1410,8 +1462,15 @@ messageComposeForm.addEventListener('submit', async (event) => {
       });
     }
     if (currentStudent?.student_id !== senderId) return;
+    if (sent.message) {
+      campusMessages = [...campusMessages.filter((message) => message.message_id !== sent.message.message_id), sent.message];
+    }
+    cancelMessageStudentLookup();
+    messageSearch.value = '';
     messageComposeInput.value = '';
     clearMessageAttachment();
+    renderConversationList();
+    renderMessageThread();
     await refreshMessages(true);
     renderMessageThread();
   } catch (error) {

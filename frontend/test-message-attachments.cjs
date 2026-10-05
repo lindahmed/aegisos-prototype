@@ -214,6 +214,65 @@ async function main() {
   }
   assert.deepEqual(fs.readFileSync(path.join(runDir, 'received-notes.txt')), contents);
   console.log('PASS: second student receives document and Electron downloads identical contents');
+
+  const sendText = async (senderId, body) => {
+    const response = await fetch(`${api}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sender_type: 'student', sender_id: senderId,
+        recipient_type: 'student', recipient_id: '231027906', body }),
+    });
+    assert.equal(response.status, 200);
+    return (await response.json()).message;
+  };
+  const older = await sendText('231027907', 'Previous conversation from another major');
+  const newer = await sendText('231006157', 'Newest incoming message');
+  execFileSync(process.env.TEST_PYTHON || 'python', ['-c',
+    'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute("UPDATE portal_messages SET created_at=? WHERE message_id=?", ("2026-01-01T11:00:00+02:00",sys.argv[2])); c.execute("UPDATE portal_messages SET created_at=? WHERE message_id=?", ("2026-01-01T08:30:00Z",sys.argv[3])); c.commit(); c.close()',
+    path.join(runDir, 'test.db'), older.message_id, newer.message_id], { windowsHide: true });
+  // Both messages are older than the already-read document chat. Ranking uses real
+  // timestamps (including offsets), not unread status or timestamp strings.
+  await page.evaluate(() => refreshMessages());
+  const keys = await page.locator('.conversation-item').evaluateAll(items => items.map(item => item.dataset.contactKey));
+  assert(keys.indexOf('student:231027905') < keys.indexOf('student:231027907'));
+  assert(keys.indexOf('student:231027907') < keys.indexOf('student:231006157'));
+  console.log('PASS: recent chats include other majors and sort by actual message time');
+
+  await page.evaluate(() => showDashboardSection('workspace'));
+  const incoming = await sendText('231027905', 'Unread while on workspace');
+  await page.evaluate(() => refreshMessages());
+  const inbox = await (await fetch(`${api}/messages?actor_type=student&actor_id=231027906`)).json();
+  assert.equal(inbox.messages.find(message => message.message_id === incoming.message_id).read, false);
+  await page.locator('#inbox-button').click();
+  await page.locator('#new-message-button').click();
+  await sendText('231006157', 'Latest message moves this chat to the top');
+  await page.evaluate(() => refreshMessages());
+  const topChat = page.locator('.conversation-item').first();
+  assert.equal(await topChat.getAttribute('data-contact-key'), 'student:231006157');
+  assert((await topChat.textContent()).includes('Latest message moves this chat to the top'));
+  assert.equal(await topChat.locator('.conversation-unread').textContent(), '2');
+  await topChat.click();
+  await page.waitForFunction(() => document.querySelector('#message-thread').textContent.includes('Newest incoming message')
+    && document.querySelector('#message-thread').textContent.includes('Latest message moves this chat to the top'));
+  assert.equal(await page.locator('.conversation-item').first().getAttribute('data-contact-key'), 'student:231006157');
+  console.log('PASS: new messages move chats to the top with unread count and complete history');
+
+  // Re-enter the account with an incomplete directory: saved history must rebuild
+  // recent contacts and remain searchable even when those classmates are absent.
+  await page.route('**/messages/contacts?**', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ contacts: [] }),
+  }));
+  await page.locator('#sign-out-button').click();
+  await login('231027906');
+  await page.waitForFunction(() => document.querySelector('.conversation-item')?.dataset.contactKey === 'student:231006157');
+  await page.locator('.conversation-item').first().click();
+  assert((await page.locator('#message-thread').textContent()).includes('Newest incoming message'));
+  assert((await page.locator('#message-thread').textContent()).includes('Latest message moves this chat to the top'));
+  await page.locator('#message-search').fill('Mariam');
+  assert.equal(await page.locator('.conversation-item').first().getAttribute('data-contact-key'), 'student:231027907');
+  await page.locator('#message-search').fill('');
+  await page.unroute('**/messages/contacts?**');
+  await screenshot('recent-chats.png');
+  console.log('PASS: recent chats and history return after signing in again, even with an incomplete directory');
   assert.deepEqual(errors, [], 'No renderer errors');
   console.log(`Desktop attachment checks passed. Screenshots: ${runDir}`);
 }

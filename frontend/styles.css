@@ -780,6 +780,8 @@ button:disabled { cursor: wait; opacity: 0.55; }
 .message-search-label { margin: 0 4px 8px; color: var(--text-dim); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .conversation-sidebar input { margin-bottom: 14px; padding: 10px 12px; font-size: 13px; }
 .conversation-list { flex: 1; min-height: 0; overflow-y: auto; }
+.conversation-list-heading { margin: 14px 10px 8px; color: var(--text-dim); font-size: 12px; font-weight: 600; }
+.conversation-item.unread .conversation-preview { color: var(--text); font-weight: 600; }
 .conversation-item {
   display: flex;
   align-items: center;
