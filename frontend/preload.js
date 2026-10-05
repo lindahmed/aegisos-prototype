@@ -1,10 +1,9 @@
 const { contextBridge } = require('electron');
 
 
+const apiBaseUrl = process.env.AEGIS_API_URL || 'http://127.0.0.1:8000';
+
 contextBridge.exposeInMainWorld('aegis', {
-  apiBaseUrl: process.env.AEGIS_API_URL || 'http://127.0.0.1:8001',
-  academicApiBaseUrl:
-    process.env.AEGIS_ACADEMIC_API_URL ||
-    process.env.AEGIS_API_URL ||
-    'http://127.0.0.1:8001',
+  apiBaseUrl,
+  academicApiBaseUrl: process.env.AEGIS_ACADEMIC_API_URL || apiBaseUrl,
 });

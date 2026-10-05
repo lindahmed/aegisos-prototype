@@ -192,8 +192,9 @@ async function academicApiRequest(path, options = {}) {
         ...(options.headers || {}),
       },
     });
-  } catch (_error) {
-    throw new Error('The shared academic notification service is unavailable.');
+  } catch (error) {
+    const reason = error?.name === 'TimeoutError' ? 'timed out' : 'could not be reached';
+    throw new Error(`The message service at ${academicApiBaseUrl} ${reason}.`);
   }
 
   const payload = await response.json().catch(() => ({}));

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "postinstall": "install-electron",
-    "check": "node --check main.js && node --check preload.js && node --check renderer.js",
+    "check": "node --check main.js && node --check preload.js && node --check renderer.js && node test-runtime-config.cjs",
     "test:messages": "node test-message-attachments.cjs"
   },
   "keywords": [],
