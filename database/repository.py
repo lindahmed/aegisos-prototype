@@ -385,6 +385,13 @@ class StudentRepository:
             course_columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(courses)")
             }
+            message_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(portal_messages)")
+            }
+            if "attachment" not in message_columns:
+                connection.execute("ALTER TABLE portal_messages ADD COLUMN attachment TEXT")
+            if "attachment_content" not in message_columns:
+                connection.execute("ALTER TABLE portal_messages ADD COLUMN attachment_content BLOB")
             if "status" not in course_columns:
                 connection.execute(
                     "ALTER TABLE courses ADD COLUMN status TEXT NOT NULL DEFAULT 'Current'"
@@ -627,13 +634,26 @@ class StudentRepository:
             student_ids = [row["student_id"] for row in connection.execute("SELECT student_id FROM students ORDER BY student_id")]
         return [student for student_id in student_ids if (student := self.get_student(student_id)) is not None]
 
-    def create_portal_message(self, message: dict[str, Any]) -> dict[str, Any]:
+    def list_message_students(self) -> list[dict[str, str]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT student_id, name, major, year FROM students ORDER BY name, student_id"
+            ).fetchall()
+        return [
+            {"type": "student", "id": str(row["student_id"]), "name": row["name"],
+             "major": row["major"], "subtitle": f'Year {row["year"]} · {row["major"]}'}
+            for row in rows
+        ]
+
+    def create_portal_message(
+        self, message: dict[str, Any], *, attachment_content: bytes | None = None
+    ) -> dict[str, Any]:
         with self._connect() as connection:
             connection.execute(
                 """INSERT INTO portal_messages (
                        message_id, sender_type, sender_id, recipient_type,
-                       recipient_id, is_broadcast, body, created_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       recipient_id, is_broadcast, body, created_at, attachment, attachment_content
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     message["message_id"],
                     message["sender_type"],
@@ -643,6 +663,8 @@ class StudentRepository:
                     1 if message.get("is_broadcast") else 0,
                     message["body"],
                     message["created_at"],
+                    json.dumps(message["attachment"]) if message.get("attachment") else None,
+                    attachment_content,
                 ),
             )
         return dict(message)
@@ -652,7 +674,8 @@ class StudentRepository:
     ) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
-                """SELECT m.*,
+                """SELECT m.message_id, m.sender_type, m.sender_id, m.recipient_type,
+                          m.recipient_id, m.is_broadcast, m.body, m.created_at, m.attachment,
                           CASE WHEN r.message_id IS NULL THEN 0 ELSE 1 END AS was_read
                    FROM portal_messages AS m
                    LEFT JOIN portal_message_reads AS r
@@ -674,12 +697,21 @@ class StudentRepository:
             ).fetchall()
         messages = [dict(row) for row in rows]
         for message in messages:
+            message["attachment"] = json.loads(message["attachment"]) if message.get("attachment") else None
             message["is_broadcast"] = bool(message["is_broadcast"])
             message["read"] = (
                 message["sender_type"] == actor_type
                 and message["sender_id"] == actor_id
             ) or bool(message.pop("was_read"))
         return messages
+
+    def get_portal_message_attachment(self, message_id: str) -> bytes | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT attachment_content FROM portal_messages WHERE message_id = ?",
+                (message_id,),
+            ).fetchone()
+        return bytes(row[0]) if row and row[0] is not None else None
 
     def mark_portal_messages_read(
         self, actor_type: str, actor_id: str, message_ids: list[str]

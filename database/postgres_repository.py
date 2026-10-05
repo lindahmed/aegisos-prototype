@@ -303,6 +303,8 @@ class PostgresStudentRepository:
                         read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         PRIMARY KEY (message_id, reader_type, reader_id)
                     );
+                    ALTER TABLE portal_messages ADD COLUMN IF NOT EXISTS attachment TEXT;
+                    ALTER TABLE portal_messages ADD COLUMN IF NOT EXISTS attachment_content BYTEA;
                     CREATE INDEX IF NOT EXISTS idx_portal_messages_sender
                         ON portal_messages(sender_type, sender_id, created_at);
                     CREATE INDEX IF NOT EXISTS idx_portal_messages_recipient
@@ -500,14 +502,30 @@ class PostgresStudentRepository:
                 ids = [row["student_id"] for row in cursor.fetchall()]
         return [student for student_id in ids if (student := self.get_student(student_id))]
 
-    def create_portal_message(self, message: dict[str, Any]) -> dict[str, Any]:
+    def list_message_students(self) -> list[dict[str, str]]:
+        rows = self._fetch_all(
+            """SELECT s.student_id::text AS id, s.full_name AS name,
+                      m.major_name AS major, s.academic_level AS year
+               FROM students s JOIN majors m ON m.program_id = s.program_id
+               ORDER BY s.full_name, s.student_id""",
+            (),
+        )
+        return [
+            {"type": "student", "id": str(row["id"]), "name": row["name"],
+             "major": row["major"], "subtitle": f'Year {row["year"]} · {row["major"]}'}
+            for row in rows
+        ]
+
+    def create_portal_message(
+        self, message: dict[str, Any], *, attachment_content: bytes | None = None
+    ) -> dict[str, Any]:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """INSERT INTO portal_messages (
                            message_id, sender_type, sender_id, recipient_type,
-                           recipient_id, is_broadcast, body, created_at
-                       ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                           recipient_id, is_broadcast, body, created_at, attachment, attachment_content
+                       ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (
                         message["message_id"],
                         message["sender_type"],
@@ -517,6 +535,8 @@ class PostgresStudentRepository:
                         bool(message.get("is_broadcast")),
                         message["body"],
                         message["created_at"],
+                        json.dumps(message["attachment"]) if message.get("attachment") else None,
+                        attachment_content,
                     ),
                 )
         return dict(message)
@@ -525,7 +545,8 @@ class PostgresStudentRepository:
         self, actor_type: str, actor_id: str
     ) -> list[dict[str, Any]]:
         rows = self._fetch_all(
-            """SELECT m.*,
+            """SELECT m.message_id, m.sender_type, m.sender_id, m.recipient_type,
+                      m.recipient_id, m.is_broadcast, m.body, m.created_at, m.attachment,
                       CASE WHEN r.message_id IS NULL THEN FALSE ELSE TRUE END AS was_read
                FROM portal_messages AS m
                LEFT JOIN portal_message_reads AS r
@@ -546,6 +567,7 @@ class PostgresStudentRepository:
             ),
         )
         for message in rows:
+            message["attachment"] = json.loads(message["attachment"]) if message.get("attachment") else None
             created_at = message.get("created_at")
             if hasattr(created_at, "isoformat"):
                 message["created_at"] = created_at.isoformat()
@@ -555,6 +577,13 @@ class PostgresStudentRepository:
                 and message["sender_id"] == actor_id
             ) or bool(message.pop("was_read"))
         return rows
+
+    def get_portal_message_attachment(self, message_id: str) -> bytes | None:
+        row = self._fetch_one(
+            "SELECT attachment_content FROM portal_messages WHERE message_id = %s",
+            (message_id,),
+        )
+        return bytes(row["attachment_content"]) if row and row["attachment_content"] is not None else None
 
     def mark_portal_messages_read(
         self, actor_type: str, actor_id: str, message_ids: list[str]

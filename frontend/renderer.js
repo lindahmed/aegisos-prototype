@@ -175,7 +175,9 @@ async function apiRequest(path, options = {}) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.detail || `Request failed (${response.status})`);
+    const error = new Error(payload.detail || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -186,7 +188,10 @@ async function academicApiRequest(path, options = {}) {
   try {
     response = await fetch(`${academicApiBaseUrl}${path}`, {
       ...options,
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      headers: {
+        ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...(options.headers || {}),
+      },
     });
   } catch (_error) {
     throw new Error('The shared academic notification service is unavailable.');
@@ -194,7 +199,9 @@ async function academicApiRequest(path, options = {}) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.detail || `Request failed (${response.status})`);
+    const error = new Error(payload.detail || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -914,20 +921,48 @@ document.addEventListener('visibilitychange', () => {
 
 const inboxButton = document.querySelector('#inbox-button');
 const inboxBadge = document.querySelector('#inbox-badge');
-const conversationList = document.querySelector('#conversation-list');
+const recentMessageList = document.querySelector('#recent-message-list');
+const contactsList = document.querySelector('#contacts-list');
 const conversationTitle = document.querySelector('#conversation-title');
 const conversationSubtitle = document.querySelector('#conversation-subtitle');
 const messageThread = document.querySelector('#message-thread');
 const messageSearch = document.querySelector('#message-search');
+const messageSearchStatus = document.querySelector('#message-search-status');
 const messageComposeForm = document.querySelector('#message-compose-form');
 const messageComposeInput = document.querySelector('#message-compose-input');
 const messageSendButton = document.querySelector('#message-send-button');
 const messageStatus = document.querySelector('#message-status');
+const messageSyncStatus = document.querySelector('#message-sync-status');
+const recentMessagesUnread = document.querySelector('#recent-messages-unread');
+const messageJumpLatest = document.querySelector('#message-jump-latest');
+const messageAttachButton = document.querySelector('#message-attach-button');
+const messageAttachmentInput = document.querySelector('#message-attachment-input');
+const messageAttachmentPreview = document.querySelector('#message-attachment-preview');
+const messageAttachmentName = document.querySelector('#message-attachment-name');
+const messageAttachmentRemove = document.querySelector('#message-attachment-remove');
+const MESSAGE_DOCUMENT_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'rtf', 'odt', 'ods', 'odp']);
+const MESSAGE_DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
+let selectedMessageFile = null;
+let messageSending = false;
 const MESSAGE_POLL_MS = 15000;
+const MESSAGE_ACTIVE_POLL_MS = 3000;
+const MESSAGE_DIRECTORY_POLL_MS = 60000;
 let messageContacts = [];
 let campusMessages = [];
 let selectedMessageContact = null;
 let messageTimer = null;
+let messageSyncGeneration = 0;
+let messageRefreshTask = null;
+let messageDirectoryUpdatedAt = 0;
+let renderedMessageThreadKey = null;
+let renderedMessageThreadSignature = '';
+let renderedRecentMessagesSignature = '';
+let renderedContactsSignature = '';
+const pendingMessageReads = new Set();
+let messageStudentLookupTimer = null;
+let messageStudentLookupSequence = 0;
+let messageStudentLookupId = null;
+const lookedUpMessageContacts = new Map();
 
 
 function contactKey(contact) {
@@ -943,10 +978,42 @@ function messagesForContact(contact) {
   return campusMessages.filter((message) => {
     if (message.is_broadcast) return false;
     return (
-      (message.sender_type === contact.type && message.sender_id === contact.id)
-      || (message.recipient_type === contact.type && message.recipient_id === contact.id)
+      (message.sender_type === contact.type && String(message.sender_id) === String(contact.id))
+      || (message.recipient_type === contact.type && String(message.recipient_id) === String(contact.id))
     );
   });
+}
+
+
+function conversationContacts() {
+  const contacts = new Map();
+  for (const message of campusMessages) {
+    if (message.is_broadcast) {
+      contacts.set('broadcast:all-students', {
+        type: 'broadcast', id: 'all-students', name: 'Professor broadcasts',
+        subtitle: 'Messages sent to all students',
+      });
+      continue;
+    }
+    const outgoing = message.sender_type === 'student'
+      && String(message.sender_id) === String(currentStudent?.student_id);
+    const type = outgoing ? message.recipient_type : message.sender_type;
+    const id = outgoing ? message.recipient_id : message.sender_id;
+    if (!type || !id) continue;
+    const contact = {
+      type, id: String(id),
+      name: (outgoing ? message.recipient_name : message.sender_name) || `Student ${id}`,
+      subtitle: type === 'staff' ? 'Professor' : `Student ID ${id}`,
+    };
+    contacts.set(contactKey(contact), contact);
+  }
+  for (const contact of messageContacts) contacts.set(contactKey(contact), contact);
+  return [...contacts.values()];
+}
+
+
+function messageTimestamp(message) {
+  return Date.parse(message?.created_at) || 0;
 }
 
 
@@ -961,47 +1028,105 @@ function formatMessageTime(value) {
 
 
 function updateInboxBadge() {
-  const unread = campusMessages.filter((message) => !message.read).length;
+  const unread = campusMessages.filter((message) => !message.read && !isOutgoingMessage(message)).length;
   inboxBadge.hidden = unread === 0;
   inboxBadge.textContent = String(unread);
+  recentMessagesUnread.hidden = unread === 0;
+  recentMessagesUnread.textContent = String(unread);
+}
+
+
+function isOutgoingMessage(message) {
+  return message.sender_type === 'student'
+    && String(message.sender_id) === String(currentStudent?.student_id);
 }
 
 
 function renderConversationList() {
   const query = messageSearch.value.trim().toLowerCase();
-  const contacts = [...messageContacts];
-  if (campusMessages.some((message) => message.is_broadcast)) {
-    contacts.unshift({
-      type: 'broadcast',
-      id: 'all-students',
-      name: 'Professor broadcasts',
-      subtitle: 'Messages sent to all students',
+  const activity = new Map();
+  for (const message of campusMessages) {
+    const outgoing = message.sender_type === 'student'
+      && String(message.sender_id) === String(currentStudent?.student_id);
+    const key = message.is_broadcast ? 'broadcast:all-students' : contactKey({
+      type: outgoing ? message.recipient_type : message.sender_type,
+      id: outgoing ? message.recipient_id : message.sender_id,
     });
+    const entry = activity.get(key) || { latest: null, unread: 0 };
+    if (!entry.latest || messageTimestamp(message) >= messageTimestamp(entry.latest)) entry.latest = message;
+    if (!message.read && !outgoing) entry.unread += 1;
+    activity.set(key, entry);
   }
-  const visible = contacts.filter((contact) =>
-    `${contact.name} ${contact.subtitle}`.toLowerCase().includes(query));
-  visible.sort((left, right) => {
-    const leftLatest = messagesForContact(left).at(-1)?.created_at || '';
-    const rightLatest = messagesForContact(right).at(-1)?.created_at || '';
-    return rightLatest.localeCompare(leftLatest);
+  const allContacts = conversationContacts();
+  const recentContacts = allContacts
+    .filter((contact) => activity.has(contactKey(contact)))
+    .sort((left, right) => {
+      const leftLatest = activity.get(contactKey(left)).latest;
+      const rightLatest = activity.get(contactKey(right)).latest;
+      return messageTimestamp(rightLatest) - messageTimestamp(leftLatest)
+        || left.name.localeCompare(right.name)
+        || contactKey(left).localeCompare(contactKey(right));
+    });
+  const recentKeys = new Set(recentContacts.map(contactKey));
+  const visibleContacts = allContacts.filter((contact) => {
+    if (recentKeys.has(contactKey(contact))) return false;
+    const isStudent = contact.type === 'student';
+    const major = contact.major || contact.subtitle?.split('·').at(-1) || '';
+    const sameMajor = isStudent
+      && major.trim().toLowerCase() === currentStudent?.major?.trim().toLowerCase();
+    const matchesQuery = `${contact.name} ${contact.id} ${contact.subtitle}`
+      .toLowerCase().includes(query);
+    const exactStudentId = isStudent && String(contact.id).toLowerCase() === query;
+    if (selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact)) return true;
+    return isStudent ? exactStudentId || (sameMajor && matchesQuery) : matchesQuery;
   });
+  visibleContacts.sort((left, right) =>
+    left.name.localeCompare(right.name)
+      || contactKey(left).localeCompare(contactKey(right)));
 
-  conversationList.replaceChildren();
-  if (visible.length === 0) {
+  const selectedKey = selectedMessageContact && contactKey(selectedMessageContact);
+  const recentSignature = JSON.stringify([selectedKey, recentContacts.map((contact) => {
+    const { latest, unread } = activity.get(contactKey(contact)) || {};
+    return [contactKey(contact), contact.name, contact.subtitle, unread, latest?.message_id,
+      latest?.body, latest?.attachment?.filename, latest?.created_at];
+  })]);
+  if (recentSignature !== renderedRecentMessagesSignature) {
+    renderedRecentMessagesSignature = recentSignature;
+    renderConversationItems(recentMessageList, recentContacts, activity,
+      'Recent messages will appear here when classmates or professors contact you.');
+  }
+
+  const contactsSignature = JSON.stringify([Boolean(query), selectedKey,
+    visibleContacts.map((contact) => [contactKey(contact), contact.name, contact.subtitle])]);
+  if (contactsSignature !== renderedContactsSignature) {
+    renderedContactsSignature = contactsSignature;
+    renderConversationItems(contactsList, visibleContacts, activity, query
+      ? 'No classmate matches. Enter a registered student’s full ID to start a conversation.'
+      : 'Your classmates and professors will appear here.');
+  }
+}
+
+
+function renderConversationItems(container, contacts, activity, emptyText) {
+  const previousTopContact = container.querySelector('.conversation-item')?.dataset.contactKey;
+  const previousScrollTop = container.scrollTop;
+  container.replaceChildren();
+  if (contacts.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'conversation-list-empty';
-    empty.textContent = query ? 'No people match your search.' : 'No contacts are available.';
-    conversationList.append(empty);
+    empty.textContent = emptyText;
+    container.append(empty);
     return;
   }
 
-  for (const contact of visible) {
-    const thread = messagesForContact(contact);
-    const latest = thread.at(-1);
-    const unread = thread.filter((message) => !message.read).length;
+  for (const contact of contacts) {
+    const { latest, unread = 0 } = activity.get(contactKey(contact)) || {};
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `conversation-item${selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact) ? ' active' : ''}`;
+    button.className = `conversation-item${unread ? ' unread' : ''}${selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact) ? ' active' : ''}`;
+    button.dataset.contactKey = contactKey(contact);
+    button.setAttribute('aria-pressed', String(Boolean(selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact))));
+    button.setAttribute('aria-label', `${contact.name}${unread ? `, ${unread} unread messages` : ''}`);
     button.addEventListener('click', () => selectMessageConversation(contact));
     const avatar = document.createElement('span');
     avatar.className = `conversation-avatar ${contact.type}`;
@@ -1022,7 +1147,8 @@ function renderConversationList() {
     }
     const preview = document.createElement('span');
     preview.className = 'conversation-preview';
-    preview.textContent = latest?.body || contact.subtitle;
+    const previewText = latest?.body || latest?.attachment?.filename || contact.subtitle;
+    preview.textContent = latest && isOutgoingMessage(latest) ? `You: ${previewText}` : previewText;
     copy.append(top, preview);
     button.append(avatar, copy);
     if (unread > 0) {
@@ -1031,17 +1157,42 @@ function renderConversationList() {
       badge.textContent = String(unread);
       button.append(badge);
     }
-    conversationList.append(button);
+    container.append(button);
+  }
+  if (previousTopContact === container.querySelector('.conversation-item')?.dataset.contactKey) {
+    container.scrollTop = previousScrollTop;
+  } else {
+    container.scrollTop = 0;
   }
 }
 
 
-function renderMessageThread() {
+function isMessageThreadAtBottom() {
+  return messageThread.scrollHeight - messageThread.scrollTop - messageThread.clientHeight < 60;
+}
+
+
+function renderMessageThread(forceScroll = false) {
   if (!selectedMessageContact) return;
-  const thread = messagesForContact(selectedMessageContact);
+  const thread = messagesForContact(selectedMessageContact).sort((left, right) =>
+    messageTimestamp(left) - messageTimestamp(right)
+      || String(left.message_id).localeCompare(String(right.message_id)));
   conversationTitle.textContent = selectedMessageContact.name;
   conversationSubtitle.textContent = selectedMessageContact.subtitle;
   messageComposeForm.hidden = selectedMessageContact.type === 'broadcast';
+  const key = contactKey(selectedMessageContact);
+  const signature = JSON.stringify(thread.map((item) => [item.message_id, item.body, item.attachment, item.created_at]));
+  if (key === renderedMessageThreadKey && signature === renderedMessageThreadSignature) {
+    if (forceScroll) {
+      messageThread.scrollTop = messageThread.scrollHeight;
+      messageJumpLatest.hidden = true;
+    }
+    return;
+  }
+  const scrollToBottom = forceScroll || key !== renderedMessageThreadKey || isMessageThreadAtBottom();
+  const oldScrollTop = messageThread.scrollTop;
+  renderedMessageThreadKey = key;
+  renderedMessageThreadSignature = signature;
   messageThread.replaceChildren();
   if (thread.length === 0) {
     const empty = document.createElement('div');
@@ -1051,7 +1202,7 @@ function renderMessageThread() {
     return;
   }
   for (const item of thread) {
-    const outgoing = item.sender_type === 'student' && item.sender_id === currentStudent.student_id;
+    const outgoing = isOutgoingMessage(item);
     const bubble = document.createElement('article');
     bubble.className = `campus-message ${outgoing ? 'outgoing' : 'incoming'}${item.is_broadcast ? ' broadcast' : ''}`;
     const meta = document.createElement('div');
@@ -1064,19 +1215,33 @@ function renderMessageThread() {
     const body = document.createElement('p');
     body.textContent = item.body;
     bubble.append(meta, body);
+    if (item.attachment) {
+      const documentButton = document.createElement('button');
+      documentButton.type = 'button';
+      documentButton.className = 'message-document';
+      documentButton.textContent = `↓ ${item.attachment.filename} · ${formatDocumentSize(item.attachment.size_bytes)}`;
+      documentButton.setAttribute('aria-label', `Download ${item.attachment.filename}`);
+      documentButton.addEventListener('click', () => downloadMessageDocument(item, documentButton));
+      bubble.append(documentButton);
+    }
     messageThread.append(bubble);
   }
-  messageThread.scrollTop = messageThread.scrollHeight;
+  messageThread.scrollTop = scrollToBottom ? messageThread.scrollHeight : oldScrollTop;
+  messageJumpLatest.hidden = scrollToBottom;
 }
 
 
 async function markSelectedConversationRead() {
-  if (!currentStudent || !selectedMessageContact) return;
+  if (!currentStudent || !selectedMessageContact || messagesPanel.hidden
+      || document.visibilityState !== 'visible' || !isMessageThreadAtBottom()) return;
+  const actorId = currentStudent.student_id;
+  const generation = messageSyncGeneration;
   const unreadIds = messagesForContact(selectedMessageContact)
-    .filter((message) => !message.read)
+    .filter((message) => !message.read && !isOutgoingMessage(message))
     .map((message) => message.message_id);
   if (unreadIds.length === 0) return;
   const unreadSet = new Set(unreadIds);
+  for (const id of unreadIds) pendingMessageReads.add(id);
   campusMessages = campusMessages.map((message) =>
     unreadSet.has(message.message_id) ? { ...message, read: true } : message);
   renderConversationList();
@@ -1086,51 +1251,165 @@ async function markSelectedConversationRead() {
       method: 'PUT',
       body: JSON.stringify({
         actor_type: 'student',
-        actor_id: currentStudent.student_id,
+        actor_id: actorId,
         message_ids: unreadIds,
       }),
     });
   } catch (_error) {
-    // The next sync restores the authoritative read state.
+    if (generation !== messageSyncGeneration) return;
+    for (const id of unreadIds) pendingMessageReads.delete(id);
+    campusMessages = campusMessages.map((message) =>
+      unreadSet.has(message.message_id) ? { ...message, read: false } : message);
+    renderConversationList();
+    updateInboxBadge();
   }
 }
 
 
 function selectMessageConversation(contact) {
+  if (messageSending) return;
+  if (!selectedMessageContact || contactKey(contact) !== contactKey(selectedMessageContact)) {
+    clearMessageAttachment();
+    messageComposeInput.value = '';
+    setMessage(messageStatus, '');
+  }
   selectedMessageContact = contact;
+  cancelMessageStudentLookup();
+  messageSearch.value = '';
+  messageJumpLatest.hidden = true;
   renderConversationList();
-  renderMessageThread();
+  renderMessageThread(true);
   markSelectedConversationRead();
   if (contact.type !== 'broadcast') messageComposeInput.focus();
 }
 
 
+function openStudentConversationById() {
+  const enteredId = messageSearch.value.trim().toLowerCase();
+  if (!enteredId || !currentStudent || messageSending) return;
+  if (enteredId === String(currentStudent.student_id).toLowerCase()) {
+    setMessage(messageSearchStatus, 'This is your own student ID. Enter another student’s ID.', true);
+    return;
+  }
+  const exactMatch = conversationContacts().find((contact) =>
+    contact.type === 'student' && String(contact.id).toLowerCase() === enteredId);
+  if (exactMatch) {
+    cancelMessageStudentLookup();
+    if (!selectedMessageContact || contactKey(selectedMessageContact) !== contactKey(exactMatch)) {
+      selectMessageConversation(exactMatch);
+    }
+    return;
+  }
+  if (!/^\d{6,64}$/.test(enteredId) || messageStudentLookupId === enteredId) return;
+  cancelMessageStudentLookup();
+  messageStudentLookupId = enteredId;
+  const sequence = messageStudentLookupSequence;
+  const actorId = currentStudent.student_id;
+  setMessage(messageSearchStatus, 'Looking up student…');
+  messageStudentLookupTimer = setTimeout(async () => {
+    const stillCurrent = () => sequence === messageStudentLookupSequence
+      && currentStudent?.student_id === actorId
+      && messageSearch.value.trim().toLowerCase() === enteredId;
+    try {
+      const student = await academicApiRequest(`/student/${encodeURIComponent(enteredId)}`);
+      if (!stillCurrent()) return;
+      const contact = {
+        type: 'student', id: String(student.student_id), name: student.name,
+        major: student.major, subtitle: `Year ${student.year} · ${student.major}`,
+      };
+      lookedUpMessageContacts.set(contactKey(contact), contact);
+      if (!messageContacts.some((item) => contactKey(item) === contactKey(contact))) {
+        messageContacts.push(contact);
+      }
+      setMessage(messageSearchStatus, '');
+      selectMessageConversation(contact);
+    } catch (error) {
+      if (!stillCurrent()) return;
+      setMessage(messageSearchStatus, error.status === 404
+        ? `No registered student has ID ${enteredId}. Check the digits and try again.`
+        : `Student lookup failed: ${error.message}`, true);
+    }
+  }, 350);
+}
+
+
+function cancelMessageStudentLookup() {
+  clearTimeout(messageStudentLookupTimer);
+  messageStudentLookupTimer = null;
+  messageStudentLookupSequence += 1;
+  messageStudentLookupId = null;
+  setMessage(messageSearchStatus, '');
+}
+
+
 async function refreshMessages(showErrors = false) {
   if (!currentStudent) return;
-  try {
-    const params = new URLSearchParams({ actor_type: 'student', actor_id: currentStudent.student_id });
-    const [contactsResponse, messagesResponse] = await Promise.all([
-      academicApiRequest(`/messages/contacts?${params}`),
-      academicApiRequest(`/messages?${params}`),
+  showErrors = showErrors === true;
+  if (messageRefreshTask?.generation === messageSyncGeneration) return messageRefreshTask.promise;
+  const actorId = currentStudent.student_id;
+  const generation = messageSyncGeneration;
+  const isCurrent = () => generation === messageSyncGeneration && currentStudent?.student_id === actorId;
+  const existingIds = new Set(campusMessages.map((message) => message.message_id));
+  const task = { generation, promise: null };
+  messageRefreshTask = task;
+  task.promise = (async () => {
+    const params = new URLSearchParams({ actor_type: 'student', actor_id: actorId });
+    const loadDirectory = !messageDirectoryUpdatedAt || Date.now() - messageDirectoryUpdatedAt >= MESSAGE_DIRECTORY_POLL_MS;
+    const [contactsResult, messagesResult] = await Promise.allSettled([
+      loadDirectory ? academicApiRequest(`/messages/contacts?${params}`, { signal: AbortSignal.timeout(12000) }).then((response) => {
+        if (!isCurrent()) return;
+        const merged = new Map(lookedUpMessageContacts);
+        for (const contact of response.contacts || []) merged.set(contactKey(contact), contact);
+        messageContacts = [...merged.values()];
+        messageDirectoryUpdatedAt = Date.now();
+        if (selectedMessageContact && selectedMessageContact.type !== 'broadcast') {
+          selectedMessageContact = merged.get(contactKey(selectedMessageContact)) || selectedMessageContact;
+        }
+        renderConversationList();
+        if (!selectedMessageContact) openStudentConversationById();
+      }) : Promise.resolve(),
+      academicApiRequest(`/messages?${params}`, { signal: AbortSignal.timeout(12000) }).then((response) => {
+        if (!isCurrent()) return;
+        if (!Array.isArray(response.messages)) throw new Error('The message service returned an invalid inbox. Please restart the backend.');
+        const receivedIds = new Set(response.messages.map((message) => message.message_id));
+        const addedDuringSync = campusMessages.filter((message) => !existingIds.has(message.message_id) && !receivedIds.has(message.message_id));
+        campusMessages = [...response.messages, ...addedDuringSync].map((message) => {
+          if (message.read) pendingMessageReads.delete(message.message_id);
+          return pendingMessageReads.has(message.message_id) ? { ...message, read: true } : message;
+        });
+        renderConversationList();
+        if (selectedMessageContact) {
+          renderMessageThread();
+          markSelectedConversationRead();
+        }
+        updateInboxBadge();
+      }),
     ]);
-    messageContacts = contactsResponse.contacts || [];
-    campusMessages = messagesResponse.messages || [];
-    if (selectedMessageContact) {
-      selectedMessageContact = [
-        ...messageContacts,
-        { type: 'broadcast', id: 'all-students', name: 'Professor broadcasts', subtitle: 'Messages sent to all students' },
-      ].find((contact) => contactKey(contact) === contactKey(selectedMessageContact)) || null;
+    if (!isCurrent()) return;
+    const inboxFailed = messagesResult.status === 'rejected';
+    setMessage(messageSyncStatus, inboxFailed
+      ? `Messages could not sync: ${messagesResult.reason.message} Retrying automatically…`
+      : contactsResult.status === 'rejected'
+        ? 'Chats are up to date · Classmate directory is reconnecting…'
+        : 'Chats are up to date · Updates automatically', inboxFailed);
+    if (showErrors) {
+      const failure = [contactsResult, messagesResult].find((result) => result.status === 'rejected');
+      setMessage(messageStatus, failure ? failure.reason.message : '', Boolean(failure));
     }
-    renderConversationList();
-    if (selectedMessageContact) {
-      renderMessageThread();
-      markSelectedConversationRead();
-    }
-    updateInboxBadge();
-    if (showErrors) setMessage(messageStatus, '');
-  } catch (error) {
-    if (showErrors) setMessage(messageStatus, error.message, true);
-  }
+  })().finally(() => {
+    if (!isCurrent()) return;
+    if (messageRefreshTask === task) messageRefreshTask = null;
+    scheduleMessageSync();
+  });
+  return task.promise;
+}
+
+
+function scheduleMessageSync() {
+  clearTimeout(messageTimer);
+  if (!currentStudent) return;
+  const active = !messagesPanel.hidden && document.visibilityState === 'visible';
+  messageTimer = setTimeout(() => refreshMessages(), active ? MESSAGE_ACTIVE_POLL_MS : MESSAGE_POLL_MS);
 }
 
 
@@ -1139,54 +1418,217 @@ function startMessageSync() {
   messageContacts = [];
   campusMessages = [];
   selectedMessageContact = null;
+  renderedRecentMessagesSignature = '';
+  renderedContactsSignature = '';
+  renderedMessageThreadKey = null;
+  renderedMessageThreadSignature = '';
+  messageDirectoryUpdatedAt = 0;
+  messageJumpLatest.hidden = true;
+  clearMessageAttachment();
+  messageComposeInput.value = '';
+  messageComposeForm.hidden = true;
+  conversationTitle.textContent = 'Choose a conversation';
+  conversationSubtitle.textContent = 'Your classmates and professors are here.';
+  messageThread.replaceChildren();
+  const empty = document.createElement('div');
+  empty.className = 'message-thread-empty';
+  empty.innerHTML = '<strong>Start a conversation</strong><span>Select someone from the inbox to view or send messages.</span>';
+  messageThread.append(empty);
+  setMessage(messageStatus, '');
   messageSearch.value = '';
+  setMessage(messageSyncStatus, 'Connecting to your chats…');
   updateInboxBadge();
   refreshMessages();
-  messageTimer = setInterval(refreshMessages, MESSAGE_POLL_MS);
 }
 
 
 function stopMessageSync() {
+  messageSyncGeneration += 1;
+  messageRefreshTask = null;
+  pendingMessageReads.clear();
   if (messageTimer) {
-    clearInterval(messageTimer);
+    clearTimeout(messageTimer);
     messageTimer = null;
+  }
+  cancelMessageStudentLookup();
+  lookedUpMessageContacts.clear();
+  clearMessageAttachment();
+}
+
+
+function formatDocumentSize(bytes) {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.ceil(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+
+function clearMessageAttachment() {
+  selectedMessageFile = null;
+  messageAttachmentInput.value = '';
+  messageAttachmentPreview.hidden = true;
+  messageAttachmentName.textContent = '';
+  messageComposeInput.required = true;
+}
+
+
+messageAttachButton.addEventListener('click', () => {
+  if (!messageSending) messageAttachmentInput.click();
+});
+messageAttachmentRemove.addEventListener('click', () => {
+  clearMessageAttachment();
+  setMessage(messageStatus, '');
+  messageAttachButton.focus();
+});
+messageAttachmentInput.addEventListener('change', () => {
+  const file = messageAttachmentInput.files[0];
+  if (!file) return;
+  const extension = file.name.split('.').at(-1).toLowerCase();
+  let error = '';
+  if (!MESSAGE_DOCUMENT_EXTENSIONS.has(extension)) error = 'Choose a PDF, Word, spreadsheet, presentation, or text document.';
+  else if (!file.size) error = 'The selected document is empty.';
+  else if (file.size > MESSAGE_DOCUMENT_MAX_BYTES) error = 'Documents must be 10 MB or smaller.';
+  if (error) {
+    clearMessageAttachment();
+    setMessage(messageStatus, error, true);
+    return;
+  }
+  selectedMessageFile = file;
+  messageAttachmentName.textContent = `${file.name} · ${formatDocumentSize(file.size)}`;
+  messageAttachmentPreview.hidden = false;
+  messageComposeInput.required = false;
+  setMessage(messageStatus, '');
+});
+
+
+async function downloadMessageDocument(item, button) {
+  if (!currentStudent) return;
+  const studentId = currentStudent.student_id;
+  button.disabled = true;
+  try {
+    const params = new URLSearchParams({ actor_type: 'student', actor_id: studentId });
+    const response = await fetch(`${academicApiBaseUrl}/messages/${encodeURIComponent(item.message_id)}/attachment?${params}`);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || 'The document could not be downloaded.');
+    }
+    const blobUrl = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = item.attachment.filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    setMessage(messageStatus, 'Document downloaded.');
+  } catch (error) {
+    setMessage(messageStatus, error.message, true);
+  } finally {
+    button.disabled = false;
   }
 }
 
 
 inboxButton.addEventListener('click', () => showDashboardSection('messages'));
+messageJumpLatest.addEventListener('click', () => {
+  messageThread.scrollTop = messageThread.scrollHeight;
+  messageJumpLatest.hidden = true;
+  markSelectedConversationRead();
+});
+messageThread.addEventListener('scroll', () => {
+  if (isMessageThreadAtBottom()) {
+    messageJumpLatest.hidden = true;
+    markSelectedConversationRead();
+  }
+});
 document.querySelector('#new-message-button').addEventListener('click', () => {
+  if (messageSending) return;
+  cancelMessageStudentLookup();
+  selectedMessageContact = null;
+  renderedMessageThreadKey = null;
+  messageJumpLatest.hidden = true;
+  clearMessageAttachment();
+  messageComposeInput.value = '';
+  messageComposeForm.hidden = true;
+  conversationTitle.textContent = 'Choose a conversation';
+  conversationSubtitle.textContent = 'Search classmates in your major or enter any student’s full ID.';
+  messageThread.replaceChildren();
+  const empty = document.createElement('div');
+  empty.className = 'message-thread-empty';
+  empty.innerHTML = '<strong>Start a conversation</strong><span>Choose a classmate or search any registered student by ID.</span>';
+  messageThread.append(empty);
   messageSearch.value = '';
+  setMessage(messageStatus, '');
   renderConversationList();
   messageSearch.focus();
 });
-messageSearch.addEventListener('input', renderConversationList);
+messageSearch.addEventListener('input', () => {
+  cancelMessageStudentLookup();
+  renderConversationList();
+  openStudentConversationById();
+});
+messageComposeInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  if (!messageSending) messageComposeForm.requestSubmit();
+});
 messageComposeForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!currentStudent || !selectedMessageContact || selectedMessageContact.type === 'broadcast') return;
   const body = messageComposeInput.value.trim();
-  if (!body) return;
+  if ((!body && !selectedMessageFile) || messageSending) return;
+  const senderId = currentStudent.student_id;
+  const generation = messageSyncGeneration;
+  const recipient = { ...selectedMessageContact };
+  const file = selectedMessageFile;
+  messageSending = true;
   messageSendButton.disabled = true;
-  setMessage(messageStatus, 'Sending…');
+  messageAttachButton.disabled = true;
+  messageAttachmentRemove.disabled = true;
+  messageComposeInput.disabled = true;
+  setMessage(messageStatus, file ? 'Sending document…' : 'Sending…');
   try {
-    await academicApiRequest('/messages', {
-      method: 'POST',
-      body: JSON.stringify({
-        sender_type: 'student',
-        sender_id: currentStudent.student_id,
-        recipient_type: selectedMessageContact.type,
-        recipient_id: selectedMessageContact.id,
-        body,
-      }),
-    });
+    let sent;
+    if (file) {
+      const formData = new FormData();
+      formData.append('sender_type', 'student');
+      formData.append('sender_id', senderId);
+      formData.append('recipient_type', recipient.type);
+      formData.append('recipient_id', recipient.id);
+      formData.append('body', body);
+      formData.append('file', file);
+      sent = await academicApiRequest('/messages/attachments', { method: 'POST', body: formData });
+    } else {
+      sent = await academicApiRequest('/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          sender_type: 'student',
+          sender_id: senderId,
+          recipient_type: recipient.type,
+          recipient_id: recipient.id,
+          body,
+        }),
+      });
+    }
+    if (currentStudent?.student_id !== senderId || messageSyncGeneration !== generation) return;
+    if (sent.message) {
+      campusMessages = [...campusMessages.filter((message) => message.message_id !== sent.message.message_id), sent.message];
+    }
+    cancelMessageStudentLookup();
+    messageSearch.value = '';
     messageComposeInput.value = '';
-    await refreshMessages(true);
-    renderMessageThread();
-    messageComposeInput.focus();
+    clearMessageAttachment();
+    renderConversationList();
+    renderMessageThread(true);
+    setMessage(messageStatus, '');
+    refreshMessages();
   } catch (error) {
-    setMessage(messageStatus, error.message, true);
+    if (currentStudent?.student_id === senderId && messageSyncGeneration === generation) setMessage(messageStatus, error.message, true);
   } finally {
+    messageSending = false;
     messageSendButton.disabled = false;
+    messageAttachButton.disabled = false;
+    messageAttachmentRemove.disabled = false;
+    messageComposeInput.disabled = false;
+    if (currentStudent?.student_id === senderId && messageSyncGeneration === generation) messageComposeInput.focus();
   }
 });
 

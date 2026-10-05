@@ -359,6 +359,7 @@
             <div class="messages-heading">
               <div>
                 <h3>Inbox</h3>
+                <p id="message-sync-status" class="message-sync-status" role="status">Connecting to your chats…</p>
               </div>
               <button id="new-message-button" class="secondary-button" type="button">
                 <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
@@ -367,25 +368,46 @@
             </div>
             <div class="messages-layout">
               <aside class="conversation-sidebar">
-                <label class="message-search-label" for="message-search">Find a classmate or professor</label>
-                <input id="message-search" type="search" placeholder="Search people" autocomplete="off">
-                <div id="conversation-list" class="conversation-list"></div>
+                <section class="recent-message-section" aria-labelledby="recent-messages-heading">
+                  <div class="conversation-section-heading">
+                    <h5 id="recent-messages-heading">Recent messages</h5>
+                    <span id="recent-messages-unread" class="conversation-unread" hidden></span>
+                  </div>
+                  <div id="recent-message-list" class="conversation-list recent-message-list" aria-label="Recent messages"></div>
+                </section>
+                <section class="contact-section" aria-labelledby="contact-list-heading">
+                  <h5 id="contact-list-heading" class="contact-list-heading">Contacts</h5>
+                  <label class="message-search-label" for="message-search">Find a classmate by name or student ID</label>
+                  <input id="message-search" type="search" placeholder="Name or student ID" autocomplete="off" aria-describedby="message-search-help">
+                  <p id="message-search-help" class="message-search-help">Your contacts are listed separately from recent messages.</p>
+                  <p id="message-search-status" class="message message-search-status" role="status" aria-live="polite"></p>
+                  <div id="contacts-list" class="conversation-list contact-list" aria-label="Contacts"></div>
+                </section>
               </aside>
-              <section class="conversation-pane" aria-live="polite">
+              <section class="conversation-pane">
                 <header id="conversation-header" class="conversation-header">
                   <div>
                     <h4 id="conversation-title">Choose a conversation</h4>
                     <p id="conversation-subtitle">Your classmates and professors are here.</p>
                   </div>
                 </header>
-                <div id="message-thread" class="message-thread">
+                <div id="message-thread" class="message-thread" role="log" aria-live="polite" aria-relevant="additions">
                   <div class="message-thread-empty">
                     <strong>Start a conversation</strong>
                     <span>Select someone from the inbox to view or send messages.</span>
                   </div>
                 </div>
+                <button id="message-jump-latest" class="secondary-button message-jump-latest" type="button" hidden>New messages ↓</button>
                 <form id="message-compose-form" class="message-compose-form" hidden>
-                  <textarea id="message-compose-input" rows="2" maxlength="4000" placeholder="Write a message…" required></textarea>
+                  <div id="message-attachment-preview" class="message-attachment-preview" role="status" hidden>
+                    <span id="message-attachment-name"></span>
+                    <button id="message-attachment-remove" class="secondary-button" type="button" aria-label="Remove attachment" title="Remove attachment">&times;</button>
+                  </div>
+                  <input id="message-attachment-input" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.rtf,.odt,.ods,.odp" hidden>
+                  <button id="message-attach-button" class="secondary-button message-attach-button" type="button" aria-label="Attach document" title="Attach document (up to 10 MB)">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 11-8.4 8.4a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"></path></svg>
+                  </button>
+                  <textarea id="message-compose-input" rows="2" maxlength="4000" placeholder="Write a message… (Enter to send, Shift+Enter for a new line)" aria-label="Message" required></textarea>
                   <button id="message-send-button" class="primary-button" type="submit">Send</button>
                 </form>
                 <p id="message-status" class="message" role="status" aria-live="polite"></p>
