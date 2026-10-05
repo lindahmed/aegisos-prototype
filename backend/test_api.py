@@ -157,6 +157,42 @@ def test_student_and_professor_messages_share_one_inbox(tmp_path: Path) -> None:
     assert next(message for message in refreshed if message["message_id"] == direct_id)["read"] is True
 
 
+def test_message_inbox_does_not_reload_every_student_profile(tmp_path: Path, monkeypatch) -> None:
+    from database.repository import StudentRepository
+
+    client = make_client(tmp_path)
+    for sender_id, body in (
+        ("231027906", "First message"),
+        ("231027907", "Second message"),
+        ("231027906", "Third message"),
+    ):
+        response = client.post("/messages", json={
+            "sender_type": "student",
+            "sender_id": sender_id,
+            "recipient_type": "student",
+            "recipient_id": "231027905",
+            "body": body,
+        })
+        assert response.status_code == 200
+
+    original_get_student = StudentRepository.get_student
+    loaded_profiles: list[str] = []
+
+    def tracked_get_student(repository, student_id):
+        loaded_profiles.append(student_id)
+        return original_get_student(repository, student_id)
+
+    monkeypatch.setattr(StudentRepository, "get_student", tracked_get_student)
+    response = client.get("/messages", params={
+        "actor_type": "student", "actor_id": "231027905",
+    })
+    assert response.status_code == 200
+    assert [message["sender_name"] for message in response.json()["messages"]] == [
+        "Ziad Ahmed", "Mariam Hassan", "Ziad Ahmed",
+    ]
+    assert loaded_profiles == ["231027905"]
+
+
 def test_message_directory_does_not_load_full_profiles(tmp_path, monkeypatch):
     from database.repository import StudentRepository
 

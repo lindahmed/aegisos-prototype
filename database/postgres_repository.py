@@ -547,8 +547,13 @@ class PostgresStudentRepository:
         rows = self._fetch_all(
             """SELECT m.message_id, m.sender_type, m.sender_id, m.recipient_type,
                       m.recipient_id, m.is_broadcast, m.body, m.created_at, m.attachment,
+                      sender.full_name AS sender_name, recipient.full_name AS recipient_name,
                       CASE WHEN r.message_id IS NULL THEN FALSE ELSE TRUE END AS was_read
                FROM portal_messages AS m
+               LEFT JOIN students AS sender
+                 ON m.sender_type = 'student' AND sender.student_id::text = m.sender_id
+               LEFT JOIN students AS recipient
+                 ON m.recipient_type = 'student' AND recipient.student_id::text = m.recipient_id
                LEFT JOIN portal_message_reads AS r
                  ON r.message_id = m.message_id
                 AND r.reader_type = %s AND r.reader_id = %s

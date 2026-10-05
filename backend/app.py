@@ -740,15 +740,17 @@ def create_app(
 
     def enrich_message(message: dict[str, object]) -> dict[str, object]:
         result = dict(message)
-        sender = messaging_participant(
-            str(result["sender_type"]), str(result["sender_id"])
-        )
-        result["sender_name"] = sender["name"]
-        if result.get("recipient_id") and result.get("recipient_type"):
-            recipient = messaging_participant(
-                str(result["recipient_type"]), str(result["recipient_id"])
+        if not result.get("sender_name"):
+            sender = messaging_participant(
+                str(result["sender_type"]), str(result["sender_id"])
             )
-            result["recipient_name"] = recipient["name"]
+            result["sender_name"] = sender["name"]
+        if result.get("recipient_id") and result.get("recipient_type"):
+            if not result.get("recipient_name"):
+                recipient = messaging_participant(
+                    str(result["recipient_type"]), str(result["recipient_id"])
+                )
+                result["recipient_name"] = recipient["name"]
         else:
             result["recipient_name"] = "All students"
         return result
