@@ -70,14 +70,15 @@ async function main() {
     await page.locator('#inbox-button').click();
   };
   await login('231027905');
-  assert.equal(await page.locator('#message-chats-tab').getAttribute('aria-pressed'), 'true');
-  await page.locator('#message-contacts-tab').click();
+  assert((await page.locator('#recent-message-list').textContent()).includes('Recent messages will appear here'));
   const contacts = await (await fetch(`${api}/messages/contacts?actor_type=student&actor_id=231027905`)).json();
   const recipient = contacts.contacts.find(contact => contact.id === '231027906');
   const third = contacts.contacts.find(contact => contact.id === '231027907');
-  await page.locator('.conversation-item').filter({ hasText: recipient.name }).waitFor();
-  assert.equal(await page.locator('.conversation-item').filter({ hasText: third.name }).count(), 0);
-  console.log('PASS: same-major classmates appear and other majors are hidden by default');
+  await page.locator('#contacts-list .conversation-item').filter({ hasText: recipient.name }).waitFor();
+  assert.equal(await page.locator('#contacts-list .conversation-item').filter({ hasText: third.name }).count(), 0);
+  assert.equal(await page.locator('#recent-message-list .conversation-item').count(), 0,
+    'A directory contact must stay separate until there is conversation history');
+  console.log('PASS: the contacts directory and recent-message list are separate; the directory defaults to same-major classmates');
 
   // Simulate a running backend that returns the older contact shape without major.
   await page.route('**/messages/contacts?**', route => route.fulfill({
@@ -93,8 +94,7 @@ async function main() {
   });
   await page.locator('#sign-out-button').click();
   await login('231027905');
-  await page.locator('#message-contacts-tab').click();
-  await page.locator('.conversation-item').filter({ hasText: recipient.name }).waitFor();
+  await page.locator('#contacts-list .conversation-item').filter({ hasText: recipient.name }).waitFor();
   assert.equal(inboxReleased, false);
   inboxReleased = true;
   releaseInbox();
@@ -128,8 +128,8 @@ async function main() {
   await page.unroute('**/messages?**');
   await page.locator('#inbox-button').click();
   await page.locator('#new-message-button').click();
-  await page.locator('.conversation-item').filter({ hasText: recipient.name }).waitFor();
-  await page.locator('.conversation-item').filter({ hasText: recipient.name }).click();
+  await page.locator('#contacts-list .conversation-item').filter({ hasText: recipient.name }).waitFor();
+  await page.locator('#contacts-list .conversation-item').filter({ hasText: recipient.name }).click();
   const paperclip = page.getByRole('button', { name: 'Attach document', exact: true });
   assert(await paperclip.isVisible(), 'Paperclip must be visible in the composer');
   await paperclip.focus();
@@ -219,7 +219,7 @@ async function main() {
 
   await page.locator('#sign-out-button').click();
   await login('231027906');
-  await page.locator('.conversation-item').filter({ hasText: 'Yasmin Wael' }).click();
+  await page.locator('#recent-message-list .conversation-item').filter({ hasText: 'Yasmin Wael' }).click();
   const downloadButton = page.getByRole('button', { name: 'Download lecture-notes.txt' });
   await downloadButton.waitFor();
   await electron.evaluate(({ session }, savePath) => {
@@ -250,7 +250,7 @@ async function main() {
   // Both messages are older than the already-read document chat. Ranking uses real
   // timestamps (including offsets), not unread status or timestamp strings.
   await page.evaluate(() => refreshMessages());
-  const keys = await page.locator('.conversation-item').evaluateAll(items => items.map(item => item.dataset.contactKey));
+  const keys = await page.locator('#recent-message-list .conversation-item').evaluateAll(items => items.map(item => item.dataset.contactKey));
   assert(keys.indexOf('student:231027905') < keys.indexOf('student:231027907'));
   assert(keys.indexOf('student:231027907') < keys.indexOf('student:231006157'));
   console.log('PASS: recent chats include other majors and sort by actual message time');
@@ -264,14 +264,14 @@ async function main() {
   await page.locator('#new-message-button').click();
   await sendText('231006157', 'Latest message moves this chat to the top');
   await page.evaluate(() => refreshMessages());
-  const topChat = page.locator('.conversation-item').first();
+  const topChat = page.locator('#recent-message-list .conversation-item').first();
   assert.equal(await topChat.getAttribute('data-contact-key'), 'student:231006157');
   assert((await topChat.textContent()).includes('Latest message moves this chat to the top'));
   assert.equal(await topChat.locator('.conversation-unread').textContent(), '2');
   await topChat.click();
   await page.waitForFunction(() => document.querySelector('#message-thread').textContent.includes('Newest incoming message')
     && document.querySelector('#message-thread').textContent.includes('Latest message moves this chat to the top'));
-  assert.equal(await page.locator('.conversation-item').first().getAttribute('data-contact-key'), 'student:231006157');
+  assert.equal(await page.locator('#recent-message-list .conversation-item').first().getAttribute('data-contact-key'), 'student:231006157');
   console.log('PASS: new messages move chats to the top with unread count and complete history');
 
   // Re-enter the account with an incomplete directory: saved history must rebuild
@@ -281,22 +281,26 @@ async function main() {
   }));
   await page.locator('#sign-out-button').click();
   await login('231027906');
-  await page.waitForFunction(() => document.querySelector('.conversation-item')?.dataset.contactKey === 'student:231006157');
-  await page.locator('.conversation-item').first().click();
+  await page.waitForFunction(() => document.querySelector('#recent-message-list .conversation-item')?.dataset.contactKey === 'student:231006157');
+  await page.locator('#recent-message-list .conversation-item').first().click();
   assert((await page.locator('#message-thread').textContent()).includes('Newest incoming message'));
   assert((await page.locator('#message-thread').textContent()).includes('Latest message moves this chat to the top'));
   await page.locator('#message-search').fill('Mariam');
-  assert.equal(await page.locator('[data-contact-key="student:231027907"]').count(), 1);
-  assert.equal(await page.locator('[data-contact-key="student:231006157"]').count(), 1,
-    'Searching for a recipient must not hide other recent senders');
+  assert.equal(await page.locator('#contacts-list .conversation-item').count(), 0,
+    'Searching contacts must not add recent conversations to the directory');
+  assert.equal(await page.locator('#recent-message-list [data-contact-key="student:231027907"]').count(), 1);
+  assert.equal(await page.locator('#recent-message-list [data-contact-key="student:231006157"]').count(), 1,
+    'Searching contacts must not filter or hide recent messages');
   await page.locator('#message-search').fill('');
   await page.unroute('**/messages/contacts?**');
   await screenshot('recent-chats.png');
   console.log('PASS: recent chats and history return after signing in again, even with an incomplete directory');
 
   await sendText('231006158', 'My first message to you');
-  await page.waitForFunction(() => document.querySelector('.conversation-item')?.dataset.contactKey === 'student:231006158');
-  const firstTimeSender = page.locator('[data-contact-key="student:231006158"]');
+  await page.waitForFunction(() => document.querySelector('#recent-message-list .conversation-item')?.dataset.contactKey === 'student:231006158');
+  const firstTimeSender = page.locator('#recent-message-list [data-contact-key="student:231006158"]');
+  assert.equal(await page.locator('#contacts-list [data-contact-key="student:231006158"]').count(), 0,
+    'A first-time sender must appear in Recent messages instead of Contacts');
   assert((await firstTimeSender.textContent()).includes('New Chat Student'));
   assert.equal(await firstTimeSender.locator('.conversation-unread').textContent(), '1');
   await firstTimeSender.click();
@@ -304,20 +308,19 @@ async function main() {
   console.log('PASS: a first-ever sender from another major appears automatically by name without an ID or directory entry');
 
   // Reproduce the reported problem with real timed sync, not a manual refresh.
-  await page.locator('#message-chats-tab').click();
   await page.locator('#message-search').fill('231027905');
   await page.waitForFunction(() => document.querySelector('#conversation-title').textContent === 'Yasmin Wael');
   await page.locator('#message-search').fill('999999999');
   await sendText('231027907', 'A live message from Mariam');
-  await page.waitForFunction(() => document.querySelector('.conversation-item')?.dataset.contactKey === 'student:231027907'
-    && document.querySelector('.conversation-item')?.textContent.includes('A live message from Mariam'));
-  const liveSender = page.locator('[data-contact-key="student:231027907"]');
+  await page.waitForFunction(() => document.querySelector('#recent-message-list .conversation-item')?.dataset.contactKey === 'student:231027907'
+    && document.querySelector('#recent-message-list .conversation-item')?.textContent.includes('A live message from Mariam'));
+  const liveSender = page.locator('#recent-message-list [data-contact-key="student:231027907"]');
   assert((await liveSender.textContent()).includes(third.name));
   assert(await liveSender.locator('.conversation-unread').isVisible());
   await liveSender.click();
   assert.equal(await page.locator('#message-search').inputValue(), '');
   assert((await page.locator('#message-thread').textContent()).includes('A live message from Mariam'));
-  await page.waitForFunction(() => !document.querySelector('[data-contact-key="student:231027907"] .conversation-unread'));
+  await page.waitForFunction(() => !document.querySelector('#recent-message-list [data-contact-key="student:231027907"] .conversation-unread'));
   console.log('PASS: automatic sync names the incoming sender while another ID is searched; one click opens history and clears unread');
 
   // Reply using the keyboard, then check that the other student actually receives it.
@@ -351,15 +354,14 @@ async function main() {
     status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Temporary inbox outage' }),
   }));
   await page.waitForFunction(() => document.querySelector('#message-sync-status').textContent.includes('Temporary inbox outage'));
-  assert((await page.locator('[data-contact-key="student:231027907"]').textContent()).includes(third.name));
+  assert((await page.locator('#recent-message-list [data-contact-key="student:231027907"]').textContent()).includes(third.name));
   await page.unroute('**/messages?**');
   await page.waitForFunction(() => document.querySelector('#message-sync-status').textContent.includes('Chats are up to date'));
   console.log('PASS: sync outages are visible, history stays available, and reconnect happens automatically');
-  const stableChat = await page.locator('.conversation-item').first().elementHandle();
+  const stableChat = await page.locator('#recent-message-list .conversation-item').first().elementHandle();
   await page.waitForTimeout(6500);
   assert(await stableChat.evaluate(button => button.isConnected), 'Unchanged chats must keep their buttons during background sync');
   console.log('PASS: automatic refresh preserves unchanged chat buttons for reliable clicks');
-  await page.locator('#message-chats-tab').click();
   await screenshot('interactive-chats.png');
   assert.deepEqual(errors, [], 'No renderer errors');
   console.log(`Desktop attachment checks passed. Screenshots: ${runDir}`);

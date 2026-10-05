@@ -322,15 +322,21 @@
             </div>
             <div class="messages-layout">
               <aside class="conversation-sidebar">
-                <div class="message-list-tabs" aria-label="Conversation list">
-                  <button id="message-chats-tab" type="button" aria-pressed="true">Chats <span id="message-chats-count" hidden></span></button>
-                  <button id="message-contacts-tab" type="button" aria-pressed="false">Classmates</button>
-                </div>
-                <label class="message-search-label" for="message-search">Find a classmate by name or student ID</label>
-                <input id="message-search" type="search" placeholder="Name or student ID" autocomplete="off" aria-describedby="message-search-help">
-                <p id="message-search-help" class="message-search-help">Incoming chats appear automatically with the sender’s name. Find a new classmate by name or student ID.</p>
-                <p id="message-search-status" class="message message-search-status" role="status" aria-live="polite"></p>
-                <div id="conversation-list" class="conversation-list"></div>
+                <section class="recent-message-section" aria-labelledby="recent-messages-heading">
+                  <div class="conversation-section-heading">
+                    <h5 id="recent-messages-heading">Recent messages</h5>
+                    <span id="recent-messages-unread" class="conversation-unread" hidden></span>
+                  </div>
+                  <div id="recent-message-list" class="conversation-list recent-message-list" aria-label="Recent messages"></div>
+                </section>
+                <section class="contact-section" aria-labelledby="contact-list-heading">
+                  <h5 id="contact-list-heading" class="contact-list-heading">Contacts</h5>
+                  <label class="message-search-label" for="message-search">Find a classmate by name or student ID</label>
+                  <input id="message-search" type="search" placeholder="Name or student ID" autocomplete="off" aria-describedby="message-search-help">
+                  <p id="message-search-help" class="message-search-help">Your contacts are listed separately from recent messages.</p>
+                  <p id="message-search-status" class="message message-search-status" role="status" aria-live="polite"></p>
+                  <div id="contacts-list" class="conversation-list contact-list" aria-label="Contacts"></div>
+                </section>
               </aside>
               <section class="conversation-pane">
                 <header id="conversation-header" class="conversation-header">

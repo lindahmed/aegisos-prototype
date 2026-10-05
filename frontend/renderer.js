@@ -916,7 +916,8 @@ document.addEventListener('visibilitychange', () => {
 
 const inboxButton = document.querySelector('#inbox-button');
 const inboxBadge = document.querySelector('#inbox-badge');
-const conversationList = document.querySelector('#conversation-list');
+const recentMessageList = document.querySelector('#recent-message-list');
+const contactsList = document.querySelector('#contacts-list');
 const conversationTitle = document.querySelector('#conversation-title');
 const conversationSubtitle = document.querySelector('#conversation-subtitle');
 const messageThread = document.querySelector('#message-thread');
@@ -927,9 +928,7 @@ const messageComposeInput = document.querySelector('#message-compose-input');
 const messageSendButton = document.querySelector('#message-send-button');
 const messageStatus = document.querySelector('#message-status');
 const messageSyncStatus = document.querySelector('#message-sync-status');
-const messageChatsTab = document.querySelector('#message-chats-tab');
-const messageContactsTab = document.querySelector('#message-contacts-tab');
-const messageChatsCount = document.querySelector('#message-chats-count');
+const recentMessagesUnread = document.querySelector('#recent-messages-unread');
 const messageJumpLatest = document.querySelector('#message-jump-latest');
 const messageAttachButton = document.querySelector('#message-attach-button');
 const messageAttachmentInput = document.querySelector('#message-attachment-input');
@@ -947,13 +946,13 @@ let messageContacts = [];
 let campusMessages = [];
 let selectedMessageContact = null;
 let messageTimer = null;
-let messageListMode = 'chats';
 let messageSyncGeneration = 0;
 let messageRefreshTask = null;
 let messageDirectoryUpdatedAt = 0;
 let renderedMessageThreadKey = null;
 let renderedMessageThreadSignature = '';
-let renderedConversationListSignature = '';
+let renderedRecentMessagesSignature = '';
+let renderedContactsSignature = '';
 const pendingMessageReads = new Set();
 let messageStudentLookupTimer = null;
 let messageStudentLookupSequence = 0;
@@ -1027,8 +1026,8 @@ function updateInboxBadge() {
   const unread = campusMessages.filter((message) => !message.read && !isOutgoingMessage(message)).length;
   inboxBadge.hidden = unread === 0;
   inboxBadge.textContent = String(unread);
-  messageChatsCount.hidden = unread === 0;
-  messageChatsCount.textContent = String(unread);
+  recentMessagesUnread.hidden = unread === 0;
+  recentMessagesUnread.textContent = String(unread);
 }
 
 
@@ -1038,18 +1037,8 @@ function isOutgoingMessage(message) {
 }
 
 
-function setMessageListMode(mode) {
-  messageListMode = mode;
-  messageChatsTab.setAttribute('aria-pressed', String(mode === 'chats'));
-  messageContactsTab.setAttribute('aria-pressed', String(mode === 'contacts'));
-  renderConversationList();
-}
-
-
 function renderConversationList() {
   const query = messageSearch.value.trim().toLowerCase();
-  const previousTopContact = conversationList.querySelector('.conversation-item')?.dataset.contactKey;
-  const previousScrollTop = conversationList.scrollTop;
   const activity = new Map();
   for (const message of campusMessages) {
     const outgoing = message.sender_type === 'student'
@@ -1063,7 +1052,19 @@ function renderConversationList() {
     if (!message.read && !outgoing) entry.unread += 1;
     activity.set(key, entry);
   }
-  const visible = conversationContacts().filter((contact) => {
+  const allContacts = conversationContacts();
+  const recentContacts = allContacts
+    .filter((contact) => activity.has(contactKey(contact)))
+    .sort((left, right) => {
+      const leftLatest = activity.get(contactKey(left)).latest;
+      const rightLatest = activity.get(contactKey(right)).latest;
+      return messageTimestamp(rightLatest) - messageTimestamp(leftLatest)
+        || left.name.localeCompare(right.name)
+        || contactKey(left).localeCompare(contactKey(right));
+    });
+  const recentKeys = new Set(recentContacts.map(contactKey));
+  const visibleContacts = allContacts.filter((contact) => {
+    if (recentKeys.has(contactKey(contact))) return false;
     const isStudent = contact.type === 'student';
     const major = contact.major || contact.subtitle?.split('·').at(-1) || '';
     const sameMajor = isStudent
@@ -1071,55 +1072,50 @@ function renderConversationList() {
     const matchesQuery = `${contact.name} ${contact.id} ${contact.subtitle}`
       .toLowerCase().includes(query);
     const exactStudentId = isStudent && String(contact.id).toLowerCase() === query;
-    const hasHistory = activity.has(contactKey(contact));
-    // Search is for starting a new chat; it must never hide an incoming sender.
-    if (hasHistory) return true;
     if (selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact)) return true;
-    if (messageListMode === 'chats' && !query) return false;
     return isStudent ? exactStudentId || (sameMajor && matchesQuery) : matchesQuery;
   });
-  visible.sort((left, right) => {
-    const leftLatest = activity.get(contactKey(left))?.latest;
-    const rightLatest = activity.get(contactKey(right))?.latest;
-    return Number(Boolean(rightLatest)) - Number(Boolean(leftLatest))
-      || messageTimestamp(rightLatest) - messageTimestamp(leftLatest)
-      || left.name.localeCompare(right.name)
-      || contactKey(left).localeCompare(contactKey(right));
-  });
+  visibleContacts.sort((left, right) =>
+    left.name.localeCompare(right.name)
+      || contactKey(left).localeCompare(contactKey(right)));
 
-  const signature = JSON.stringify([messageListMode, Boolean(query),
-    selectedMessageContact && contactKey(selectedMessageContact), visible.map((contact) => {
-      const { latest, unread } = activity.get(contactKey(contact)) || {};
-      return [contactKey(contact), contact.name, contact.subtitle, unread, latest?.message_id,
-        latest?.body, latest?.attachment?.filename, latest?.created_at];
-    })]);
-  if (signature === renderedConversationListSignature) return;
-  renderedConversationListSignature = signature;
+  const selectedKey = selectedMessageContact && contactKey(selectedMessageContact);
+  const recentSignature = JSON.stringify([selectedKey, recentContacts.map((contact) => {
+    const { latest, unread } = activity.get(contactKey(contact)) || {};
+    return [contactKey(contact), contact.name, contact.subtitle, unread, latest?.message_id,
+      latest?.body, latest?.attachment?.filename, latest?.created_at];
+  })]);
+  if (recentSignature !== renderedRecentMessagesSignature) {
+    renderedRecentMessagesSignature = recentSignature;
+    renderConversationItems(recentMessageList, recentContacts, activity,
+      'Recent messages will appear here when classmates or professors contact you.');
+  }
 
-  conversationList.replaceChildren();
-  if (visible.length === 0) {
+  const contactsSignature = JSON.stringify([Boolean(query), selectedKey,
+    visibleContacts.map((contact) => [contactKey(contact), contact.name, contact.subtitle])]);
+  if (contactsSignature !== renderedContactsSignature) {
+    renderedContactsSignature = contactsSignature;
+    renderConversationItems(contactsList, visibleContacts, activity, query
+      ? 'No classmate matches. Enter a registered student’s full ID to start a conversation.'
+      : 'Your classmates and professors will appear here.');
+  }
+}
+
+
+function renderConversationItems(container, contacts, activity, emptyText) {
+  const previousTopContact = container.querySelector('.conversation-item')?.dataset.contactKey;
+  const previousScrollTop = container.scrollTop;
+  container.replaceChildren();
+  if (contacts.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'conversation-list-empty';
-    empty.textContent = query
-      ? 'No classmate matches. Enter a registered student’s full ID to start a chat.'
-      : messageListMode === 'chats'
-        ? 'Your chats will appear here automatically when someone messages you. Choose New message to start a chat.'
-        : 'No classmates in your major are available yet.';
-    conversationList.append(empty);
+    empty.textContent = emptyText;
+    container.append(empty);
     return;
   }
 
-  let section = '';
-  for (const contact of visible) {
+  for (const contact of contacts) {
     const { latest, unread = 0 } = activity.get(contactKey(contact)) || {};
-    const nextSection = latest ? 'Recent chats' : query ? 'Search results' : 'Classmates & professors';
-    if (section !== nextSection) {
-      section = nextSection;
-      const heading = document.createElement('h5');
-      heading.className = 'conversation-list-heading';
-      heading.textContent = section;
-      conversationList.append(heading);
-    }
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `conversation-item${unread ? ' unread' : ''}${selectedMessageContact && contactKey(selectedMessageContact) === contactKey(contact) ? ' active' : ''}`;
@@ -1156,12 +1152,12 @@ function renderConversationList() {
       badge.textContent = String(unread);
       button.append(badge);
     }
-    conversationList.append(button);
+    container.append(button);
   }
-  if (previousTopContact === conversationList.querySelector('.conversation-item')?.dataset.contactKey) {
-    conversationList.scrollTop = previousScrollTop;
+  if (previousTopContact === container.querySelector('.conversation-item')?.dataset.contactKey) {
+    container.scrollTop = previousScrollTop;
   } else {
-    conversationList.scrollTop = 0;
+    container.scrollTop = 0;
   }
 }
 
@@ -1417,6 +1413,8 @@ function startMessageSync() {
   messageContacts = [];
   campusMessages = [];
   selectedMessageContact = null;
+  renderedRecentMessagesSignature = '';
+  renderedContactsSignature = '';
   renderedMessageThreadKey = null;
   renderedMessageThreadSignature = '';
   messageDirectoryUpdatedAt = 0;
@@ -1433,7 +1431,6 @@ function startMessageSync() {
   messageThread.append(empty);
   setMessage(messageStatus, '');
   messageSearch.value = '';
-  setMessageListMode('chats');
   setMessage(messageSyncStatus, 'Connecting to your chats…');
   updateInboxBadge();
   refreshMessages();
@@ -1526,13 +1523,6 @@ async function downloadMessageDocument(item, button) {
 
 
 inboxButton.addEventListener('click', () => showDashboardSection('messages'));
-messageChatsTab.addEventListener('click', () => {
-  cancelMessageStudentLookup();
-  messageSearch.value = '';
-  setMessageListMode('chats');
-  conversationList.scrollTop = 0;
-});
-messageContactsTab.addEventListener('click', () => setMessageListMode('contacts'));
 messageJumpLatest.addEventListener('click', () => {
   messageThread.scrollTop = messageThread.scrollHeight;
   messageJumpLatest.hidden = true;
@@ -1562,7 +1552,7 @@ document.querySelector('#new-message-button').addEventListener('click', () => {
   messageThread.append(empty);
   messageSearch.value = '';
   setMessage(messageStatus, '');
-  setMessageListMode('contacts');
+  renderConversationList();
   messageSearch.focus();
 });
 messageSearch.addEventListener('input', () => {
