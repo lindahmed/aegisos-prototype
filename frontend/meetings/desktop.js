@@ -6,6 +6,7 @@ const path = require('node:path');
 const { WebSocket } = require('ws');
 const { createMeetingServer } = require('./server');
 const { createInvitation, parseInvitation } = require('./invitation');
+const { meetingConfiguration, normalizeRtcConfiguration } = require('./configuration');
 
 function installMeetings(win) {
   const appUrl = pathToFileURL(path.join(__dirname, '..', 'index.html')).href;
@@ -38,28 +39,41 @@ function installMeetings(win) {
       return fn(...args);
     });
   }
-  function configuration() {
-    let iceServers;
-    try {
-      iceServers = JSON.parse(process.env.AEGIS_MEETING_ICE_SERVERS || '[]');
-      if (!Array.isArray(iceServers)) throw new Error();
-    } catch { throw new Error('AEGIS_MEETING_ICE_SERVERS must contain a JSON array.'); }
-    return { iceServers, iceTransportPolicy: process.env.AEGIS_MEETING_RELAY_ONLY === '1' ? 'relay' : 'all' };
-  }
   async function connect(endpoint, roomKey, hostKey) {
     const url = new URL(endpoint);
     if (!['ws:', 'wss:'].includes(url.protocol) || url.username || url.password || url.hash || url.search) throw new Error('Use a ws:// or wss:// meeting address.');
-    const rtc = configuration();
     const connectionGeneration = generation;
     const client = new WebSocket(url, { maxPayload: 4 * 1024 * 1024, handshakeTimeout: 4000, followRedirects: false });
     let opened = false;
+    let configured = false;
+    let settleConfiguration;
+    let rejectConfiguration;
+    const remoteConfiguration = new Promise((resolve, reject) => {
+      settleConfiguration = resolve;
+      rejectConfiguration = reject;
+    });
+    void remoteConfiguration.catch(() => {});
     socket = client;
     client.on('error', () => {});
     client.on('message', (raw) => {
       if (socket !== client) return;
-      try { emit(JSON.parse(raw.toString())); } catch { emit({ type: 'error', message: 'Invalid meeting response.' }); }
+      try {
+        const message = JSON.parse(raw.toString());
+        if (message.type === 'configuration') {
+          const rtc = normalizeRtcConfiguration(message.configuration);
+          configured = true;
+          settleConfiguration(rtc);
+        } else {
+          if (message.type === 'error' && !configured) rejectConfiguration(new Error(message.message));
+          emit(message);
+        }
+      } catch (error) {
+        rejectConfiguration(error);
+        emit({ type: 'error', message: 'Invalid meeting response.' });
+      }
     });
     client.on('close', () => {
+      rejectConfiguration(new Error('The meeting connection closed.'));
       if (socket !== client) return;
       if (!opened) { socket = null; return; }
       emit({ type: 'disconnected', reason: 'Meeting connection lost. Rejoin with your invitation.' });
@@ -79,6 +93,18 @@ function installMeetings(win) {
     }
     if (generation !== connectionGeneration) { client.terminate(); throw new Error('Meeting connection cancelled.'); }
     client.send(JSON.stringify({ type: 'join', roomKey, hostKey, name: identity.name }));
+    let rtc;
+    try {
+      rtc = await Promise.race([
+        remoteConfiguration,
+        new Promise((_, reject) => setTimeout(() =>
+          reject(new Error('The meeting host did not provide media configuration.')), 5000)),
+      ]);
+    } catch (error) {
+      if (socket === client) socket = null;
+      client.terminate();
+      throw error;
+    }
     blocker = powerSaveBlocker.start('prevent-app-suspension');
     return rtc;
   }
@@ -116,6 +142,7 @@ function installMeetings(win) {
         port: Number(process.env.AEGIS_MEETING_PORT || 8765),
         host: process.env.AEGIS_MEETING_BIND || '0.0.0.0',
         title: String(title || '').trim().slice(0, 120) || 'Online meeting', identity,
+        configuration: () => meetingConfiguration(),
       });
       if (generation !== startGeneration) { await created.close(); throw new Error('Meeting cancelled.'); }
       server = created;

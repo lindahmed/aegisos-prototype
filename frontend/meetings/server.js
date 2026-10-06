@@ -17,7 +17,8 @@ function sameSecret(a, b) {
 
 // A room belongs to this desktop process. Remote clients cannot create rooms or
 // obtain the host credential; join invitations only contain the admission key.
-async function createMeetingServer({ port = 8765, host = '0.0.0.0', title, identity }) {
+async function createMeetingServer({ port = 8765, host = '0.0.0.0', title, identity,
+  configuration = () => ({ iceServers: [], iceTransportPolicy: 'all' }) }) {
   const roomKey = randomBytes(24).toString('hex');
   const hostKey = randomBytes(32).toString('hex');
   const members = new Map();
@@ -80,6 +81,7 @@ async function createMeetingServer({ port = 8765, host = '0.0.0.0', title, ident
           if (members.size >= 48) throw new Error('The waiting room is full.');
           const name = isHost ? identity.name : String(message.name || '').trim().slice(0, 100);
           if (!name) throw new Error('A display name is required.');
+          const rtc = configuration();
           member = {
             id: randomUUID(), ws, name,
             role: isHost ? identity.role : 'guest', host: isHost, admitted: isHost,
@@ -88,6 +90,7 @@ async function createMeetingServer({ port = 8765, host = '0.0.0.0', title, ident
           members.set(member.id, member);
           if (isHost) hostId = member.id;
           clearTimeout(timeout);
+          send(ws, { type: 'configuration', configuration: rtc });
           send(ws, { type: 'joined', id: member.id });
           snapshot();
           return;

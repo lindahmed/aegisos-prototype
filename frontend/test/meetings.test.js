@@ -37,7 +37,8 @@ async function client(server, { host = false, key = server.roomKey, name = 'Stud
 const type = (expected) => (message) => message.type === expected;
 const has = (id, predicate) => (message) => message.type === 'state' && message.members.some((m) => m.id === id && predicate(m));
 async function fixture(t) {
-  const server = await createMeetingServer({ port: 0, host: '127.0.0.1', title: 'Algorithms', identity: { name: 'Professor', role: 'staff' } });
+  const server = await createMeetingServer({ port: 0, host: '127.0.0.1', title: 'Algorithms', identity: { name: 'Professor', role: 'staff' },
+    configuration: () => ({ iceServers: [{ urls: 'turn:turn.example.edu', username: 'temporary', credential: 'secret' }], iceTransportPolicy: 'relay' }) });
   t.after(() => server.close());
   const host = await client(server, { host: true });
   host.id = (await host.next(type('joined'))).id;
@@ -52,6 +53,15 @@ async function admit(host, guestClient) {
   host.send({ type: 'admit', target: guestClient.id });
   await guestClient.next(has(guestClient.id, (m) => m.admitted));
 }
+
+test('the host distributes media relay configuration to participants', async (t) => {
+  const { server, host } = await fixture(t);
+  const hostConfiguration = await host.next(type('configuration'));
+  const participant = await guest(server, 'Alice');
+  const participantConfiguration = await participant.next(type('configuration'));
+  assert.deepEqual(participantConfiguration, hostConfiguration);
+  assert.equal(participantConfiguration.configuration.iceTransportPolicy, 'relay');
+});
 
 test('invitations cannot grant host access and the lobby receives no media or private requests', async (t) => {
   const { server, host } = await fixture(t);

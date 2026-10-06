@@ -42,23 +42,28 @@ LAN address cannot be reached from the public internet. TLS terminates at the
 proxy; the internal desktop service uses plain WebSocket. Keep the proxy path
 pointing at the host desktop and allow long-lived WebSocket connections.
 
-Set these variables when starting Electron (on **every participant desktop** for
-ICE/TURN settings):
+Set these variables on the **host desktop**. The host now sends validated ICE/TURN
+configuration to joining apps, so participants only need UniTrack. For a complete
+Cloudflare Tunnel and coturn deployment, see [Public desktop meetings](../../docs/PUBLIC_MEETINGS.md).
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `AEGIS_MEETING_PORT` | `8765` | Host signaling listener port. |
 | `AEGIS_MEETING_BIND` | `0.0.0.0` | Host bind address; use `127.0.0.1` with a local proxy. |
 | `AEGIS_MEETING_PUBLIC_URL` | LAN `ws://address:8765` | Externally reachable `wss://lectures.example.edu` proxy/tunnel endpoint, without fragment or query. |
-| `AEGIS_MEETING_ICE_SERVERS` | `[]` | JSON array of institution-managed STUN/TURN server configurations. |
-| `AEGIS_MEETING_RELAY_ONLY` | unset | Set `1` to force media through configured TURN. |
+| `AEGIS_MEETING_ICE_SERVERS` | `[]` | JSON array of static STUN/TURN configurations distributed to participants. |
+| `AEGIS_MEETING_TURN_URLS` | unset | JSON array of coturn `turn:` / `turns:` URLs. |
+| `AEGIS_MEETING_TURN_SECRET` | unset | Coturn REST shared secret used only to create time-limited credentials. |
+| `AEGIS_MEETING_TURN_TTL_SECONDS` | `86400` | Credential lifetime from 300 to 86400 seconds. |
+| `AEGIS_MEETING_RELAY_ONLY` | unset | Set `1` to force media through configured TURN during verification. |
 
 Example (substitute your actual service and short-lived TURN credentials):
 
 ```bash
 export AEGIS_MEETING_PUBLIC_URL='wss://lectures.example.edu'
 export AEGIS_MEETING_BIND='127.0.0.1'
-export AEGIS_MEETING_ICE_SERVERS='[{"urls":"stun:turn.example.edu:3478"},{"urls":"turns:turn.example.edu:5349","username":"temporary-user","credential":"temporary-password"}]'
+export AEGIS_MEETING_TURN_URLS='["turn:turn.example.edu:3478?transport=udp","turns:turn.example.edu:443?transport=tcp"]'
+export AEGIS_MEETING_TURN_SECRET='replace-with-the-coturn-shared-secret'
 cd frontend
 npm start
 ```
