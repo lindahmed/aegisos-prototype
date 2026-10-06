@@ -5,6 +5,7 @@ const { networkInterfaces } = require('node:os');
 const path = require('node:path');
 const { WebSocket } = require('ws');
 const { createMeetingServer } = require('./server');
+const { createInvitation, parseInvitation } = require('./invitation');
 
 function installMeetings(win) {
   const appUrl = pathToFileURL(path.join(__dirname, '..', 'index.html')).href;
@@ -50,7 +51,8 @@ function installMeetings(win) {
     if (!['ws:', 'wss:'].includes(url.protocol) || url.username || url.password || url.hash || url.search) throw new Error('Use a ws:// or wss:// meeting address.');
     const rtc = configuration();
     const connectionGeneration = generation;
-    const client = new WebSocket(url, { maxPayload: 4 * 1024 * 1024, handshakeTimeout: 10000, followRedirects: false });
+    const client = new WebSocket(url, { maxPayload: 4 * 1024 * 1024, handshakeTimeout: 4000, followRedirects: false });
+    let opened = false;
     socket = client;
     client.on('error', () => {});
     client.on('message', (raw) => {
@@ -59,18 +61,34 @@ function installMeetings(win) {
     });
     client.on('close', () => {
       if (socket !== client) return;
+      if (!opened) { socket = null; return; }
       emit({ type: 'disconnected', reason: 'Meeting connection lost. Rejoin with your invitation.' });
       void disconnect();
     });
-    await new Promise((resolve, reject) => {
-      client.once('open', resolve);
-      client.once('error', () => reject(new Error('Cannot reach the meeting host. Check the address and network.')));
-      client.once('close', () => reject(new Error('The meeting connection closed.')));
-    });
+    try {
+      await new Promise((resolve, reject) => {
+        client.once('open', resolve);
+        client.once('error', () => reject(new Error('Cannot reach the meeting host. Check the address and network.')));
+        client.once('close', () => reject(new Error('The meeting connection closed.')));
+      });
+      opened = true;
+    } catch (error) {
+      if (socket === client) socket = null;
+      client.terminate();
+      throw error;
+    }
     if (generation !== connectionGeneration) { client.terminate(); throw new Error('Meeting connection cancelled.'); }
     client.send(JSON.stringify({ type: 'join', roomKey, hostKey, name: identity.name }));
     blocker = powerSaveBlocker.start('prevent-app-suspension');
     return rtc;
+  }
+  async function connectAny(endpoints, roomKey, hostKey) {
+    let lastError;
+    for (const endpoint of endpoints) {
+      try { return await connect(endpoint, roomKey, hostKey); }
+      catch (error) { lastError = error; }
+    }
+    throw lastError || new Error('Cannot reach the meeting host. Check the address and network.');
   }
   handle('authenticate', async ({ role, id, password }) => {
     if (socket) throw new Error('Leave the meeting before changing accounts.');
@@ -102,22 +120,21 @@ function installMeetings(win) {
       if (generation !== startGeneration) { await created.close(); throw new Error('Meeting cancelled.'); }
       server = created;
       const rtc = await connect(`ws://127.0.0.1:${server.port}`, server.roomKey, server.hostKey);
-      const address = Object.values(networkInterfaces()).flat().find((a) => a.family === 'IPv4' && !a.internal)?.address || '127.0.0.1';
-      const endpoint = new URL(process.env.AEGIS_MEETING_PUBLIC_URL || `ws://${address}:${server.port}`);
-      if (!['ws:', 'wss:'].includes(endpoint.protocol) || endpoint.search || endpoint.hash || endpoint.username || endpoint.password) throw new Error('Invalid AEGIS_MEETING_PUBLIC_URL.');
-      endpoint.hash = server.roomKey;
-      return { ...rtc, invitation: endpoint.href };
+      const invitation = createInvitation({
+        publicUrl: process.env.AEGIS_MEETING_PUBLIC_URL,
+        port: server.port,
+        roomKey: server.roomKey,
+        interfaces: networkInterfaces(),
+      });
+      return { ...rtc, invitation };
     } catch (error) { if (generation === startGeneration) await disconnect(); throw error; }
   });
   handle('join', async (invitation) => {
     if (!identity) throw new Error('Sign in first.');
     await disconnect();
     try {
-      const url = new URL(String(invitation).trim());
-      const roomKey = url.hash.slice(1);
-      if (!/^[a-f0-9]{48}$/.test(roomKey)) throw new Error('Paste the complete meeting invitation.');
-      url.hash = '';
-      return await connect(url.href, roomKey);
+      const { roomKey, endpoints } = parseInvitation(invitation);
+      return await connectAny(endpoints, roomKey);
     } catch (error) { await disconnect(); throw error; }
   });
   handle('send', (message) => {

@@ -27,7 +27,10 @@ profile lookup and professor password login validate desktop sign-in.
 ## Connection setup
 
 A host starts a WebSocket signaling service on its own desktop only while hosting.
-The default invitation uses the first non-loopback IPv4 address, port **8765**.
+The default invitation prefers physical Wi-Fi or Ethernet over Docker, VPN and
+other virtual adapters, using port **8765**. It also carries other usable local
+addresses as fallbacks that joining devices try automatically. This avoids
+publishing a single address that another device on the same LAN cannot reach.
 This works on a reachable LAN; the OS firewall must allow inbound TCP 8765.
 If the machine has several network adapters, set `AEGIS_MEETING_PUBLIC_URL` to the
 address reachable by participants. Wi-Fi client isolation can prevent LAN access.
