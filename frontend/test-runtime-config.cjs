@@ -16,7 +16,10 @@ function loadConfig(environment) {
       return { contextBridge: { exposeInMainWorld(_name, value) { exposed = value; } } };
     },
   });
-  return JSON.parse(JSON.stringify(exposed));
+  return {
+    apiBaseUrl: exposed.apiBaseUrl,
+    academicApiBaseUrl: exposed.academicApiBaseUrl,
+  };
 }
 
 assert.deepEqual(loadConfig({}), {

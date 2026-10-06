@@ -28,10 +28,12 @@
 
       <section class="content-panel">
         <section id="login-view" class="view login-view" aria-labelledby="login-title">
-          <h2 id="login-title">Student sign in</h2>
-          <p class="intro">Enter your student ID to open your workspace.</p>
+          <h2 id="login-title">Workstation sign in</h2>
+          <p class="intro">Open your student workspace or sign in as a professor to host a meeting.</p>
           <form id="login-form">
-            <label for="student-id">Student ID</label>
+            <label for="login-role">Account type</label>
+            <select id="login-role"><option value="student">Student</option><option value="staff">Professor</option></select>
+            <label id="login-id-label" for="student-id">Student ID</label>
             <input
               id="student-id"
               name="student-id"
@@ -40,6 +42,8 @@
               value="231027905"
               required
             >
+            <label id="staff-password-label" for="staff-password" hidden>Password</label>
+            <input id="staff-password" type="password" autocomplete="current-password" hidden>
             <button id="login-button" class="primary-button" type="submit">
               Continue
             </button>
@@ -97,7 +101,7 @@
                   <p id="notif-empty" class="notif-empty">You are all caught up.</p>
                 </section>
               </div>
-              <button id="sign-out-button" class="text-button" type="button">Change student</button>
+              <button id="sign-out-button" class="text-button" type="button">Sign out</button>
             </div>
           </header>
 
@@ -135,6 +139,7 @@
             <button id="calendar-tab" class="tab-button" type="button" aria-pressed="false">
               Calendar
             </button>
+            <button id="meeting-tab" class="tab-button" type="button" aria-pressed="false">Live meeting</button>
           </nav>
 
           <section id="workspace-panel" class="dashboard-page workspace-panel">
@@ -207,6 +212,47 @@
                 <p id="workspace-recommendation" class="recommendation-copy">Loading your latest recommendation…</p>
                 <button id="workspace-advisor-button" class="secondary-button" type="button">Ask Advisor AI <span aria-hidden="true">→</span></button>
               </section>
+            </div>
+          </section>
+
+          <section id="meeting-panel" class="dashboard-page meeting-panel" aria-labelledby="meeting-heading" hidden>
+            <div class="section-heading"><div><p class="workspace-kicker">Online meeting room</p><h3 id="meeting-heading">Live meeting</h3></div><span id="meeting-connection" class="count-badge">Ready</span></div>
+            <p id="meeting-status" class="message" role="status" aria-live="polite">Host a meeting or paste an invitation to request admission.</p>
+            <div id="meeting-lobby" class="meeting-lobby">
+              <form id="meeting-host-form" class="overview-card">
+                <h4>Host a meeting</h4><p>You approve entry and decide who can speak, share a screen, or draw.</p>
+                <label for="meeting-title">Meeting title</label><input id="meeting-title" maxlength="120" placeholder="e.g. Algorithms · Study group" required>
+                <button class="primary-button" type="submit">Start meeting</button>
+              </form>
+              <form id="meeting-join-form" class="overview-card">
+                <h4>Join a meeting</h4><p>Your microphone and camera stay off until you turn them on after admission.</p>
+                <label for="meeting-invitation">Meeting invitation</label><input id="meeting-invitation" autocomplete="off" spellcheck="false" placeholder="Paste the invitation from your host" required>
+                <button class="secondary-button" type="submit">Request to join</button>
+              </form>
+            </div>
+            <div id="meeting-room" hidden>
+              <div id="meeting-invite-row" class="meeting-invite-row" hidden><label for="meeting-share-invitation">Invite participants</label><input id="meeting-share-invitation" readonly><button id="meeting-copy" class="secondary-button meeting-icon-button" type="button" aria-label="Copy invitation" title="Copy invitation">📋</button></div>
+              <div class="meeting-controls" aria-label="Meeting controls">
+                <button id="meeting-mic" class="secondary-button meeting-icon-button" type="button" aria-pressed="false" aria-label="Unmute" title="Unmute">🔇</button>
+                <button id="meeting-camera" class="secondary-button meeting-icon-button" type="button" aria-pressed="false" aria-label="Camera on" title="Camera on">📷</button>
+                <button id="meeting-screen" class="secondary-button meeting-icon-button" type="button" aria-pressed="false" aria-label="Share screen" title="Share screen">🖥️</button>
+                <button id="meeting-hand" class="secondary-button meeting-icon-button" type="button" aria-pressed="false" aria-label="Raise hand" title="Raise hand">✋</button>
+                <button id="meeting-board-toggle" class="secondary-button meeting-icon-button" type="button" aria-pressed="false" aria-label="Show whiteboard" title="Show whiteboard">📝</button>
+                <button id="meeting-leave" class="secondary-button meeting-icon-button meeting-danger" type="button" aria-label="Leave meeting" title="Leave meeting">🚪</button>
+              </div>
+              <p id="meeting-permissions" class="meeting-hint"></p>
+              <div class="meeting-layout">
+                <div class="meeting-stage">
+                  <div id="meeting-screens" class="meeting-screens"></div>
+                  <div id="meeting-videos" class="meeting-videos"></div>
+                  <section id="meeting-board" class="meeting-board" aria-label="Shared whiteboard" hidden>
+                    <div class="meeting-board-tools"><label for="meeting-pen-color">Pen color</label><input id="meeting-pen-color" type="color" value="#2563eb"><label for="meeting-pen-width">Width</label><select id="meeting-pen-width"><option value="2">Fine</option><option value="5" selected>Medium</option><option value="10">Thick</option></select><button id="meeting-clear-board" class="secondary-button meeting-icon-button" type="button" aria-label="Clear board" title="Clear board" hidden>🧹</button></div>
+                    <canvas id="meeting-canvas" width="1200" height="675" aria-label="Meeting whiteboard; participants with presentation permission can draw"></canvas>
+                  </section>
+                  <p id="meeting-stage-empty" class="overview-empty">Camera feeds and shared screens appear here.</p>
+                </div>
+                <aside class="meeting-members overview-card" aria-labelledby="meeting-members-title"><div class="overview-heading"><h4 id="meeting-members-title">Participants</h4><button id="meeting-mute-all" class="text-button meeting-icon-button" type="button" aria-label="Mute all" title="Mute all" hidden>🔇</button></div><p class="meeting-hint">Display names identify join requests. Admit only people you recognize.</p><div id="meeting-members-list"></div><button id="meeting-end" class="secondary-button meeting-icon-button meeting-danger" type="button" aria-label="End meeting for everyone" title="End meeting for everyone" hidden>🛑</button></aside>
+              </div>
             </div>
           </section>
 
@@ -437,6 +483,8 @@
       </section>
     </div>
     <div id="toast-container" class="toast-container" aria-live="polite"></div>
+    <dialog id="meeting-source-dialog" class="meeting-source-dialog" aria-labelledby="meeting-source-title"><h3 id="meeting-source-title">Choose a screen or window</h3><div id="meeting-sources" class="meeting-sources"></div><button id="meeting-source-cancel" class="secondary-button" type="button">Cancel</button></dialog>
     <script src="renderer.js"></script>
+    <script src="meetings/renderer.js"></script>
   </body>
 </html>

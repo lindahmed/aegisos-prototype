@@ -1141,3 +1141,41 @@ body.is-authenticated .messages-panel {
   .advisor-compose .primary-button,
   .voice-button { min-height: 78px; }
 }
+
+/* Desktop live meetings use the same workstation colors in both themes. */
+.meeting-lobby { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.meeting-lobby form { display: flex; flex-direction: column; gap: 12px; }
+.meeting-lobby h4, .meeting-members h4 { margin: 0; }
+.meeting-lobby p { color: var(--text-dim); margin: 0 0 6px; }
+.meeting-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 8px; }
+.meeting-icon-button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: 8px; font-size: 1.35rem; line-height: 1; }
+.meeting-controls button[aria-pressed="true"] { border-color: var(--green); color: var(--green); }
+.meeting-danger { color: var(--red); border-color: var(--red-border); }
+.meeting-hint { font-size: .82rem; color: var(--text-dim); }
+.meeting-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 18px; align-items: start; }
+.meeting-stage { min-width: 0; }
+.meeting-videos { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.meeting-tile { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface-1); margin: 0 0 10px; }
+.meeting-tile video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #050b16; }
+.meeting-tile figcaption { padding: 8px 12px; font-size: .8rem; }
+.meeting-invite-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.meeting-invite-row input { flex: 1; min-width: 180px; font-size: .8rem; }
+.meeting-members { padding: 16px; }
+.meeting-member { padding: 14px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.meeting-member p { margin: 4px 0; font-size: .78rem; color: var(--text-dim); }
+.meeting-member-controls { display: flex; gap: 6px; flex-wrap: wrap; }
+.meeting-member-controls button { font-size: .72rem; padding: 6px 9px; }
+.meeting-board { margin: 16px 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.meeting-board-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; background: var(--surface-2); font-size: .8rem; }
+.meeting-board-tools input { width: 48px; height: 35px; padding: 2px; }
+.meeting-board-tools select { width: auto; }
+#meeting-canvas { width: 100%; height: auto; display: block; background: #fff; touch-action: none; cursor: crosshair; }
+#meeting-canvas[aria-disabled="true"] { cursor: default; }
+.meeting-source-dialog { background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 16px; max-width: 850px; width: 85vw; max-height: 80vh; padding: 24px; }
+.meeting-source-dialog::backdrop { background: rgba(0, 0, 0, .65); }
+.meeting-sources { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.meeting-source { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: 8px; border-radius: 8px; overflow-wrap: anywhere; }
+.meeting-source img { width: 100%; display: block; margin-bottom: 8px; }
+@media (max-width: 1150px) { .meeting-layout { grid-template-columns: minmax(0, 1fr) 250px; } .meeting-lobby { grid-template-columns: 1fr; } }
+body.is-authenticated .meeting-panel { overflow: auto; padding-bottom: 24px; }
+#login-form select { width: 100%; padding: 13px 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); }

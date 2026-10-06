@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
+const { installMeetings } = require('./meetings/desktop');
 
 
 function createWindow() {
@@ -20,6 +21,7 @@ function createWindow() {
     },
   });
 
+  installMeetings(mainWindow);
   Menu.setApplicationMenu(null);
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 

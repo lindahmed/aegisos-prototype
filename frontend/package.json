@@ -6,7 +6,9 @@
   "scripts": {
     "start": "electron .",
     "postinstall": "install-electron",
-    "check": "node --check main.js && node --check preload.js && node --check renderer.js && node test-runtime-config.cjs",
+    "check": "node --check main.js && node --check preload.js && node --check renderer.js && node --check meetings/server.js && node --check meetings/configuration.js && node --check meetings/desktop.js && node --check meetings/renderer.js && node test-runtime-config.cjs",
+    "test": "node --test test/*.test.js",
+    "test:meetings": "electron test/electron-meetings.js",
     "test:messages": "node test-message-attachments.cjs"
   },
   "keywords": [],
@@ -19,5 +21,8 @@
   "devDependencies": {
     "electron": "^43.4.0",
     "playwright": "^1.63.0"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
   }
 }

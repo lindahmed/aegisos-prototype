@@ -90,6 +90,7 @@ const calendarEventType = document.querySelector('#calendar-event-type');
 const calendarFormStatus = document.querySelector('#calendar-form-status');
 
 let currentStudent = null;
+let currentStaff = null;
 let selectedCourse = null;
 let advisorHistory = [];
 let activeRecording = null;
@@ -379,17 +380,21 @@ function renderWorkspaceOverview() {
 
 
 function showDashboardSection(section) {
+  if (currentStaff) section = 'meeting';
+  const showMeeting = section === 'meeting';
+  document.querySelector('#meeting-panel').hidden = !showMeeting;
+  document.querySelector('#meeting-tab').setAttribute('aria-pressed', String(showMeeting));
   const showAdvisor = section === 'advisor';
   const showProgress = section === 'progress';
   const showCalendar = section === 'calendar';
   const showMessages = section === 'messages';
-  workspacePanel.hidden = showAdvisor || showProgress || showCalendar || showMessages;
+  workspacePanel.hidden = showMeeting || showAdvisor || showProgress || showCalendar || showMessages;
   advisorPanel.hidden = !showAdvisor;
   progressPanel.hidden = !showProgress;
   calendarPanel.hidden = !showCalendar;
   messagesPanel.hidden = !showMessages;
   dashboardView.dataset.section = section;
-  workspaceTab.setAttribute('aria-pressed', String(!showAdvisor && !showProgress && !showCalendar && !showMessages));
+  workspaceTab.setAttribute('aria-pressed', String(!showMeeting && !showAdvisor && !showProgress && !showCalendar && !showMessages));
   advisorTab.setAttribute('aria-pressed', String(showAdvisor));
   progressTab.setAttribute('aria-pressed', String(showProgress));
   calendarTab.setAttribute('aria-pressed', String(showCalendar));
@@ -1781,6 +1786,8 @@ function resetAdvisor() {
 
 
 function renderStudent(student) {
+  currentStaff = null;
+  setStaffLayout(false);
   currentStudent = student;
   closeScorePanel();
   document.querySelector('#score-value').textContent = '—';
@@ -1837,9 +1844,12 @@ loginForm.addEventListener('submit', async (event) => {
   setBusy(true);
   setMessage(loginStatus, 'Loading student profile...');
   try {
-    const student = await apiRequest(`/student/${encodeURIComponent(studentId)}`);
+    const role = document.querySelector('#login-role').value;
+    const profile = await window.aegis.meetings.authenticate({ role, id: studentId, password: document.querySelector('#staff-password').value });
+    document.querySelector('#staff-password').value = '';
     setMessage(loginStatus, '');
-    renderStudent(student);
+    if (role === 'staff') renderProfessor(profile);
+    else renderStudent(profile);
   } catch (error) {
     setMessage(loginStatus, error.message, true);
   } finally {
@@ -2201,7 +2211,11 @@ advisorVoiceButton.addEventListener('click', async () => {
 });
 
 
-document.querySelector('#sign-out-button').addEventListener('click', () => {
+document.querySelector('#sign-out-button').addEventListener('click', async () => {
+  await window.lecture.leave();
+  await window.aegis.meetings.signOut();
+  currentStaff = null;
+  setStaffLayout(false);
   scoreRequestId += 1;
   closeScorePanel();
   stopNotificationSync();
@@ -2230,3 +2244,32 @@ document.querySelector('#sign-out-button').addEventListener('click', () => {
   setMessage(advisorStatus, '');
   studentIdInput.focus();
 });
+
+
+function setStaffLayout(isStaff) {
+  for (const element of [workspaceTab, advisorTab, progressTab, calendarTab,
+    document.querySelector('.student-stats'), document.querySelector('.score-wrap'),
+    document.querySelector('.notif-wrap'), inboxButton]) element.hidden = isStaff;
+}
+
+function renderProfessor(profile) {
+  currentStudent = null;
+  currentStaff = profile;
+  setStaffLayout(true);
+  document.querySelector('#welcome-title').textContent = `${profile.name} · Professor`;
+  loginView.hidden = true;
+  dashboardView.hidden = false;
+  document.body.classList.add('is-authenticated');
+  showDashboardSection('meeting');
+}
+
+document.querySelector('#login-role').addEventListener('change', (event) => {
+  const isStaff = event.target.value === 'staff';
+  document.querySelector('#login-id-label').textContent = isStaff ? 'Professor ID' : 'Student ID';
+  document.querySelector('#staff-password-label').hidden = !isStaff;
+  document.querySelector('#staff-password').hidden = !isStaff;
+  document.querySelector('#staff-password').required = isStaff;
+  studentIdInput.value = '';
+  setMessage(loginStatus, '');
+});
+document.querySelector('#meeting-tab').addEventListener('click', () => showDashboardSection('meeting'));

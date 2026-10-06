@@ -41,6 +41,31 @@ if [[ ! -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
     exit 1
 fi
 
+# Load only desktop meeting settings from .env without evaluating it as shell
+# code. Values already supplied by the launching environment take precedence.
+MEETING_ENV_KEYS=(
+    AEGIS_MEETING_PORT AEGIS_MEETING_BIND AEGIS_MEETING_PUBLIC_URL
+    AEGIS_MEETING_ICE_SERVERS AEGIS_MEETING_RELAY_ONLY
+    AEGIS_MEETING_TURN_URLS AEGIS_MEETING_TURN_SECRET
+    AEGIS_MEETING_TURN_TTL_SECONDS
+)
+while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    if [[ ! -v "$key" ]]; then
+        printf -v "$key" '%s' "$value"
+        export "$key"
+    fi
+done < <("$PROJECT_ROOT/.venv/bin/python" - "$PROJECT_ROOT/.env" "${MEETING_ENV_KEYS[@]}" <<'PY'
+import sys
+from dotenv import dotenv_values
+
+values = dotenv_values(sys.argv[1])
+for key in sys.argv[2:]:
+    value = values.get(key)
+    if value is not None:
+        sys.stdout.buffer.write(key.encode() + b"\0" + value.encode() + b"\0")
+PY
+)
+
 if [[ ! -d "$FRONTEND_DIR/node_modules/electron" ]]; then
     echo "Electron dependencies are missing. Run vm/setup.sh first." >&2
     exit 1
