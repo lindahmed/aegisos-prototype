@@ -1575,9 +1575,31 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
                     ),
                 )
                 course_rows = cursor.fetchall()
+                cursor.execute(
+                    """
+                    SELECT course_id, lecture_number
+                    FROM student_score_lectures
+                    WHERE student_id = %s AND semester = %s
+                    """,
+                    (student.student_id, self.semester),
+                )
+                completed_lecture_rows = cursor.fetchall()
+
+        completed_lectures_by_course: dict[str, set[int]] = {}
+        for lecture in completed_lecture_rows:
+            completed_lectures_by_course.setdefault(lecture["course_id"], set()).add(
+                int(lecture["lecture_number"])
+            )
+
+        # The normalized production schema does not yet contain a lecture
+        # catalogue. Score records do contain verified lecture completion, so
+        # expose one weekly course checkpoint per teaching week. This gives
+        # students a next-study prompt without inventing a lecture title.
+        available_lecture_count = min(max(self.current_week, 1), 16)
         courses = []
         for row in course_rows:
             course_id = row["course_id"]
+            completed_lecture_numbers = completed_lectures_by_course.get(course_id, set())
             grades = row if row["gradebook_student_id"] is not None else None
             coursework_mark = grades["coursework_mark"] if grades is not None else None
             week7_mark = grades["week7_exam_mark"] if grades is not None else None
@@ -1589,13 +1611,24 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
                 {"assessment_id": f"{course_id}-week12", "name": "Week 12 exam", "assessment_type": "midterm", "weight": 20.0, "due_week": 12, "covered_lecture_ids": "[]", "percentage": week12_mark * 5 if week12_mark is not None and self.current_week >= 12 else None},
                 {"assessment_id": f"{course_id}-final", "name": "Final exam", "assessment_type": "final", "weight": 40.0, "due_week": 16, "covered_lecture_ids": "[]", "percentage": final_mark * 2.5 if final_mark is not None and self.current_week >= 16 else None},
             ]
+            lectures = [
+                {
+                    "lecture_id": f"{course_id}-l{number}",
+                    "lecture_number": number,
+                    "title": f"{row['course_name']} lecture {number}",
+                    "available_week": number,
+                    "completed": number in completed_lecture_numbers,
+                }
+                for number in range(1, available_lecture_count + 1)
+            ]
+
             courses.append({
                 "course_id": course_id,
                 "course_name": row["course_name"],
                 "semester": self.semester,
                 "current_week": self.current_week,
                 "assessments": assessments,
-                "lectures": [],
+                "lectures": lectures,
                 "materials": [],
             })
         return {

@@ -1962,6 +1962,79 @@ function addAdvisorMessage(role, content, audioUrl = null) {
 }
 
 
+const suggestionAlert = document.querySelector('#suggestion-alert');
+const suggestionTitle = document.querySelector('#suggestion-alert-title');
+const suggestionText = document.querySelector('#suggestion-alert-text');
+const suggestionStartButton = document.querySelector('#suggestion-start-button');
+let currentSuggestion = null;
+let suggestionRequestId = 0;
+
+
+function hideSuggestionAlert() {
+  suggestionAlert.hidden = true;
+  suggestionAlert.classList.remove('leaving');
+}
+
+
+function dismissSuggestionAlert() {
+  if (suggestionAlert.hidden) return;
+  suggestionAlert.classList.add('leaving');
+  setTimeout(hideSuggestionAlert, 200);
+}
+
+
+function showSuggestionAlert(suggestion) {
+  currentSuggestion = suggestion;
+  suggestionTitle.textContent = suggestion.title;
+  suggestionText.textContent = suggestion.reason + ' You have studied ' +
+    suggestion.completed_lectures + ' of ' + suggestion.available_lectures +
+    ' available lectures.';
+  suggestionAlert.classList.remove('leaving');
+  suggestionAlert.hidden = false;
+  suggestionStartButton.focus({ preventScroll: true });
+}
+
+
+async function loadStudySuggestion(studentId) {
+  const requestId = ++suggestionRequestId;
+  try {
+    const result = await apiRequest(
+      '/progress/' + encodeURIComponent(studentId) + '/suggestion',
+    );
+    if (requestId !== suggestionRequestId || currentStudent?.student_id !== studentId) return;
+    if (result.suggestion) showSuggestionAlert(result.suggestion);
+  } catch (_error) {
+    // The suggestion is optional; login and the workspace still work without it.
+  }
+}
+
+
+function startSuggestedStudy() {
+  const suggestion = currentSuggestion;
+  hideSuggestionAlert();
+  if (!suggestion || !currentStudent) return;
+  if (currentStudent.courses.includes(suggestion.course_name)) {
+    selectCourse(suggestion.course_name);
+  }
+  showDashboardSection('advisor');
+  if (advisorSendButton.disabled) return;
+  addAdvisorMessage(
+    'assistant',
+    suggestion.title + '. ' + suggestion.reason + ' Let me walk you through it.',
+  );
+  sendAdvisorMessage(suggestion.chat_prompt);
+}
+
+
+suggestionStartButton.addEventListener('click', startSuggestedStudy);
+document.querySelector('#suggestion-later-button').addEventListener('click', dismissSuggestionAlert);
+document.querySelector('#suggestion-dismiss-button').addEventListener('click', dismissSuggestionAlert);
+suggestionAlert.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') dismissSuggestionAlert();
+});
+
+
+
 function resetAdvisor() {
   advisorHistory = [];
   advisorMessages.replaceChildren();
@@ -2017,6 +2090,8 @@ function renderStudent(student) {
   loadScores(student.student_id);
   startNotificationSync();
   startMessageSync();
+  hideSuggestionAlert();
+  loadStudySuggestion(student.student_id);
 
   if (student.courses.length > 0) {
     selectCourse(student.courses[0]);
@@ -2204,18 +2279,12 @@ calendarEventForm.addEventListener('submit', (event) => {
 });
 
 
-advisorForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  if (!currentStudent) return;
-
-  const message = advisorInput.value.trim();
-  if (!message) return;
+async function sendAdvisorMessage(message) {
+  if (!currentStudent || !message) return;
 
   const priorHistory = advisorHistory.slice(-10);
   advisorHistory.push({ role: 'user', content: message });
   addAdvisorMessage('user', message);
-  advisorInput.value = '';
-  resizeAdvisorInput();
   setAdvisorBusy(true);
   advisorIntent.textContent = 'Thinking';
   setMessage(advisorStatus, 'Advisor AI is processing your request...');
@@ -2245,6 +2314,16 @@ advisorForm.addEventListener('submit', async (event) => {
     setAdvisorBusy(false);
     advisorInput.focus();
   }
+}
+
+
+advisorForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const message = advisorInput.value.trim();
+  if (!message) return;
+  advisorInput.value = '';
+  resizeAdvisorInput();
+  await sendAdvisorMessage(message);
 });
 
 advisorInput.addEventListener('input', resizeAdvisorInput);
@@ -2418,6 +2497,9 @@ document.querySelector('#sign-out-button').addEventListener('click', async () =>
   campusMessages = [];
   selectedMessageContact = null;
   toastContainer.replaceChildren();
+  suggestionRequestId += 1;
+  currentSuggestion = null;
+  hideSuggestionAlert();
   notifPanel.hidden = true;
   notifButton.setAttribute('aria-expanded', 'false');
   currentStudent = null;

@@ -51,6 +51,7 @@ from backend.progress.narrative import generate_weekly_narrative
 from backend.progress.scheduler import run_analysis_cycle
 from backend.progress.scoring import leaderboard
 from backend.progress.service import build_student_twin
+from backend.progress.suggestions import build_study_suggestion
 from backend.planner.service import build_semester_plan
 from backend.progress_agent.graph import (
     StudentNotFoundError,
@@ -1641,6 +1642,27 @@ def create_app(
         if twin is None:
             raise HTTPException(status_code=404, detail="Student not found")
         return twin
+
+    @api.get("/progress/{student_id}/suggestion")
+    def get_study_suggestion(
+        student_id: str, skip: str = ""
+    ) -> dict[str, object]:
+        """Return the next available lecture the student should study.
+
+        skip accepts a comma-separated list of lecture IDs already dismissed
+        by the student, allowing the client to request the next suitable
+        lecture without changing stored academic progress.
+        """
+        twin = build_student_twin(repository, student_id)
+        if twin is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        skipped = {item.strip() for item in skip.split(",") if item.strip()}
+        return {
+            "student_id": student_id,
+            "semester": twin.semester,
+            "current_week": twin.current_week,
+            "suggestion": build_study_suggestion(twin, skipped),
+        }
 
     @api.post("/progress/analyze/{student_id}")
     def analyze_progress(student_id: str) -> dict[str, object]:

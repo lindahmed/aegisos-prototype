@@ -505,6 +505,18 @@
         </form>
       </section>
     </div>
+    <aside id="suggestion-alert" class="suggestion-alert" role="alertdialog" aria-labelledby="suggestion-alert-title" aria-describedby="suggestion-alert-text" hidden>
+      <div class="suggestion-alert-head">
+        <span class="suggestion-alert-kicker"><span aria-hidden="true">✦</span> Advisor AI suggestion</span>
+        <button id="suggestion-dismiss-button" class="toast-close" type="button" aria-label="Dismiss suggestion">✕</button>
+      </div>
+      <h3 id="suggestion-alert-title" class="suggestion-alert-title"></h3>
+      <p id="suggestion-alert-text" class="suggestion-alert-text"></p>
+      <div class="suggestion-alert-actions">
+        <button id="suggestion-start-button" class="primary-button" type="button">Start studying</button>
+        <button id="suggestion-later-button" class="secondary-button" type="button">Later</button>
+      </div>
+    </aside>
     <div id="toast-container" class="toast-container" aria-live="polite"></div>
     <dialog id="meeting-source-dialog" class="meeting-source-dialog" aria-labelledby="meeting-source-title"><h3 id="meeting-source-title">Choose a screen or window</h3><div id="meeting-sources" class="meeting-sources"></div><button id="meeting-source-cancel" class="secondary-button" type="button">Cancel</button></dialog>
     <script src="renderer.js"></script>
