@@ -61,6 +61,8 @@ const workspaceTab = document.querySelector('#workspace-tab');
 const advisorTab = document.querySelector('#advisor-tab');
 const progressTab = document.querySelector('#progress-tab');
 const calendarTab = document.querySelector('#calendar-tab');
+const scheduleTab = document.querySelector('#schedule-tab');
+const schedulePanel = document.querySelector('#schedule-panel');
 const workspacePanel = document.querySelector('#workspace-panel');
 const advisorPanel = document.querySelector('#advisor-panel');
 const progressPanel = document.querySelector('#progress-panel');
@@ -201,6 +203,7 @@ async function academicApiRequest(path, options = {}) {
       },
     });
   } catch (error) {
+    if (error?.name === 'AbortError') throw error;
     const reason = error?.name === 'TimeoutError' ? 'timed out' : 'could not be reached';
     throw new Error(`The message service at ${academicApiBaseUrl} ${reason}.`);
   }
@@ -388,13 +391,16 @@ function showDashboardSection(section) {
   const showProgress = section === 'progress';
   const showCalendar = section === 'calendar';
   const showMessages = section === 'messages';
-  workspacePanel.hidden = showMeeting || showAdvisor || showProgress || showCalendar || showMessages;
+  const showSchedule = section === 'schedule';
+  workspacePanel.hidden = showMeeting || showAdvisor || showProgress || showCalendar || showMessages || showSchedule;
+  schedulePanel.hidden = !showSchedule;
   advisorPanel.hidden = !showAdvisor;
   progressPanel.hidden = !showProgress;
   calendarPanel.hidden = !showCalendar;
   messagesPanel.hidden = !showMessages;
   dashboardView.dataset.section = section;
-  workspaceTab.setAttribute('aria-pressed', String(!showMeeting && !showAdvisor && !showProgress && !showCalendar && !showMessages));
+  workspaceTab.setAttribute('aria-pressed', String(!showMeeting && !showAdvisor && !showProgress && !showCalendar && !showMessages && !showSchedule));
+  scheduleTab.setAttribute('aria-pressed', String(showSchedule));
   advisorTab.setAttribute('aria-pressed', String(showAdvisor));
   progressTab.setAttribute('aria-pressed', String(showProgress));
   calendarTab.setAttribute('aria-pressed', String(showCalendar));
@@ -407,6 +413,9 @@ function showDashboardSection(section) {
   }
   if (showMessages) {
     refreshMessages(true);
+  }
+  if (showSchedule) {
+    loadSchedule();
   }
 }
 
@@ -809,6 +818,189 @@ const notifPanel = document.querySelector('#notif-panel');
 const notifList = document.querySelector('#notif-list');
 const notifEmpty = document.querySelector('#notif-empty');
 const notifClearButton = document.querySelector('#notif-clear-button');
+
+// ---- Common group schedule + classmates (data comes only from the database) ----
+const SCHEDULE_DAYS = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+let scheduleRequestId = 0;
+
+function formatMinute(totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = String(totalMinutes % 60).padStart(2, '0');
+  const suffix = hours >= 12 ? 'PM' : 'AM';
+  return `${hours % 12 === 0 ? 12 : hours % 12}:${minutes} ${suffix}`;
+}
+
+function sessionDuration(slot) {
+  const minutes = slot.end_minute - slot.start_minute;
+  return minutes % 60 === 0 ? `${minutes / 60} h` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
+
+function scheduleTag(text, className) {
+  const tag = document.createElement('span');
+  tag.className = `schedule-tag ${className}`;
+  tag.textContent = text;
+  return tag;
+}
+
+function renderSchedule(view) {
+  const days = document.querySelector('#schedule-days');
+  const note = document.querySelector('#schedule-note');
+  const unscheduled = document.querySelector('#schedule-unscheduled');
+  const badge = document.querySelector('#schedule-group-badge');
+  const list = document.querySelector('#classmates-list');
+  const count = document.querySelector('#classmates-count');
+  let summary = document.querySelector('#schedule-summary');
+  if (!summary) {
+    summary = document.createElement('div');
+    summary.id = 'schedule-summary';
+    summary.className = 'schedule-summary';
+    days.before(summary);
+  }
+  days.replaceChildren();
+  list.replaceChildren();
+  summary.replaceChildren();
+  unscheduled.replaceChildren();
+  unscheduled.hidden = true;
+
+  if (!view.group || !view.schedule) {
+    badge.textContent = 'No group';
+    count.textContent = '';
+    setMessage(note, 'No schedule group is available for this student yet.');
+    return;
+  }
+
+  document.querySelector('#schedule-title').textContent = view.group.label;
+  badge.textContent = `${view.group.size} of ${view.group.capacity} students`;
+  const members = view.members || view.classmates.map((m) => ({ ...m, is_you: false }));
+  document.querySelector('#classmates-title').textContent = 'Students who share this schedule';
+  count.textContent = `${members.length} ${members.length === 1 ? 'student' : 'students'}`;
+
+  const slots = view.schedule.slots || [];
+  const noteText = {
+    database: `${view.schedule.semester} timetable · shared by every student in your group.`,
+    partial: `${view.schedule.semester} timetable · some courses have no class times in the database yet.`,
+    provisional: 'Provisional timetable · placeholder times and rooms until the official ones are published.',
+    none: 'No class times have been published for your courses yet.',
+  };
+  setMessage(note, noteText[view.schedule.times_source] || '');
+
+  // Summary: how many sessions, hours, days on campus and which days are free.
+  const weekDays = SCHEDULE_DAYS.filter((day) => day !== 'Friday' || slots.some((s) => s.day_of_week === day));
+  const busyDays = weekDays.filter((day) => slots.some((s) => s.day_of_week === day));
+  const freeDays = weekDays.filter((day) => !busyDays.includes(day));
+  const totalMinutes = slots.reduce((sum, s) => sum + (s.end_minute - s.start_minute), 0);
+  if (slots.length > 0) {
+    const facts = [
+      [String(slots.length), slots.length === 1 ? 'session a week' : 'sessions a week'],
+      [`${Math.round((totalMinutes / 60) * 10) / 10} h`, 'in class'],
+      [String(busyDays.length), busyDays.length === 1 ? 'day on campus' : 'days on campus'],
+      [freeDays.length ? freeDays.map((d) => d.slice(0, 3)).join(' · ') : 'None', 'days off'],
+    ];
+    for (const [value, label] of facts) {
+      const box = document.createElement('div');
+      box.className = 'schedule-fact';
+      const strong = document.createElement('strong');
+      strong.textContent = value;
+      const small = document.createElement('span');
+      small.textContent = label;
+      box.append(strong, small);
+      summary.append(box);
+    }
+  }
+
+  for (const day of weekDays) {
+    const daySlots = slots
+      .filter((slot) => slot.day_of_week === day)
+      .sort((a, b) => a.start_minute - b.start_minute);
+    const card = document.createElement('section');
+    card.className = `schedule-day${daySlots.length === 0 ? ' day-off' : ''}`;
+    const heading = document.createElement('h4');
+    heading.textContent = day;
+    const sessions = document.createElement('span');
+    sessions.className = 'schedule-day-count';
+    sessions.textContent = daySlots.length === 0
+      ? 'Day off'
+      : `${daySlots.length} ${daySlots.length === 1 ? 'session' : 'sessions'}`;
+    const head = document.createElement('div');
+    head.className = 'schedule-day-head';
+    head.append(heading, sessions);
+    card.append(head);
+    for (const slot of daySlots) {
+      const row = document.createElement('div');
+      row.className = `schedule-slot${slot.provisional ? ' provisional' : ''}`;
+      const time = document.createElement('span');
+      time.className = 'schedule-time';
+      time.textContent = `${formatMinute(slot.start_minute)} – ${formatMinute(slot.end_minute)} · ${sessionDuration(slot)}`;
+      const course = document.createElement('strong');
+      course.textContent = slot.course_name;
+      const tags = document.createElement('div');
+      tags.className = 'schedule-tags';
+      if (slot.session_type) tags.append(scheduleTag(slot.session_type, slot.session_type.toLowerCase()));
+      tags.append(scheduleTag(slot.location || 'Room to be announced', 'room'));
+      if (slot.provisional) tags.append(scheduleTag('Provisional', 'provisional-tag'));
+      row.append(time, course, tags);
+      card.append(row);
+    }
+    days.append(card);
+  }
+
+  if ((view.schedule.unscheduled_courses || []).length > 0) {
+    unscheduled.hidden = false;
+    const title = document.createElement('h4');
+    title.textContent = 'Class times not announced yet';
+    unscheduled.append(title);
+    for (const course of view.schedule.unscheduled_courses) {
+      const item = document.createElement('p');
+      item.textContent = course.course_name;
+      unscheduled.append(item);
+    }
+  }
+
+  if (members.length <= 1) {
+    const empty = document.createElement('li');
+    empty.className = 'overview-empty';
+    empty.textContent = 'You are the only student in this group so far.';
+    list.append(empty);
+  }
+  for (const member of members) {
+    const item = document.createElement('li');
+    item.textContent = member.name;
+    if (member.is_you) {
+      item.classList.add('is-you');
+      item.append(scheduleTag('You', 'lecture'));
+    }
+    list.append(item);
+  }
+}
+
+async function loadSchedule() {
+  if (!currentStudent) return;
+  const requestId = ++scheduleRequestId;
+  const note = document.querySelector('#schedule-note');
+  const hasContent = document.querySelector('#schedule-days').childElementCount > 0
+    || document.querySelector('#classmates-list').childElementCount > 0;
+  if (!hasContent) setMessage(note, 'Loading your schedule…');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45000);
+  try {
+    const view = await academicApiRequest(
+      `/portal/students/${encodeURIComponent(currentStudent.student_id)}/schedule`,
+      { signal: controller.signal },
+    );
+    if (requestId === scheduleRequestId) renderSchedule(view);
+  } catch (error) {
+    if (requestId === scheduleRequestId) {
+      setMessage(
+        note,
+        error.name === 'AbortError' ? 'The schedule is taking too long to load. Click Schedule to try again.' : error.message,
+        true,
+      );
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 
 const NOTIF_POLL_MS = 60000;
 let notifTimer = null;
@@ -1941,6 +2133,7 @@ workspaceTab.addEventListener('click', () => showDashboardSection('workspace'));
 advisorTab.addEventListener('click', () => showDashboardSection('advisor'));
 progressTab.addEventListener('click', () => showDashboardSection('progress'));
 calendarTab.addEventListener('click', () => showDashboardSection('calendar'));
+scheduleTab.addEventListener('click', () => showDashboardSection('schedule'));
 
 document.querySelector('#calendar-previous-button').addEventListener('click', () => {
   calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1);

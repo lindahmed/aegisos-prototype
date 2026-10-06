@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from dotenv import load_dotenv
 import httpx
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pypdf import PdfReader
 
@@ -46,6 +46,7 @@ from backend.progress.models import (
     WhatIfRequest,
     WhatIfResponse,
 )
+from backend.progress.insights import InsightsRunner, client_source
 from backend.progress.narrative import generate_weekly_narrative
 from backend.progress.scheduler import run_analysis_cycle
 from backend.progress.scoring import leaderboard
@@ -55,6 +56,7 @@ from backend.progress_agent.graph import (
     StudentNotFoundError,
     build_progress_graph,
 )
+from backend.schedule_groups import build_all_groups, student_schedule_view
 from backend.simulation.what_if import run_assessment_grade_scenario
 from database.repository import Student, StudentRepository
 from database.postgres_repository import PostgresStudentRepository
@@ -115,6 +117,13 @@ class PortalGradebookRowRequest(BaseModel):
     week7_exam_mark: float = Field(ge=0, le=30)
     week12_exam_mark: float = Field(ge=0, le=20)
     final_exam_mark: float = Field(ge=0, le=40)
+
+
+class StudentActivityRequest(BaseModel):
+    event_type: str = Field(min_length=1, max_length=40)
+    source: Literal["workspace", "app", "website"] | None = None
+    course_ref: str | None = Field(default=None, max_length=120)
+    detail: str | None = Field(default=None, max_length=200)
 
 
 class PortalGradebookUpdateRequest(BaseModel):
@@ -423,6 +432,22 @@ def _portal_notifications(
                         "read": notification_id in read_ids,
                     }
                 )
+    for suggestion in repository.get_advisor_suggestions(student_id):
+        notification_id = f"advisor:{suggestion['suggestion_id']}"
+        items.append(
+            {
+                "id": notification_id,
+                "type": "advisor",
+                "category": "Advisor AI",
+                "title": suggestion["title"],
+                "body": suggestion["body"],
+                "timestamp": (
+                    f"Week {suggestion['week_number']} · "
+                    f"{str(suggestion['priority']).upper()}"
+                ),
+                "read": notification_id in read_ids,
+            }
+        )
     return items
 
 
@@ -644,6 +669,23 @@ def create_app(
     knowledge_graph = create_knowledge_graph()
     progress_graph = build_progress_graph(repository)
     manager = WorkspaceManager(student_workspace_root, launcher=launcher)
+    insights = InsightsRunner(
+        repository,
+        enabled=os.environ.get("AEGIS_INSIGHTS", "1").strip().lower()
+        not in {"0", "false", "off"},
+        run_inline=db_path is not None,  # tests / local SQLite runs stay deterministic
+    )
+
+    def _track(
+        student_id: str, http: Request, event_type: str,
+        course: str | None = None, detail: str | None = None,
+    ) -> None:
+        """Log which client (workspace, app or website) a student used; never fails."""
+        insights.record(
+            student_id.strip(),
+            client_source(http.headers.get("user-agent"), http.query_params.get("source")),
+            event_type, course, detail,
+        )
 
     api = FastAPI(title="AegisOS EDU API", version="1.1.0")
     api.add_middleware(
@@ -788,7 +830,7 @@ def create_app(
         return {"status": "ok"}
 
     @api.post("/student/login")
-    def login_student(request: StudentLoginRequest) -> dict[str, object]:
+    def login_student(request: StudentLoginRequest, http: Request) -> dict[str, object]:
         student = repository.authenticate_student(
             request.student_id, request.password
         )
@@ -796,13 +838,15 @@ def create_app(
             raise HTTPException(
                 status_code=401, detail="Incorrect student ID or password."
             )
+        _track(student.student_id, http, "login")
         return student.as_dict()
 
     @api.get("/student/{student_id}")
-    def get_student(student_id: str) -> dict[str, object]:
+    def get_student(student_id: str, http: Request) -> dict[str, object]:
         student = repository.get_student(student_id)
         if student is None:
             raise HTTPException(status_code=404, detail="Student not found")
+        _track(student.student_id, http, "login")
         return student.as_dict()
 
     @api.get("/messages/contacts")
@@ -1132,10 +1176,11 @@ def create_app(
         }
 
     @api.get("/portal/students/{student_id}/grades")
-    def get_portal_student_grades(student_id: str) -> dict[str, object]:
+    def get_portal_student_grades(student_id: str, http: Request) -> dict[str, object]:
         report = repository.get_student_portal_grade_report(student_id)
         if report is None:
             raise HTTPException(status_code=404, detail="Student not found")
+        _track(student_id, http, "grades_view")
         records = [_enrich_grade_record(record) for record in report["records"]]
         return {
             "student": report["student"],
@@ -1195,7 +1240,7 @@ def create_app(
 
     @api.get("/portal/students/{student_id}/materials/{document_id}")
     def download_portal_student_material(
-        student_id: str, document_id: str
+        student_id: str, document_id: str, http: Request
     ) -> FileResponse:
         if repository.get_student(student_id) is None:
             raise HTTPException(status_code=404, detail="Student not found")
@@ -1206,6 +1251,10 @@ def create_app(
         document = allowed.get(document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Material not found")
+        _track(
+            student_id, http, "material_view",
+            str(document.get("course_name") or document.get("course_id") or "") or None,
+        )
         source = (material_storage_root / str(document["storage_path"])).resolve()
         if not source.is_relative_to(material_storage_root) or not source.is_file():
             raise HTTPException(status_code=404, detail="Material file is unavailable")
@@ -1255,18 +1304,60 @@ def create_app(
 
     @api.get("/portal/students/{student_id}/notifications")
     def get_portal_student_notifications(student_id: str) -> dict[str, object]:
-        return {"notifications": _portal_notifications(repository, student_id)}
+        items = _portal_notifications(repository, student_id)
+        # Refresh Advisor AI behaviour suggestions in the background (at most hourly);
+        # anything new appears in the next poll.
+        insights.trigger(student_id.strip())
+        return {"notifications": items}
 
     @api.put("/portal/students/{student_id}/notifications/read")
     def set_portal_student_notifications_read(
-        student_id: str, request: PortalNotificationReadRequest
+        student_id: str, request: PortalNotificationReadRequest, http: Request
     ) -> dict[str, object]:
         if repository.get_student(student_id) is None:
             raise HTTPException(status_code=404, detail="Student not found")
+        _track(student_id, http, "notification_read")
         repository.set_notifications_read(
             student_id, request.notification_ids, request.read
         )
         return {"notifications": _portal_notifications(repository, student_id)}
+
+    @api.get("/portal/students/{student_id}/schedule")
+    def get_portal_student_schedule(student_id: str, http: Request) -> dict[str, object]:
+        """The student's common group schedule plus the names of their classmates."""
+        view = student_schedule_view(repository, student_id.strip(), repository.semester)
+        if view["group"] is None and repository.get_student(student_id) is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        _track(student_id, http, "schedule_view")
+        return view
+
+    @api.post("/portal/students/{student_id}/activity")
+    def record_portal_student_activity(
+        student_id: str, request: StudentActivityRequest, http: Request
+    ) -> dict[str, object]:
+        """Lets the mobile app and the website report what a student did."""
+        if repository.get_student(student_id) is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        source = request.source or client_source(http.headers.get("user-agent"))
+        recorded = insights.record(
+            student_id.strip(), source, request.event_type,
+            request.course_ref, request.detail,
+        )
+        return {"recorded": recorded}
+
+    @api.post("/portal/schedule-groups/build")
+    def build_schedule_groups(
+        x_scheduler_token: str | None = Header(default=None, alias="X-Scheduler-Token"),
+    ) -> dict[str, object]:
+        """Operator command: build or top up the groups of every major."""
+        expected_token = os.environ.get("AEGIS_SCHEDULER_TOKEN")
+        if (
+            not expected_token
+            or not x_scheduler_token
+            or not hmac.compare_digest(x_scheduler_token, expected_token)
+        ):
+            raise HTTPException(status_code=403, detail="Invalid scheduler token")
+        return build_all_groups(repository, repository.semester)
 
     @api.get("/portal/students/{student_id}/weekly-plan")
     def get_student_weekly_plan(student_id: str) -> dict[str, object]:
@@ -1291,7 +1382,7 @@ def create_app(
 
     @api.put("/portal/students/{student_id}/weekly-plan/{task_id}")
     def set_student_weekly_plan_status(
-        student_id: str, task_id: str, request: WeeklyPlanStatusRequest
+        student_id: str, task_id: str, request: WeeklyPlanStatusRequest, http: Request
     ) -> dict[str, object]:
         if repository.get_student(student_id) is None:
             raise HTTPException(status_code=404, detail="Student not found")
@@ -1300,6 +1391,7 @@ def create_app(
         )
         if item is None:
             raise HTTPException(status_code=404, detail="Weekly plan item not found")
+        _track(student_id, http, "plan_update")
         return {"item": item}
 
     @api.get("/portal/staff/{staff_id}")
@@ -1328,12 +1420,13 @@ def create_app(
         }
 
     @api.post("/workspace/create", response_model=WorkspaceResponse)
-    def create_workspace(request: WorkspaceRequest) -> WorkspaceResponse:
+    def create_workspace(request: WorkspaceRequest, http: Request) -> WorkspaceResponse:
         student = repository.get_student(request.student_id)
         if student is None:
             raise HTTPException(status_code=404, detail="Student not found")
         course = _enrolled_course(student, request.course)
         path = manager.create_course_workspace(student.student_id, course)
+        _track(student.student_id, http, "workspace_create", course)
         return WorkspaceResponse(
             student_id=student.student_id,
             course=course,
@@ -1389,7 +1482,7 @@ def create_app(
         )
 
     @api.post("/workspace/vscode", response_model=WorkspaceResponse)
-    def open_vscode(request: WorkspaceRequest) -> WorkspaceResponse:
+    def open_vscode(request: WorkspaceRequest, http: Request) -> WorkspaceResponse:
         student = repository.get_student(request.student_id)
         if student is None:
             raise HTTPException(status_code=404, detail="Student not found")
@@ -1399,6 +1492,7 @@ def create_app(
             manager.open_vscode(path)
         except ToolUnavailableError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
+        _track(student.student_id, http, "workspace_vscode", course)
         return WorkspaceResponse(
             student_id=student.student_id,
             course=course,
@@ -1407,7 +1501,7 @@ def create_app(
         )
 
     @api.post("/advisor", response_model=AdvisorResponse)
-    def ask_advisor(request: AdvisorRequest) -> AdvisorResponse:
+    def ask_advisor(request: AdvisorRequest, http: Request) -> AdvisorResponse:
         student = repository.get_student(request.student_id)
         if student is None:
             raise HTTPException(status_code=404, detail="Student not found")
@@ -1437,6 +1531,7 @@ def create_app(
                 detail="Advisor AI could not complete the request.",
             ) from error
 
+        _track(student.student_id, http, "advisor_question", None, str(result["intent"]))
         return AdvisorResponse(
             intent=result["intent"],
             response=result["response"],

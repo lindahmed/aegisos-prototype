@@ -25,6 +25,14 @@ except ImportError:  # permits SQLite-only development and test runs
 
 from .academic_calendar import FALL_2026_START_DATE, academic_week
 from .repository import Student
+from .schedule_groups import (
+    ACTIVITY_INDEX,
+    ACTIVITY_TABLE_POSTGRES,
+    MIGRATIONS_POSTGRES,
+    SCHEMA_STATEMENTS,
+    ScheduleGroupStoreMixin,
+    slot_from_row,
+)
 
 
 GRADE_POINTS: dict[str, float] = {
@@ -35,7 +43,7 @@ GRADE_POINTS: dict[str, float] = {
 }
 
 
-class PostgresStudentRepository:
+class PostgresStudentRepository(ScheduleGroupStoreMixin):
     """Repository implementation for the Database branch's PostgreSQL schema."""
 
     def __init__(self, dsn: str) -> None:
@@ -415,6 +423,132 @@ class PostgresStudentRepository:
                       AND week12_exam_mark IS NULL AND final_exam_mark IS NULL;
                     """
                 )
+
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                for statement in (
+                    *SCHEMA_STATEMENTS, *MIGRATIONS_POSTGRES, ACTIVITY_TABLE_POSTGRES, ACTIVITY_INDEX
+                ):
+                    cursor.execute(statement)
+
+    # ---- schedule-group support (Postgres: students.program_id + current_semester) ----
+    def _sg_all(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+        return self._fetch_all(sql.replace("?", "%s"), params)
+
+    _SG_MEMBERS_SQL = """SELECT m.student_id, s.full_name AS name
+        FROM schedule_group_members m JOIN students s ON s.student_id::text = m.student_id
+        WHERE m.schedule_id = (SELECT schedule_id FROM schedule_group_members
+                               WHERE student_id = ? AND semester = ?)
+        ORDER BY m.student_id"""
+
+    def _sg_batch(self, reads: list[tuple[str, tuple]]) -> list[list[dict[str, Any]]]:
+        results: list[list[dict[str, Any]]] = []
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                for sql, params in reads:
+                    cursor.execute(sql.replace("?", "%s"), params)
+                    results.append([dict(row) for row in cursor.fetchall()])
+        return results
+
+    def _sg_write(self, statements: list[tuple[str, tuple]]) -> list[int]:
+        counts: list[int] = []
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                for sql, params in statements:
+                    cursor.execute(sql.replace("?", "%s"), params)
+                    counts.append(cursor.rowcount)
+        return counts
+
+    @staticmethod
+    def _cohort(major_code: str, major_name: str, semester: int) -> dict[str, Any]:
+        return {
+            "key": f"{str(major_code).strip().upper()}|s{int(semester)}",
+            "major": str(major_name).strip(), "semester": int(semester),
+            "level_label": f"Semester {int(semester)}",
+        }
+
+    @staticmethod
+    def _split_cohort_key(key: str) -> tuple[str, int]:
+        major, _, semester = key.rpartition("|s")
+        return major, int(semester)
+
+    def list_cohorts(self) -> list[dict[str, Any]]:
+        rows = self._fetch_all(
+            """SELECT m.major_code, MIN(m.major_name) AS major_name, s.current_semester
+               FROM students s JOIN majors m ON m.program_id = s.program_id
+               WHERE s.current_semester IS NOT NULL
+               GROUP BY m.major_code, s.current_semester
+               ORDER BY m.major_code, s.current_semester""",
+            (),
+        )
+        return [self._cohort(r["major_code"], r["major_name"], r["current_semester"]) for r in rows]
+
+    def get_student_cohort(self, student_id: str) -> dict[str, Any] | None:
+        row = self._fetch_one(
+            """SELECT m.major_code, m.major_name, s.current_semester
+               FROM students s JOIN majors m ON m.program_id = s.program_id
+               WHERE s.student_id::text = %s""",
+            (student_id.strip(),),
+        )
+        if row is None or row["current_semester"] is None:
+            return None
+        return self._cohort(row["major_code"], row["major_name"], row["current_semester"])
+
+    def get_cohort_members(self, cohort_key: str) -> list[dict[str, Any]]:
+        major_code, semester = self._split_cohort_key(cohort_key)
+        return self._fetch_all(
+            """SELECT s.student_id::text AS student_id, s.full_name AS name
+               FROM students s JOIN majors m ON m.program_id = s.program_id
+               WHERE upper(m.major_code) = %s AND s.current_semester = %s
+               ORDER BY s.student_id::text""",
+            (major_code, semester),
+        )
+
+    def get_cohort_courses(self, cohort_key: str) -> list[dict[str, Any]]:
+        """Courses most of the cohort is enrolled in; the department plan if nobody is."""
+        major_code, semester = self._split_cohort_key(cohort_key)
+        members = len(self.get_cohort_members(cohort_key))
+        enrolled = self._fetch_all(
+            """SELECT c.course_code AS course_id, c.course_title AS course_name
+               FROM student_courses sc
+               JOIN courses c ON c.course_code = sc.course_code
+               JOIN students s ON s.student_id = sc.student_id
+               JOIN majors m ON m.program_id = s.program_id
+               WHERE sc.status = 'Current'
+                 AND upper(m.major_code) = %s AND s.current_semester = %s
+               GROUP BY c.course_code, c.course_title
+               HAVING COUNT(DISTINCT sc.student_id) * 2 >= %s
+               ORDER BY c.course_code""",
+            (major_code, semester, max(members, 1)),
+        )
+        if enrolled:
+            return enrolled
+        return self._fetch_all(
+            """SELECT DISTINCT c.course_code AS course_id, c.course_title AS course_name
+               FROM department_plan_courses dpc
+               JOIN courses c ON c.course_code = dpc.course_code
+               WHERE upper(dpc.major_code) = %s AND dpc.program_semester = %s
+               ORDER BY c.course_code""",
+            (major_code, semester),
+        )
+
+    def get_course_slots(self, course_ids: list[str]) -> list[dict[str, Any]]:
+        if not course_ids:
+            return []
+        rows = self._fetch_all(
+            "SELECT * FROM course_schedule_slots WHERE course_id::text = ANY(%s)",
+            (list(course_ids),),
+        )
+        return [slot_from_row(row) for row in rows]
+
+    def get_schedule_group(self, schedule_id: str) -> list[dict[str, Any]]:
+        return self._fetch_all(
+            """SELECT member.student_id, s.full_name AS name
+               FROM schedule_group_members member
+               JOIN students s ON s.student_id::text = member.student_id
+               WHERE member.schedule_id = %s ORDER BY member.student_id""",
+            (schedule_id,),
+        )
 
     def get_student(self, student_id: str) -> Student | None:
         normalized_id = student_id.strip()

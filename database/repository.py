@@ -4,6 +4,7 @@ import csv
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import sqlite3
 from dataclasses import dataclass
@@ -12,6 +13,14 @@ from pathlib import Path
 from typing import Any
 
 from .academic_calendar import FALL_2026_START_DATE, academic_week
+from .schedule_groups import (
+    ACTIVITY_INDEX,
+    ACTIVITY_TABLE_SQLITE,
+    MIGRATIONS_SQLITE_COLUMNS,
+    SCHEMA_STATEMENTS,
+    ScheduleGroupStoreMixin,
+    slot_from_row,
+)
 
 
 DATASET_PATH = Path(__file__).with_name("students.csv")
@@ -37,10 +46,11 @@ class Student:
         }
 
 
-class StudentRepository:
+class StudentRepository(ScheduleGroupStoreMixin):
     def __init__(self, database_path: Path, dataset_path: Path = DATASET_PATH) -> None:
         self.database_path = Path(database_path)
         self.dataset_path = Path(dataset_path)
+        self.semester = os.getenv("AEGIS_CURRENT_SEMESTER", "Fall 2026")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path)
@@ -382,6 +392,12 @@ class StudentRepository:
                 CREATE INDEX IF NOT EXISTS idx_portal_pdfs_instructor ON portal_pdfs(instructor_id, uploaded_at DESC);
                 """
             )
+            for statement in (*SCHEMA_STATEMENTS, ACTIVITY_TABLE_SQLITE, ACTIVITY_INDEX):
+                connection.execute(statement)
+            for table, column, kind in MIGRATIONS_SQLITE_COLUMNS:
+                existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+                if column not in existing:
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
             course_columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(courses)")
             }
@@ -557,6 +573,96 @@ class StudentRepository:
         connection.executemany(
             "INSERT INTO student_lecture_progress (student_id, lecture_id, completed_week) VALUES (?, ?, ?)",
             progress_rows,
+        )
+
+    # ---- schedule-group support (SQLite schema: students.major + students.year) ----
+    def _sg_all(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            return [dict(row) for row in connection.execute(sql, params).fetchall()]
+
+    _SG_MEMBERS_SQL = """SELECT m.student_id, s.name AS name
+        FROM schedule_group_members m JOIN students s ON s.student_id = m.student_id
+        WHERE m.schedule_id = (SELECT schedule_id FROM schedule_group_members
+                               WHERE student_id = ? AND semester = ?)
+        ORDER BY m.student_id"""
+
+    def _sg_batch(self, reads: list[tuple[str, tuple]]) -> list[list[dict[str, Any]]]:
+        with self._connect() as connection:
+            return [[dict(r) for r in connection.execute(sql, params).fetchall()] for sql, params in reads]
+
+    def _sg_write(self, statements: list[tuple[str, tuple]]) -> list[int]:
+        counts: list[int] = []
+        with self._connect() as connection:
+            for sql, params in statements:
+                counts.append(connection.execute(sql, params).rowcount)
+        return counts
+
+    @staticmethod
+    def _cohort(major: str, year: int) -> dict[str, Any]:
+        return {
+            "key": f"{major.strip().casefold()}|y{int(year)}",
+            "major": major.strip(), "year": int(year), "level_label": f"Year {int(year)}",
+        }
+
+    @staticmethod
+    def _split_cohort_key(key: str) -> tuple[str, int]:
+        major, _, year = key.rpartition("|y")
+        return major, int(year)
+
+    def list_cohorts(self) -> list[dict[str, Any]]:
+        rows = self._sg_all(
+            """SELECT MIN(major) AS major, year FROM students
+               GROUP BY lower(major), year ORDER BY lower(major), year"""
+        )
+        return [self._cohort(row["major"], row["year"]) for row in rows]
+
+    def get_student_cohort(self, student_id: str) -> dict[str, Any] | None:
+        student = self.get_student(student_id)
+        return None if student is None else self._cohort(student.major, student.year)
+
+    def get_cohort_members(self, cohort_key: str) -> list[dict[str, Any]]:
+        major, year = self._split_cohort_key(cohort_key)
+        return self._sg_all(
+            """SELECT student_id, name FROM students
+               WHERE lower(major) = ? AND year = ? ORDER BY student_id""",
+            (major, year),
+        )
+
+    def get_cohort_courses(self, cohort_key: str) -> list[dict[str, Any]]:
+        """Courses most of the cohort is currently enrolled in (one stray course
+        taken by a single student does not change the whole group's timetable)."""
+        major, year = self._split_cohort_key(cohort_key)
+        members = len(self.get_cohort_members(cohort_key))
+        return self._sg_all(
+            """SELECT offering.course_id, offering.course_name
+               FROM courses enrollment
+               JOIN students student ON student.student_id = enrollment.student_id
+               JOIN course_offerings offering ON offering.course_name = enrollment.course_name
+               WHERE enrollment.status = 'Current'
+                 AND lower(student.major) = ? AND student.year = ?
+               GROUP BY offering.course_id, offering.course_name
+               HAVING COUNT(DISTINCT enrollment.student_id) * 2 >= ?
+               ORDER BY offering.course_id""",
+            (major, year, max(members, 1)),
+        )
+
+    def get_course_slots(self, course_ids: list[str]) -> list[dict[str, Any]]:
+        if not course_ids:
+            return []
+        marks = ", ".join("?" for _ in course_ids)
+        rows = self._sg_all(
+            f"SELECT * FROM course_schedule_slots WHERE course_id IN ({marks})",
+            tuple(course_ids),
+        )
+        return [slot_from_row(row) for row in rows]
+
+    def get_schedule_group(self, schedule_id: str) -> list[dict[str, Any]]:
+        return self._sg_all(
+            """SELECT member.student_id, student.name
+               FROM schedule_group_members member
+               JOIN students student ON student.student_id = member.student_id
+               WHERE member.schedule_id = ? ORDER BY member.student_id""",
+            (schedule_id,),
         )
 
     def get_student(self, student_id: str) -> Student | None:

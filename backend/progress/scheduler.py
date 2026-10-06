@@ -13,6 +13,9 @@ from backend.progress_agent.graph import (
 from database.postgres_repository import PostgresStudentRepository
 from database.repository import StudentRepository
 
+from .suggestions import generate_suggestions
+from .weekly_report import generate_weekly_report
+
 
 logger = logging.getLogger("aegisos.progress.scheduler")
 
@@ -24,12 +27,16 @@ RepositoryType = StudentRepository | PostgresStudentRepository
 class SchedulerRunResult:
     students_analyzed: int = 0
     interventions_created: int = 0
+    reports_generated: int = 0
+    suggestions_created: int = 0
     errors: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         return (
             f"Analyzed {self.students_analyzed} students, "
             f"created {self.interventions_created} interventions, "
+            f"generated {self.reports_generated} weekly reports, "
+            f"created {self.suggestions_created} suggestions, "
             f"{len(self.errors)} errors."
         )
 
@@ -59,6 +66,21 @@ def run_analysis_cycle(
             )
         except Exception as error:  # pragma: no cover - defensive logging
             message = f"Failed to analyze {student.student_id}: {error}"
+            logger.exception(message)
+            result.errors.append(message)
+            continue
+        # Reports and suggestions are separate from analysis: a failure here
+        # is recorded but never undoes or hides the analysis that succeeded.
+        try:
+            report = generate_weekly_report(repository, student.student_id)
+            if report is not None:
+                result.reports_generated += 1
+                new_suggestions = generate_suggestions(
+                    repository, student.student_id, report=report
+                )
+                result.suggestions_created += len(new_suggestions or [])
+        except Exception as error:  # pragma: no cover - defensive logging
+            message = f"Failed to build weekly report for {student.student_id}: {error}"
             logger.exception(message)
             result.errors.append(message)
     return result

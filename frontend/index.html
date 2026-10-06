@@ -140,6 +140,9 @@
               Calendar
             </button>
             <button id="meeting-tab" class="tab-button" type="button" aria-pressed="false">Live meeting</button>
+            <button id="schedule-tab" class="tab-button" type="button" aria-pressed="false">
+              Schedule
+            </button>
           </nav>
 
           <section id="workspace-panel" class="dashboard-page workspace-panel">
@@ -369,6 +372,26 @@
               <span><i class="study_session"></i>Study session</span>
               <span><i class="personal"></i>Personal</span>
             </div>
+          </section>
+
+          <section id="schedule-panel" class="dashboard-page schedule-panel" hidden>
+            <div class="progress-heading">
+              <div>
+                <p class="workspace-kicker">Common college schedule</p>
+                <h3 id="schedule-title">Your schedule</h3>
+              </div>
+              <span id="schedule-group-badge" class="count-badge">Loading</span>
+            </div>
+            <p id="schedule-note" class="schedule-note" role="status"></p>
+            <div id="schedule-days" class="schedule-days"></div>
+            <div id="schedule-unscheduled" class="schedule-unscheduled" hidden></div>
+            <section class="schedule-classmates" aria-labelledby="classmates-title">
+              <div class="overview-heading">
+                <h3 id="classmates-title">Your classmates</h3>
+                <span id="classmates-count" class="count-badge"></span>
+              </div>
+              <ul id="classmates-list" class="classmates-list"></ul>
+            </section>
           </section>
 
           <section id="messages-panel" class="dashboard-page messages-panel" hidden>

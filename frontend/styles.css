@@ -288,6 +288,7 @@ button:disabled { cursor: wait; opacity: 0.55; }
 }
 .notif-item.grade .notif-dot { background: var(--cyan); }
 .notif-item.exam .notif-dot { background: var(--amber); }
+.notif-item.advisor .notif-dot { background: #a78bfa; }
 .notif-item-title { margin: 0; color: var(--text); font-size: 13px; font-weight: 700; }
 .notif-item-body { margin: 4px 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.5; }
 .notif-item-meta { margin: 6px 0 0; color: var(--text-faint); font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-family: var(--font-mono); }
@@ -988,7 +989,8 @@ body.is-authenticated .dashboard-page {
 }
 body.is-authenticated .workspace-panel,
 body.is-authenticated .progress-panel,
-body.is-authenticated .calendar-panel { overflow: auto; }
+body.is-authenticated .calendar-panel,
+body.is-authenticated .schedule-panel { overflow-y: auto;max-height: 100%;padding-bottom: 40px; }
 body.is-authenticated .messages-panel:not([hidden]) {
   display: flex;
   flex-direction: column;
@@ -1179,3 +1181,41 @@ body.is-authenticated .messages-panel {
 @media (max-width: 1150px) { .meeting-layout { grid-template-columns: minmax(0, 1fr) 250px; } .meeting-lobby { grid-template-columns: 1fr; } }
 body.is-authenticated .meeting-panel { overflow: auto; padding-bottom: 24px; }
 #login-form select { width: 100%; padding: 13px 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); }
+
+/* ---- Schedule tab ---- */
+.schedule-note { margin: 0 0 16px; color: var(--text-dim); font-size: 14px; }
+.schedule-days { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.schedule-day { border: 1px solid var(--border); border-radius: 14px; background: var(--surface-1); padding: 14px 16px; }
+.schedule-day h4 { margin: 0 0 10px; color: var(--cyan); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
+.schedule-slot { display: grid; gap: 2px; padding: 10px 0; border-top: 1px solid var(--border); }
+.schedule-slot:first-of-type { border-top: 0; padding-top: 0; }
+.schedule-slot strong { color: var(--text); font-size: 15px; }
+.schedule-slot.provisional { opacity: 0.75; font-style: italic; }
+.schedule-time { color: var(--amber); font-size: 12px; font-weight: 700; font-family: var(--font-mono); }
+.schedule-place { color: var(--text-dim); font-size: 12px; }
+.schedule-unscheduled { margin-top: 14px; padding: 12px 16px; border: 1px dashed var(--amber-border); border-radius: 12px; background: var(--amber-bg); }
+.schedule-unscheduled h4 { margin: 0 0 6px; color: var(--amber); font-size: 13px; }
+.schedule-unscheduled p { margin: 2px 0; color: var(--text); font-size: 14px; }
+.schedule-classmates { margin-top: 22px; }
+.classmates-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.classmates-list li { padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); color: var(--text); font-size: 14px; }
+
+/* ---- Schedule tab: details ---- */
+.schedule-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 0 0 16px; }
+.schedule-fact { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); }
+.schedule-fact strong { color: var(--text); font-size: 18px; font-family: var(--font-head); }
+.schedule-fact span { color: var(--text-dim); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+.schedule-day-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.schedule-day-head h4 { margin: 0; }
+.schedule-day-count { color: var(--text-dim); font-size: 11px; font-weight: 700; }
+.schedule-day.day-off { opacity: 0.6; border-style: dashed; }
+.schedule-day.day-off .schedule-day-count { color: var(--green, #34d399); }
+.schedule-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.schedule-tag { padding: 2px 9px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-dim); font-size: 11px; font-weight: 700; font-style: normal; }
+.schedule-tag.lecture { color: #93c5fd; border-color: rgba(147, 197, 253, 0.5); background: rgba(59, 130, 246, 0.14); }
+.schedule-tag.section { color: #6ee7b7; border-color: rgba(110, 231, 183, 0.5); background: rgba(16, 185, 129, 0.14); }
+.schedule-tag.lab { color: #fcd34d; border-color: rgba(252, 211, 77, 0.5); background: rgba(245, 158, 11, 0.14); }
+.schedule-tag.room { color: var(--text); }
+.schedule-tag.provisional-tag { color: var(--text-faint); border-style: dashed; }
+.classmates-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.classmates-list li.is-you { border-color: rgba(147, 197, 253, 0.6); background: rgba(59, 130, 246, 0.12); }
