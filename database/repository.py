@@ -1422,6 +1422,25 @@ class StudentRepository(ScheduleGroupStoreMixin):
             "rows": [dict(row) for row in rows],
         }
 
+    def get_student_week_attendance(
+        self, student_id: str, semester: str, week_number: int
+    ) -> list[dict[str, Any]]:
+        """Return recorded attendance for one student in a semester week."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT attendance.course_code AS course_id, attendance.status
+                   FROM attendance
+                   JOIN course_offerings offering
+                     ON offering.course_id = attendance.course_code
+                    AND offering.semester = attendance.semester_id
+                   WHERE attendance.student_id = ?
+                     AND offering.semester = ?
+                     AND attendance.week_number = ?
+                   ORDER BY attendance.course_code""",
+                (student_id, semester, week_number),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def save_portal_course_attendance(
         self, course_id: str, session_date: date, rows: list[dict[str, Any]]
     ) -> dict[str, Any] | None:
