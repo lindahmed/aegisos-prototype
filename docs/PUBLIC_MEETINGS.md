@@ -16,7 +16,21 @@ meeting.
 
 ## 1. Publish signaling with Cloudflare Tunnel
 
-Create a named Cloudflare Tunnel and route `meet.example.com` to it. The
+If you do not own a domain, install `cloudflared` and set this in the
+project-root `.env`:
+
+```env
+AEGIS_MEETING_QUICK_TUNNEL=1
+```
+
+The launcher then creates a temporary `trycloudflare.com` address, passes its
+`wss://` form to UniTrack, and stops the tunnel when UniTrack exits. The
+hostname changes on every launch, but the launcher and generated invitation are
+updated automatically. Quick Tunnels are intended for development and have no
+uptime guarantee.
+
+For a stable production hostname, create a named Cloudflare Tunnel and route
+`meet.example.com` to it. The
 `cloudflared` configuration on the host machine should contain:
 
 ```yaml

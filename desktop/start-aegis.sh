@@ -8,7 +8,9 @@ FRONTEND_DIR="$PROJECT_ROOT/frontend"
 API_URL="http://127.0.0.1:8000"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/aegisos"
 BACKEND_LOG="$STATE_DIR/backend.log"
+TUNNEL_LOG="$STATE_DIR/meeting-tunnel.log"
 BACKEND_PID=""
+TUNNEL_PID=""
 
 if [[ -z "${DATABASE_URL:-}" ]] && ! grep -qE '^DATABASE_URL=[^[:space:]]+' "$PROJECT_ROOT/.env" 2>/dev/null; then
     echo "UniTrack requires DATABASE_URL for the Supabase-backed backend." >&2
@@ -45,7 +47,7 @@ fi
 # code. Values already supplied by the launching environment take precedence.
 MEETING_ENV_KEYS=(
     AEGIS_MEETING_PORT AEGIS_MEETING_BIND AEGIS_MEETING_PUBLIC_URL
-    AEGIS_MEETING_ICE_SERVERS AEGIS_MEETING_RELAY_ONLY
+    AEGIS_MEETING_QUICK_TUNNEL AEGIS_MEETING_ICE_SERVERS AEGIS_MEETING_RELAY_ONLY
     AEGIS_MEETING_TURN_URLS AEGIS_MEETING_TURN_SECRET
     AEGIS_MEETING_TURN_TTL_SECONDS
 )
@@ -81,12 +83,58 @@ if [[ ! -f "$SANDBOX" ]] || [[ "$(stat -c '%U:%G:%a' "$SANDBOX")" != "root:root:
 fi
 
 cleanup() {
+    if [[ -n "$TUNNEL_PID" ]] && kill -0 "$TUNNEL_PID" 2>/dev/null; then
+        kill "$TUNNEL_PID"
+        wait "$TUNNEL_PID" 2>/dev/null || true
+    fi
     if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" 2>/dev/null; then
         kill "$BACKEND_PID"
         wait "$BACKEND_PID" 2>/dev/null || true
     fi
 }
 trap cleanup EXIT INT TERM
+
+if [[ "${AEGIS_MEETING_QUICK_TUNNEL:-0}" == "1" ]]; then
+    CLOUDFLARED_BIN=""
+    if command -v cloudflared >/dev/null 2>&1; then
+        CLOUDFLARED_BIN="$(command -v cloudflared)"
+    elif [[ -x "$PROJECT_ROOT/.tools/cloudflared" ]]; then
+        CLOUDFLARED_BIN="$PROJECT_ROOT/.tools/cloudflared"
+    else
+        echo "Automatic public meetings require cloudflared." >&2
+        echo "Install it system-wide or place it at $PROJECT_ROOT/.tools/cloudflared." >&2
+        exit 1
+    fi
+
+    MEETING_PORT="${AEGIS_MEETING_PORT:-8765}"
+    if [[ ! "$MEETING_PORT" =~ ^[0-9]+$ ]] || (( MEETING_PORT < 1 || MEETING_PORT > 65535 )); then
+        echo "AEGIS_MEETING_PORT must be a number from 1 to 65535." >&2
+        exit 1
+    fi
+
+    : >"$TUNNEL_LOG"
+    "$CLOUDFLARED_BIN" tunnel --no-autoupdate --url "http://127.0.0.1:$MEETING_PORT" >"$TUNNEL_LOG" 2>&1 &
+    TUNNEL_PID=$!
+    TUNNEL_HTTP_URL=""
+    for _ in {1..60}; do
+        if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+            echo "Cloudflare Quick Tunnel failed to start. See $TUNNEL_LOG" >&2
+            tail -n 20 "$TUNNEL_LOG" >&2 || true
+            exit 1
+        fi
+        TUNNEL_HTTP_URL="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' "$TUNNEL_LOG" | head -n 1 || true)"
+        [[ -n "$TUNNEL_HTTP_URL" ]] && break
+        sleep 0.5
+    done
+    if [[ -z "$TUNNEL_HTTP_URL" ]]; then
+        echo "Cloudflare Quick Tunnel did not provide a public URL. See $TUNNEL_LOG" >&2
+        exit 1
+    fi
+
+    export AEGIS_MEETING_BIND=127.0.0.1
+    export AEGIS_MEETING_PUBLIC_URL="wss://${TUNNEL_HTTP_URL#https://}"
+    echo "Public meeting tunnel: $AEGIS_MEETING_PUBLIC_URL"
+fi
 
 if ! curl --silent --fail "$API_URL/health" >/dev/null 2>&1; then
     (
