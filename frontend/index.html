@@ -164,10 +164,26 @@
                 <div><span>Assessments graded</span><strong id="focus-assessments">—</strong></div>
                 <div><span>Study next</span><strong id="focus-next">Loading course progress…</strong></div>
               </div>
+              <section class="workstation-setup" aria-labelledby="workstation-title">
+                <div class="workstation-heading">
+                  <div>
+                    <p class="workspace-kicker">AI environment planner</p>
+                    <h4 id="workstation-title">Smart workstation setup</h4>
+                  </div>
+                  <span id="workstation-badge" class="setup-badge is-checking">Checking device</span>
+                </div>
+                <p id="workstation-summary" class="workstation-summary">Scanning Python and course dependencies…</p>
+                <div id="workstation-packages" class="package-list" aria-label="Course dependencies"></div>
+                <label id="custom-requirements-field" class="custom-requirements" for="custom-requirements" hidden>
+                  <span>Requirements for this course</span>
+                  <small>This course has no saved profile yet. Add one Python package per line, optionally with a version.</small>
+                  <textarea id="custom-requirements" rows="3" maxlength="4000" placeholder="numpy==2.5.3&#10;pandas==3.0.6"></textarea>
+                </label>
+              </section>
               <div class="focus-actions">
                 <button id="create-workspace-button" class="secondary-button action-button" type="button">
                   <span class="action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M12 12v4M10 14h4"></path></svg></span>
-                  <span class="action-copy"><strong>Create / open folder</strong><small>Course files and assignments</small></span>
+                  <span class="action-copy"><strong>Create smart workspace</strong><small>Folder, Python environment, and dependencies</small></span>
                 </button>
                 <button id="open-vscode-button" class="primary-button action-button" type="button">
                   <span class="action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-5.5 6L8 18M16 6l5.5 6-5.5 6"></path></svg></span>

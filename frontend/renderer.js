@@ -1,5 +1,5 @@
-const apiBaseUrl = window.aegis.apiBaseUrl;
-const academicApiBaseUrl = window.aegis.academicApiBaseUrl || apiBaseUrl;
+const apiBaseUrl = window.aegis?.apiBaseUrl || 'http://127.0.0.1:8000';
+const academicApiBaseUrl = window.aegis?.academicApiBaseUrl || apiBaseUrl;
 const themeToggleButtons = document.querySelectorAll('[data-theme-toggle]');
 
 const THEME_STORAGE_KEY = 'aegisos-theme';
@@ -48,6 +48,11 @@ const actionStatus = document.querySelector('#action-status');
 const courseList = document.querySelector('#course-list');
 const createWorkspaceButton = document.querySelector('#create-workspace-button');
 const openVsCodeButton = document.querySelector('#open-vscode-button');
+const workstationBadge = document.querySelector('#workstation-badge');
+const workstationSummary = document.querySelector('#workstation-summary');
+const workstationPackages = document.querySelector('#workstation-packages');
+const customRequirementsField = document.querySelector('#custom-requirements-field');
+const customRequirementsInput = document.querySelector('#custom-requirements');
 const advisorBackButton = document.querySelector('#advisor-back-button');
 const scoreButton = document.querySelector('#score-button');
 const scorePanel = document.querySelector('#score-panel');
@@ -91,6 +96,8 @@ let activeRecording = null;
 let currentTwin = null;
 let progressState = 'loading';
 let scoreRequestId = 0;
+let workstationRequestId = 0;
+let workstationProfile = null;
 
 function closeScorePanel() {
   scorePanel.hidden = true;
@@ -234,7 +241,85 @@ function selectCourse(course) {
   }
   setMessage(actionStatus, '');
   renderWorkspaceOverview();
+  inspectWorkstation(course);
 }
+
+
+function customRequirements() {
+  return customRequirementsInput.value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+
+function renderWorkstationStatus(status) {
+  workstationProfile = status;
+  customRequirementsField.hidden = status.known_course;
+  workstationPackages.replaceChildren();
+  const missing = new Set(status.missing_requirements || []);
+  for (const requirement of status.requirements || []) {
+    const chip = document.createElement('span');
+    chip.className = `package-chip${missing.has(requirement) ? '' : ' is-installed'}`;
+    chip.textContent = requirement;
+    chip.title = missing.has(requirement) ? 'Will be installed' : 'Already installed';
+    workstationPackages.append(chip);
+  }
+
+  workstationBadge.classList.remove('is-checking', 'is-missing');
+  if (!status.known_course && !status.requirements.length) {
+    workstationBadge.textContent = 'Requirements needed';
+    workstationBadge.classList.add('is-missing');
+    workstationSummary.textContent = 'No saved profile exists for this course. Add the requirements supplied by the instructor, then create the workspace.';
+    return;
+  }
+  if (status.setup_complete) {
+    workstationBadge.textContent = 'Ready';
+    workstationSummary.textContent = `${status.profile_label} is ready${status.python_version ? ` with ${status.python_version}` : ''}.`;
+    return;
+  }
+  workstationBadge.textContent = `${status.missing_requirements.length} to install`;
+  workstationBadge.classList.add('is-checking');
+  const environment = status.virtual_environment_found ? 'Course environment found.' : 'A private course environment will be created.';
+  workstationSummary.textContent = `${status.profile_label}. ${environment} ${status.missing_requirements.length} missing dependencies will be installed.`;
+}
+
+
+async function inspectWorkstation(course, requirements = []) {
+  if (!currentStudent || !course) return;
+  const requestId = ++workstationRequestId;
+  workstationProfile = null;
+  customRequirementsField.hidden = true;
+  workstationPackages.replaceChildren();
+  workstationBadge.textContent = 'Checking device';
+  workstationBadge.classList.add('is-checking');
+  workstationBadge.classList.remove('is-missing');
+  workstationSummary.textContent = 'Scanning Python and course dependencies…';
+  try {
+    const status = await apiRequest('/workspace/inspect', {
+      method: 'POST',
+      body: JSON.stringify({
+        student_id: currentStudent.student_id,
+        course,
+        requirements,
+        install: false,
+      }),
+    });
+    if (requestId !== workstationRequestId || selectedCourse !== course) return;
+    renderWorkstationStatus(status);
+  } catch (error) {
+    if (requestId !== workstationRequestId || selectedCourse !== course) return;
+    workstationBadge.textContent = 'Check failed';
+    workstationBadge.classList.remove('is-checking');
+    workstationBadge.classList.add('is-missing');
+    workstationSummary.textContent = error.message;
+  }
+}
+
+
+customRequirementsInput.addEventListener('change', () => {
+  if (selectedCourse) inspectWorkstation(selectedCourse, customRequirements());
+});
 
 function renderWorkspaceOverview() {
   if (!currentStudent) return;
@@ -1789,7 +1874,36 @@ async function runWorkspaceAction(path, pendingText) {
 
 
 createWorkspaceButton.addEventListener('click', () => {
-  runWorkspaceAction('/workspace/create', 'Preparing the course workspace...');
+  if (!currentStudent || !selectedCourse) return;
+  const requirements = customRequirements();
+  if (workstationProfile && !workstationProfile.known_course && requirements.length === 0) {
+    customRequirementsField.hidden = false;
+    customRequirementsInput.focus();
+    setMessage(actionStatus, 'Add the instructor-provided requirements before creating this workspace.', true);
+    return;
+  }
+  const course = selectedCourse;
+  setBusy(true);
+  setMessage(actionStatus, 'Checking the device and installing missing course dependencies…');
+  apiRequest('/workspace/setup', {
+    method: 'POST',
+    body: JSON.stringify({
+      student_id: currentStudent.student_id,
+      course,
+      requirements,
+      install: true,
+    }),
+  }).then((result) => {
+    if (selectedCourse === course) renderWorkstationStatus(result);
+    const installed = result.installed_requirements.length
+      ? ` Installed ${result.installed_requirements.join(', ')}.`
+      : ' Everything required was already installed.';
+    setMessage(actionStatus, `Smart workspace ready: ${result.path}.${installed}`);
+  }).catch((error) => {
+    setMessage(actionStatus, error.message, true);
+  }).finally(() => {
+    setBusy(false);
+  });
 });
 
 

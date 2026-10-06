@@ -434,6 +434,19 @@ button:disabled { cursor: wait; opacity: 0.55; }
 .focus-metrics span { display: block; margin-bottom: 5px; color: var(--text-dim); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .focus-metrics strong { display: block; overflow: hidden; color: var(--text); font-size: 20px; font-family: var(--font-head); line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
 #focus-next { display: -webkit-box; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.workstation-setup { margin: 0 0 18px; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-md); background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), var(--surface-0)); }
+.workstation-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.workstation-heading h4 { margin: 3px 0 0; color: var(--text); font-size: 20px; }
+.setup-badge { flex: none; padding: 7px 11px; border: 1px solid var(--green-border); border-radius: 999px; background: var(--green-bg); color: var(--green); font-size: 12px; font-weight: 800; }
+.setup-badge.is-checking { border-color: var(--amber-border); background: var(--amber-bg); color: var(--amber); }
+.setup-badge.is-missing { border-color: var(--red-border); background: var(--red-bg); color: var(--red); }
+.workstation-summary { margin: 12px 0 0; color: var(--text-dim); font-size: 14px; line-height: 1.55; }
+.package-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.package-chip { padding: 6px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text-dim); font-family: Consolas, "SFMono-Regular", monospace; font-size: 12px; }
+.package-chip.is-installed { border-color: var(--green-border); color: var(--green); }
+.custom-requirements { display: grid; gap: 6px; margin-top: 14px; color: var(--text); font-size: 14px; font-weight: 700; }
+.custom-requirements small { color: var(--text-dim); font-weight: 500; line-height: 1.45; }
+.custom-requirements textarea { min-height: 82px; resize: vertical; font-family: Consolas, "SFMono-Regular", monospace; font-size: 13px; }
 .focus-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .action-button { display: flex !important; align-items: center; justify-content: flex-start; gap: 12px; min-width: 0; min-height: 92px; padding: 16px; text-align: left; }
 .action-icon {

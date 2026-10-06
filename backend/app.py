@@ -59,7 +59,11 @@ from backend.simulation.what_if import run_assessment_grade_scenario
 from database.repository import Student, StudentRepository
 from database.postgres_repository import PostgresStudentRepository
 from database.portal_pdfs import PortalPdfStore
-from workspace.manager import ToolUnavailableError, WorkspaceManager
+from workspace.manager import (
+    ToolUnavailableError,
+    WorkstationSetupError,
+    WorkspaceManager,
+)
 
 
 class WorkspaceRequest(BaseModel):
@@ -67,11 +71,35 @@ class WorkspaceRequest(BaseModel):
     course: str = Field(min_length=1, max_length=160)
 
 
+class WorkstationSetupRequest(WorkspaceRequest):
+    requirements: list[str] = Field(default_factory=list, max_length=50)
+    install: bool = True
+
+
 class WorkspaceResponse(BaseModel):
     student_id: str
     course: str
     path: str
     opened: bool = False
+
+
+class WorkstationSetupResponse(BaseModel):
+    student_id: str
+    course: str
+    path: str
+    profile: str
+    profile_label: str
+    known_course: bool
+    python_found: bool
+    python_version: str | None = None
+    virtual_environment_found: bool
+    requirements: list[str]
+    missing_requirements: list[str]
+    installed_requirements: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    requirements_file: str | None = None
+    install_requested: bool = False
+    setup_complete: bool = False
 
 
 class ScoreAchievementRequest(BaseModel):
@@ -1310,6 +1338,54 @@ def create_app(
             student_id=student.student_id,
             course=course,
             path=str(path),
+        )
+
+    @api.post("/workspace/inspect", response_model=WorkstationSetupResponse)
+    def inspect_workstation(request: WorkstationSetupRequest) -> WorkstationSetupResponse:
+        student = repository.get_student(request.student_id)
+        if student is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        course = _enrolled_course(student, request.course)
+        try:
+            result = manager.inspect_course_environment(
+                student.student_id,
+                course,
+                request.requirements,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return WorkstationSetupResponse(
+            student_id=student.student_id,
+            course=course,
+            installed_requirements=[],
+            install_requested=False,
+            setup_complete=not result["missing_requirements"],
+            **result,
+        )
+
+    @api.post("/workspace/setup", response_model=WorkstationSetupResponse)
+    def setup_workstation(request: WorkstationSetupRequest) -> WorkstationSetupResponse:
+        student = repository.get_student(request.student_id)
+        if student is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        course = _enrolled_course(student, request.course)
+        try:
+            result = manager.setup_course_environment(
+                student.student_id,
+                course,
+                request.requirements,
+                install=request.install,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except ToolUnavailableError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        except WorkstationSetupError as error:
+            raise HTTPException(status_code=500, detail=str(error)) from error
+        return WorkstationSetupResponse(
+            student_id=student.student_id,
+            course=course,
+            **result,
         )
 
     @api.post("/workspace/vscode", response_model=WorkspaceResponse)

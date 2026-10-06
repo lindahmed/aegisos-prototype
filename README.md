@@ -13,6 +13,14 @@ Desktop Client  ──────┘            │
 
 The Android app should talk to the FastAPI backend, not directly to the database.
 
+## Smart course workstations
+
+In the desktop Workspace screen, select an enrolled course and choose **Create smart workspace**. UniTrack checks the local Python runtime and the selected course's private `.venv` before making changes. It then creates the course folder, writes a pinned `requirements.txt`, configures VS Code to use the course interpreter, and installs only missing dependencies.
+
+Built-in profiles cover Artificial Intelligence, Operating Systems, Software Engineering, Data Structures, C++ OOP, Discrete Mathematics, Software Security, Network Security, and Digital Forensics. If a course has no profile, the screen asks for the instructor-provided Python requirements (one package per line). Requirement input accepts package names with optional version constraints; shell commands, URLs, and requirements-file options are rejected.
+
+The read-only environment scan is `POST /workspace/inspect`; provisioning is `POST /workspace/setup`. Send `"install": false` to create the plan and workspace metadata without creating the virtual environment or downloading packages.
+
 ## Desktop messages
 
 The Inbox left panel opens on Recent messages, ordered by latest activity with the sender’s name, preview, time, and unread count. A Contacts button stays at the bottom-left; press it to open the full contact directory and use Back to return to recent chats. New conversations appear in Recent messages automatically, including students from other majors. Opening a recent message shows the conversation history without entering an ID. Contacts lists classmates in the same major and professors; search it by name or enter any registered student’s full ID to start a conversation. Starting a conversation adds that person to Recent messages once a message is sent or received. The inbox checks for new messages every three seconds while open and shows its connection status; failed syncs retry automatically. Enter sends a reply, and Shift+Enter adds a line break. New messages preserve your position when reading older history; click New messages to jump to the latest. Click the paperclip beside the message field to share a document. The composer shows the filename and size and lets you remove it before sending. A document can be sent alone or with a message; the recipient downloads it from the conversation.

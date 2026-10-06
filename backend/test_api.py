@@ -518,6 +518,36 @@ def test_workspace_is_created_for_enrolled_course(tmp_path: Path) -> None:
     assert "Artificial Intelligence" in (workspace_path / "README.md").read_text()
 
 
+def test_workspace_inspection_uses_known_course_profile(tmp_path: Path) -> None:
+    response = make_client(tmp_path).post(
+        "/workspace/inspect",
+        json={"student_id": "231027905", "course": "Artificial Intelligence"},
+    )
+    assert response.status_code == 200
+    setup = response.json()
+    assert setup["known_course"] is True
+    assert setup["profile"] == "intro-ai"
+    assert "numpy==2.5.3" in setup["requirements"]
+    assert setup["python_found"] is True
+
+
+def test_workspace_setup_dry_run_creates_requirements_file(tmp_path: Path) -> None:
+    response = make_client(tmp_path).post(
+        "/workspace/setup",
+        json={
+            "student_id": "231027905",
+            "course": "Artificial Intelligence",
+            "install": False,
+        },
+    )
+    assert response.status_code == 200
+    setup = response.json()
+    assert setup["install_requested"] is False
+    assert Path(setup["requirements_file"]).read_text(encoding="utf-8").startswith(
+        "numpy==2.5.3\n"
+    )
+
+
 def test_unenrolled_course_is_rejected(tmp_path: Path) -> None:
     response = make_client(tmp_path).post(
         "/workspace/create",
