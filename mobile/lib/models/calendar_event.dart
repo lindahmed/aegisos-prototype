@@ -48,6 +48,30 @@ class StudentCalendarEvent {
   final bool urgent;
   final bool completed;
 
+  StudentCalendarEvent copyWith({
+    String? id,
+    String? title,
+    String? description,
+    DateTime? startAt,
+    DateTime? endAt,
+    StudentCalendarEventType? type,
+    StudentCalendarEventSource? source,
+    String? courseId,
+    bool? urgent,
+    bool? completed,
+  }) => StudentCalendarEvent(
+    id: id ?? this.id,
+    title: title ?? this.title,
+    description: description ?? this.description,
+    startAt: startAt ?? this.startAt,
+    endAt: endAt ?? this.endAt,
+    type: type ?? this.type,
+    source: source ?? this.source,
+    courseId: courseId ?? this.courseId,
+    urgent: urgent ?? this.urgent,
+    completed: completed ?? this.completed,
+  );
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'title': title,
@@ -166,13 +190,13 @@ class StudentCalendarBuilder {
       final courseId = course['course_id']?.toString() ?? 'course-$index';
       final id = 'ai:$semester:$currentWeek:$courseId';
       if (result.any((event) => event.id == id)) continue;
-      final start = _nextStudySlot(
-        [
+      final start = nextAvailableStudySlot(
+        events: [
           ...allEvents,
           ...result.where((event) => !customEvents.contains(event)),
         ],
-        index,
-        current,
+        offset: index,
+        now: current,
       );
       final riskMessages = ((course['risks'] as List<dynamic>?) ?? const [])
           .whereType<Map<String, dynamic>>()
@@ -219,15 +243,22 @@ class StudentCalendarBuilder {
         .add(const Duration(days: 2));
   }
 
-  static DateTime _nextStudySlot(
-    List<StudentCalendarEvent> events,
-    int offset,
-    DateTime now,
-  ) {
-    var first = DateTime(now.year, now.month, now.day, now.hour);
+  static DateTime nextAvailableStudySlot({
+    required List<StudentCalendarEvent> events,
+    DateTime? now,
+    Duration duration = const Duration(minutes: 90),
+    int offset = 0,
+  }) {
+    final current = now ?? DateTime.now();
+    var first = DateTime(
+      current.year,
+      current.month,
+      current.day,
+      current.hour,
+    );
     if (first.hour >= 18) first = first.add(const Duration(days: 1));
     final candidates = <DateTime>[];
-    for (var day = 0; day < 5; day += 1) {
+    for (var day = 0; day < 7; day += 1) {
       for (final hour in const [18, 20]) {
         candidates.add(
           DateTime(first.year, first.month, first.day + day, hour),
@@ -241,8 +272,8 @@ class StudentCalendarBuilder {
     ];
     return rotated.firstWhere(
       (start) =>
-          start.isAfter(now) &&
-          !_overlaps(start, start.add(const Duration(minutes: 90)), events),
+          start.isAfter(current) &&
+          !_overlaps(start, start.add(duration), events),
       orElse: () => candidates.last,
     );
   }

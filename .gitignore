@@ -17,6 +17,11 @@ Advisor_db.zip
 # Compiled mobile releases belong in GitHub Releases, not source control.
 *.apk
 
+# Local full-project packages must not be pushed to the source repository.
+AegisOS-Final-Project.zip
+UNI-Track-Test-Final.zip
+UNI-Track-Test-Final/
+
 .Rhistory
 test_flutter_app/
 

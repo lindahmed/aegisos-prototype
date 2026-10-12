@@ -19,7 +19,8 @@ class CourseScheduleSlot {
   final int endMinute;
   final String? location;
 
-  String get timeLabel => '${_formatMinute(startMinute)}–${_formatMinute(endMinute)}';
+  String get timeLabel =>
+      '${_formatMinute(startMinute)}–${_formatMinute(endMinute)}';
 
   static String _formatMinute(int minute) {
     final hour24 = minute ~/ 60;

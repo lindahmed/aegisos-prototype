@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 
-const uniTrackNavy = Color(0xFF073B67);
-const uniTrackBlue = Color(0xFF168DD1);
-const uniTrackSky = Color(0xFF38B8E8);
+import '../localization/app_language.dart';
+
+export '../localization/app_language.dart';
+
+const uniTrackNavy = Color(0xFF123765);
+const uniTrackBlue = Color(0xFF2563EB);
+const uniTrackBlueMid = Color(0xFF3B82F6);
+const uniTrackSky = Color(0xFF38BDF8);
+const uniTrackBlueSoft = Color(0xFFEAF2FF);
 
 final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.light);
 
@@ -35,7 +41,7 @@ class ThemeModeToggleButton extends StatelessWidget {
       final dark = mode == ThemeMode.dark;
       return IconButton.filledTonal(
         key: const Key('theme-mode-toggle'),
-        tooltip: dark ? 'Switch to light mode' : 'Switch to dark mode',
+        tooltip: tr(dark ? 'Switch to light mode' : 'Switch to dark mode'),
         onPressed: toggleAppTheme,
         style: IconButton.styleFrom(
           backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,

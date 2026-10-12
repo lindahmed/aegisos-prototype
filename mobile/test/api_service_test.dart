@@ -1,13 +1,22 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:uni_track_mobile/models/advisor_message.dart';
+import 'package:uni_track_mobile/models/portal_message.dart';
 import 'package:uni_track_mobile/services/api_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('uses the live Railway API by default', () {
+    expect(
+      ApiService.defaultBaseUrl,
+      'https://web-production-3a6ad.up.railway.app',
+    );
+  });
+
   test('student login sends the password and returns the student', () async {
     final service = ApiService(
       client: MockClient((request) async {
@@ -396,6 +405,66 @@ void main() {
     service.close();
   });
 
+  test('loads the detailed database-backed schedule group', () async {
+    final service = ApiService(
+      client: MockClient((request) async {
+        expect(
+          request.url.toString(),
+          'https://api.example.test/portal/students/STU001/schedule',
+        );
+        return http.Response(
+          jsonEncode({
+            'student_id': 'STU001',
+            'semester': 'Fall 2026',
+            'group': {
+              'id': 'group-2',
+              'label': 'Computer Science · Semester 5 · Group 2',
+              'major': 'Computer Science',
+              'level_label': 'Semester 5',
+              'number': 2,
+              'size': 25,
+              'capacity': 25,
+              'automatic': true,
+            },
+            'schedule': {
+              'schedule_id': 'group-2',
+              'name': 'Computer Science · Semester 5 · Group 2',
+              'semester': 'Fall 2026',
+              'times_source': 'database',
+              'slots': [
+                {
+                  'course_id': 'CIS2101',
+                  'course_name': 'Database Systems',
+                  'day_of_week': 'Monday',
+                  'start_minute': 720,
+                  'end_minute': 810,
+                  'location': 'Room B21',
+                  'session_type': 'Lecture',
+                  'provisional': false,
+                },
+              ],
+              'unscheduled_courses': [],
+            },
+            'classmates': [
+              {'name': 'Aya Salem'},
+            ],
+            'group_size': 25,
+          }),
+          200,
+        );
+      }),
+      baseUrl: 'https://api.example.test',
+    );
+
+    final report = await service.getStudentGroupSchedule('STU001');
+
+    expect(report.group?.number, 2);
+    expect(report.schedule?.slots.single.sessionType, 'Lecture');
+    expect(report.schedule?.slots.single.location, 'Room B21');
+    expect(report.classmates, ['Aya Salem']);
+    service.close();
+  });
+
   test('updates shared notification read state', () async {
     final client = MockClient((request) async {
       expect(request.method, 'PUT');
@@ -750,4 +819,154 @@ void main() {
     );
     service.close();
   });
+
+  test('loads contacts and sends and reads campus messages', () async {
+    final requests = <http.Request>[];
+    final service = ApiService(
+      client: MockClient((request) async {
+        requests.add(request);
+        if (request.url.path == '/messages/contacts') {
+          expect(request.url.queryParameters, {
+            'actor_type': 'student',
+            'actor_id': 'STU001',
+          });
+          return http.Response(
+            jsonEncode({
+              'actor': {'type': 'student', 'id': 'STU001'},
+              'contacts': [
+                {
+                  'type': 'staff',
+                  'id': 'PROF001',
+                  'name': 'Dr. Salma',
+                  'subtitle': 'Professor · Computer Science',
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        if (request.method == 'GET' && request.url.path == '/messages') {
+          return http.Response(jsonEncode({'messages': []}), 200);
+        }
+        if (request.method == 'POST' && request.url.path == '/messages') {
+          expect(jsonDecode(request.body), {
+            'sender_type': 'student',
+            'sender_id': 'STU001',
+            'recipient_type': 'staff',
+            'recipient_id': 'PROF001',
+            'is_broadcast': false,
+            'body': 'Hello professor',
+          });
+          return http.Response(
+            jsonEncode({
+              'message': {
+                'message_id': 'MSG001',
+                'sender_type': 'student',
+                'sender_id': 'STU001',
+                'sender_name': 'Test Student',
+                'recipient_type': 'staff',
+                'recipient_id': 'PROF001',
+                'recipient_name': 'Dr. Salma',
+                'is_broadcast': false,
+                'body': 'Hello professor',
+                'created_at': '2026-10-08T10:00:00Z',
+                'read': true,
+              },
+            }),
+            200,
+          );
+        }
+        if (request.method == 'PUT' && request.url.path == '/messages/read') {
+          expect(jsonDecode(request.body), {
+            'actor_type': 'student',
+            'actor_id': 'STU001',
+            'message_ids': ['MSG002'],
+          });
+          return http.Response(
+            jsonEncode({
+              'read': ['MSG002'],
+            }),
+            200,
+          );
+        }
+        return http.Response('Not found', 404);
+      }),
+      baseUrl: 'https://api.example.test',
+    );
+
+    final contacts = await service.getMessageContacts('STU001');
+    final messages = await service.getMessages('STU001');
+    final sent = await service.sendMessage(
+      studentId: 'STU001',
+      recipient: contacts.single,
+      body: 'Hello professor',
+    );
+    await service.markMessagesRead(studentId: 'STU001', messageIds: ['MSG002']);
+
+    expect(contacts.single.name, 'Dr. Salma');
+    expect(messages, isEmpty);
+    expect(sent.messageId, 'MSG001');
+    expect(requests.map((request) => request.method), [
+      'GET',
+      'GET',
+      'POST',
+      'PUT',
+    ]);
+    service.close();
+  });
+
+  test(
+    'uploads a message document with the website backend contract',
+    () async {
+      final service = ApiService(
+        client: MockClient((request) async {
+          expect(request.method, 'POST');
+          expect(request.url.path, '/messages/attachments');
+          expect(
+            request.headers['content-type'],
+            contains('multipart/form-data'),
+          );
+          expect(request.body, contains('filename="notes.pdf"'));
+          expect(request.body, contains('STU001'));
+          expect(request.body, contains('PROF001'));
+          return http.Response(
+            jsonEncode({
+              'message': {
+                'message_id': 'MSG-DOC',
+                'sender_type': 'student',
+                'sender_id': 'STU001',
+                'sender_name': 'Test Student',
+                'recipient_type': 'staff',
+                'recipient_id': 'PROF001',
+                'recipient_name': 'Dr. Salma',
+                'is_broadcast': false,
+                'body': 'My notes',
+                'created_at': '2026-10-08T10:00:00Z',
+                'read': true,
+                'attachment': {'filename': 'notes.pdf', 'size_bytes': 4},
+              },
+            }),
+            200,
+          );
+        }),
+        baseUrl: 'https://api.example.test',
+      );
+
+      final sent = await service.sendMessageAttachment(
+        studentId: 'STU001',
+        recipient: const MessageContact(
+          type: 'staff',
+          id: 'PROF001',
+          name: 'Dr. Salma',
+          subtitle: 'Professor',
+        ),
+        filename: 'notes.pdf',
+        bytes: Uint8List.fromList([1, 2, 3, 4]),
+        body: 'My notes',
+      );
+
+      expect(sent.attachment?.filename, 'notes.pdf');
+      service.close();
+    },
+  );
 }

@@ -348,7 +348,11 @@ The API configuration is in:
 mobile/lib/services/api_service.dart
 ```
 
-The current project is configured to use the deployed online backend by default.
+The current project is configured to use this deployed online backend by default:
+
+```text
+https://web-production-3a6ad.up.railway.app
+```
 
 If you intentionally want to test against a FastAPI backend running locally on the same Mac with the standard Android Emulator, use:
 

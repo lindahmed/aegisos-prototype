@@ -3,22 +3,28 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/advisor_message.dart';
+import '../models/calendar_event.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/advisor_voice_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/study_session_dialog.dart';
+import 'courses_schedule_screen.dart';
+import 'weekly_plan_screen.dart';
 
 class AdvisorScreen extends StatefulWidget {
   const AdvisorScreen({
     required this.student,
     this.apiService,
     this.voiceService,
+    this.initialMessage,
     super.key,
   });
 
   final Student student;
   final ApiService? apiService;
   final AdvisorVoiceService? voiceService;
+  final String? initialMessage;
 
   @override
   State<AdvisorScreen> createState() => _AdvisorScreenState();
@@ -43,8 +49,9 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
   bool _isRecording = false;
   bool _isSpeaking = false;
   int _recordingSession = 0;
-  String _language = 'english';
   String? _errorMessage;
+
+  String get _appLanguage => appLanguageController.advisorLanguage;
 
   @override
   void initState() {
@@ -53,6 +60,12 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
     _apiService = widget.apiService ?? ApiService();
     _ownsVoiceService = widget.voiceService == null;
     _voiceService = widget.voiceService ?? DeviceAdvisorVoiceService();
+    final initialMessage = widget.initialMessage?.trim();
+    if (initialMessage != null && initialMessage.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_sendMessage(initialMessage));
+      });
+    }
   }
 
   Future<void> _toggleVoiceRecording() async {
@@ -65,7 +78,7 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
         _messageController.clear();
         final recordingSession = ++_recordingSession;
         final started = await _voiceService.startListening(
-          language: _language,
+          language: _appLanguage,
           onResult: (words) {
             if (!mounted || recordingSession != _recordingSession) return;
             _messageController.value = TextEditingValue(
@@ -141,6 +154,7 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
   ]) async {
     final message = (suggestedMessage ?? _messageController.text).trim();
     if (message.isEmpty || _isSending || _isRecording) return;
+    final requestLanguage = containsArabic(message) ? 'arabic' : _appLanguage;
 
     if (_isSpeaking) await _stopSpeaking();
     if (!mounted) return;
@@ -159,17 +173,35 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
         studentId: widget.student.studentId,
         message: message,
         history: history,
-        language: _language,
+        language: requestLanguage,
       );
       if (!mounted) return;
       setState(() {
-        _messages.add(AdvisorMessage.assistant(reply.response));
+        _messages.add(
+          AdvisorMessage.assistant(
+            reply.response,
+            actions: const [
+              AdvisorAction(
+                type: AdvisorActionType.addStudySession,
+                label: 'Add to Calendar',
+              ),
+              AdvisorAction(
+                type: AdvisorActionType.openCourse,
+                label: 'View Courses',
+              ),
+              AdvisorAction(
+                type: AdvisorActionType.fixMyWeek,
+                label: 'Week Planner',
+              ),
+            ],
+          ),
+        );
       });
       if (speakReply) {
         try {
           final audioBytes = await _apiService.speakAdvisor(
             text: reply.response,
-            language: _language,
+            language: requestLanguage,
           );
           if (!mounted) return;
           setState(() => _isSpeaking = true);
@@ -190,12 +222,40 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
         }
       }
     } on ApiException catch (error) {
-      if (mounted) setState(() => _errorMessage = error.message);
+      final fallback = await _localAdvisorFallback(
+        message,
+        language: requestLanguage,
+      );
+      if (!mounted) return;
+      if (fallback == null) {
+        setState(() => _errorMessage = error.message);
+      } else {
+        setState(() {
+          _messages.add(
+            AdvisorMessage.assistant(
+              fallback,
+              actions: const [
+                AdvisorAction(
+                  type: AdvisorActionType.addStudySession,
+                  label: 'Add to Calendar',
+                ),
+                AdvisorAction(
+                  type: AdvisorActionType.openCourse,
+                  label: 'View Courses',
+                ),
+                AdvisorAction(
+                  type: AdvisorActionType.fixMyWeek,
+                  label: 'Week Planner',
+                ),
+              ],
+            ),
+          );
+        });
+      }
     } catch (_) {
       if (mounted) {
         setState(
-          () =>
-              _errorMessage = 'Advisor AI could not answer. Please try again.',
+          () => _errorMessage = 'Aegis AI could not answer. Please try again.',
         );
       }
     } finally {
@@ -203,6 +263,55 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
         setState(() => _isSending = false);
         _scrollToBottom();
       }
+    }
+  }
+
+  Future<String?> _localAdvisorFallback(
+    String message, {
+    required String language,
+  }) async {
+    try {
+      final progress = await _apiService.getStudentProgress(
+        widget.student.studentId,
+        forceRefresh: true,
+      );
+      final courses = ((progress['courses'] as List<dynamic>?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      if (courses.isEmpty) return null;
+      int priority(Map<String, dynamic> course) =>
+          switch (course['risk_level']?.toString().toLowerCase()) {
+            'high' => 0,
+            'medium' => 1,
+            'low' => 2,
+            _ => 3,
+          };
+      courses.sort((a, b) => priority(a).compareTo(priority(b)));
+      final mentioned = courses.where(
+        (course) => message.toLowerCase().contains(
+          (course['course_name']?.toString() ?? '').toLowerCase(),
+        ),
+      );
+      final course = mentioned.isNotEmpty ? mentioned.first : courses.first;
+      final risks = ((course['risks'] as List<dynamic>?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      final reason = risks.isEmpty
+          ? 'No active risk is currently recorded for this course.'
+          : risks.first['message']?.toString() ??
+                'This course needs attention.';
+      final health = progress['overall_academic_health'];
+      final week = progress['current_week'];
+      if (language == 'arabic') {
+        return 'بناءً على بياناتك الحالية في الأسبوع $week، صحتك الأكاديمية العامة هي '
+            '$health/100. الأولوية الآن هي ${course['course_name']}. السبب: $reason '
+            'ابدئي بمراجعة مركزة لمدة 30 دقيقة، ثم أضيفي جلسة متابعة من زر Add to Calendar.';
+      }
+      return 'Based on your live week $week data, your overall academic health is '
+          '$health/100. Your current priority is ${course['course_name']}. Why: $reason '
+          'Start with one focused 30-minute review, then use Add to Calendar for the follow-up.';
+    } on Exception {
+      return null;
     }
   }
 
@@ -225,6 +334,86 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
     }
   }
 
+  Future<void> _handleAction(
+    AdvisorAction action,
+    AdvisorMessage message,
+  ) async {
+    if (action.type == AdvisorActionType.openCourse) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => CoursesScheduleScreen(
+            student: widget.student,
+            apiService: _apiService,
+          ),
+        ),
+      );
+      return;
+    }
+    if (action.type == AdvisorActionType.fixMyWeek) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => WeeklyPlanScreen(
+            student: widget.student,
+            apiService: _apiService,
+          ),
+        ),
+      );
+      return;
+    }
+
+    final courseName = widget.student.courses.firstWhere(
+      (course) => message.content.toLowerCase().contains(course.toLowerCase()),
+      orElse: () => 'Focused Study',
+    );
+    var alreadyInWeekPlanner = false;
+    try {
+      final plan = await _apiService.getWeeklyPlan(widget.student.studentId);
+      alreadyInWeekPlanner = plan.items.any(
+        (item) =>
+            item.courseName.trim().toLowerCase() ==
+            courseName.trim().toLowerCase(),
+      );
+    } catch (_) {
+      // Date and time selection still works when Week Planner is unavailable.
+    }
+    if (!mounted) return;
+    final event = await showStudySessionDialog(
+      context,
+      courseName: courseName,
+      reason: 'Added from this Advisor recommendation: ${message.content}',
+      alreadyInWeekPlanner: alreadyInWeekPlanner,
+    );
+    if (event == null) return;
+    try {
+      final saved = await StudentCalendarStore.load(widget.student.studentId);
+      await StudentCalendarStore.save(widget.student.studentId, [
+        ...saved,
+        event,
+      ]);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: AppText(
+            '${event.title} added to Calendar on ${event.startAt.day}/${event.startAt.month} at ${_clock(event.startAt)}.',
+          ),
+        ),
+      );
+    } on Exception {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: AppText('Could not save the Calendar session.'),
+        ),
+      );
+    }
+  }
+
+  static String _clock(DateTime value) {
+    final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+    final minute = value.minute.toString().padLeft(2, '0');
+    return '$hour:$minute ${value.hour < 12 ? 'AM' : 'PM'}';
+  }
+
   @override
   void dispose() {
     _messageController.dispose();
@@ -243,20 +432,8 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Advisor AI'),
-        actions: [
-          const ThemeModeToggleButton(),
-          PopupMenuButton<String>(
-            tooltip: 'Response language',
-            initialValue: _language,
-            onSelected: (value) => setState(() => _language = value),
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'english', child: Text('English')),
-              PopupMenuItem(value: 'arabic', child: Text('العربية')),
-            ],
-            icon: const Icon(Icons.language),
-          ),
-        ],
+        title: const AppText('AI Advisor'),
+        actions: const [ThemeModeToggleButton()],
       ),
       body: SafeArea(
         child: Column(
@@ -274,7 +451,10 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
                       padding: const EdgeInsets.all(16),
                       itemCount: _messages.length,
                       itemBuilder: (context, index) {
-                        return _MessageBubble(message: _messages[index]);
+                        return _MessageBubble(
+                          message: _messages[index],
+                          onAction: _handleAction,
+                        );
                       },
                     ),
             ),
@@ -293,7 +473,9 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
                   children: [
                     const Icon(Icons.mic, color: Colors.red),
                     const SizedBox(width: 8),
-                    const Expanded(child: Text('Listening… Tap stop to send')),
+                    const Expanded(
+                      child: AppText('Listening… Tap stop to send'),
+                    ),
                     IconButton(
                       key: const Key('advisor-discard-recording'),
                       tooltip: 'Discard recording',
@@ -319,12 +501,12 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
                       color: Theme.of(context).colorScheme.onPrimaryContainer,
                     ),
                     const SizedBox(width: 8),
-                    const Expanded(child: Text('Reading response aloud')),
+                    const Expanded(child: AppText('Reading response aloud')),
                     TextButton.icon(
                       key: const Key('advisor-stop-speaking'),
                       onPressed: _stopSpeaking,
                       icon: const Icon(Icons.stop_circle_outlined),
-                      label: const Text('Stop audio'),
+                      label: const AppText('Stop speaking'),
                     ),
                   ],
                 ),
@@ -337,7 +519,7 @@ class _AdvisorScreenState extends State<AdvisorScreen> {
                   horizontal: 16,
                   vertical: 10,
                 ),
-                child: Text(
+                child: AppText(
                   _errorMessage!,
                   key: const Key('advisor-error'),
                   style: TextStyle(
@@ -382,14 +564,14 @@ class _EmptyAdvisorState extends StatelessWidget {
           color: Theme.of(context).colorScheme.primary,
         ),
         const SizedBox(height: 16),
-        Text(
+        AppText(
           'How can I help, ${studentName.split(' ').first}?',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.headlineSmall
               ?.copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
-        const Text(
+        const AppText(
           'Ask about semester planning, careers, courses, or your academic progress.',
           textAlign: TextAlign.center,
         ),
@@ -399,10 +581,23 @@ class _EmptyAdvisorState extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 10),
             child: OutlinedButton.icon(
               onPressed: () => onSuggestionSelected(suggestion),
-              icon: const Icon(Icons.chat_bubble_outline),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: uniTrackNavy,
+                backgroundColor: appScreenSurface,
+                side: BorderSide(color: uniTrackBlue.withValues(alpha: 0.38)),
+                shape: const StadiumBorder(),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 5,
+                ),
+              ),
+              icon: const Icon(Icons.north_east_rounded, size: 20),
               label: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text(suggestion),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: AppText(suggestion),
+                ),
               ),
             ),
           ),
@@ -413,9 +608,10 @@ class _EmptyAdvisorState extends StatelessWidget {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
+  const _MessageBubble({required this.message, required this.onAction});
 
   final AdvisorMessage message;
+  final Future<void> Function(AdvisorAction, AdvisorMessage) onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -433,7 +629,54 @@ class _MessageBubble extends StatelessWidget {
               : colors.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(18),
         ),
-        child: SelectableText(message.content),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SelectableText(
+              message.content,
+              textDirection: containsArabic(message.content)
+                  ? TextDirection.rtl
+                  : TextDirection.ltr,
+            ),
+            if (!isUser && message.actions.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                children: message.actions
+                    .map(
+                      (action) => ActionChip(
+                        key: Key('advisor-action-${action.type.name}'),
+                        avatar: Icon(switch (action.type) {
+                          AdvisorActionType.addStudySession =>
+                            Icons.event_available_outlined,
+                          AdvisorActionType.openCourse =>
+                            Icons.menu_book_outlined,
+                          AdvisorActionType.fixMyWeek =>
+                            Icons.auto_fix_high_rounded,
+                        }, size: 17),
+                        label: AppText(action.label),
+                        backgroundColor: colors.surface,
+                        side: BorderSide(
+                          color: colors.primary.withValues(alpha: 0.35),
+                        ),
+                        shape: const StadiumBorder(),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        labelStyle: TextStyle(
+                          color: colors.primary,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        onPressed: () => onAction(action, message),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -470,10 +713,15 @@ class _MessageComposer extends StatelessWidget {
                 enabled: enabled && !isRecording,
                 minLines: 1,
                 maxLines: 4,
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  hintText: 'Ask your advisor...',
-                  border: OutlineInputBorder(),
+                textDirection: isArabicApp
+                    ? TextDirection.rtl
+                    : TextDirection.ltr,
+                decoration: InputDecoration(
+                  hintText: tr('Ask your advisor...'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
             ),
@@ -481,8 +729,8 @@ class _MessageComposer extends StatelessWidget {
             IconButton.filledTonal(
               key: const Key('advisor-voice'),
               tooltip: isRecording
-                  ? 'Stop and send recording'
-                  : 'Speak to Advisor',
+                  ? tr('Stop and send recording')
+                  : tr('Record a question'),
               onPressed: enabled ? onVoice : null,
               style: isRecording
                   ? IconButton.styleFrom(
@@ -497,7 +745,7 @@ class _MessageComposer extends StatelessWidget {
             const SizedBox(width: 8),
             IconButton.filled(
               key: const Key('advisor-send'),
-              tooltip: 'Send',
+              tooltip: tr('Send'),
               onPressed: enabled && !isRecording ? onSend : null,
               icon: const Icon(Icons.send),
             ),

@@ -70,7 +70,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Results'), findsOneWidget);
+    expect(find.text('Grades'), findsOneWidget);
     expect(find.text('Courses Achieved'), findsOneWidget);
     expect(find.text('Fall 2026'), findsOneWidget);
     expect(find.text('CCS3201'), findsOneWidget);

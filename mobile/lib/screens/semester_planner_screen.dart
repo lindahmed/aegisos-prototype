@@ -6,9 +6,10 @@ import '../models/semester_plan.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ask_aegis_fab.dart';
 
-const _plannerIndigo = Color(0xFF5965F2);
-const _plannerCyan = Color(0xFF20B8CD);
+const _plannerIndigo = uniTrackBlue;
+const _plannerCyan = uniTrackSky;
 const _plannerGreen = Color(0xFF1A9B78);
 const _plannerAmber = Color(0xFFF0A12A);
 const _gradePoints = <String, double>{
@@ -78,7 +79,14 @@ class _SemesterPlannerScreenState extends State<SemesterPlannerScreen> {
   List<PlanCourse> get _selectedCourses {
     final plan = _plan;
     if (plan == null) return const [];
-    return plan.candidateCourses
+    final uniqueCourses = <String, PlanCourse>{};
+    for (final course in [
+      ...plan.recommendedCourses,
+      ...plan.candidateCourses,
+    ]) {
+      uniqueCourses[course.id] = course;
+    }
+    return uniqueCourses.values
         .where((course) => _selectedIds.contains(course.id))
         .toList();
   }
@@ -130,33 +138,51 @@ class _SemesterPlannerScreenState extends State<SemesterPlannerScreen> {
   void _toggleCourse(PlanCourse course, bool selected) {
     if (!course.canSelect) return;
     final plan = _plan;
-    if (selected &&
-        plan != null &&
-        _selectedCredits + course.creditHours > plan.maximumCreditHours) {
+    if (plan == null) return;
+    final nextIds = Set<String>.from(_selectedIds);
+    if (selected) {
+      nextIds.add(course.id);
+    } else {
+      nextIds.remove(course.id);
+    }
+    final uniqueCourses = <String, PlanCourse>{};
+    for (final item in [...plan.recommendedCourses, ...plan.candidateCourses]) {
+      uniqueCourses[item.id] = item;
+    }
+    final nextCredits = uniqueCourses.values
+        .where((item) => nextIds.contains(item.id))
+        .fold(0, (total, item) => total + item.creditHours);
+    if (selected && nextCredits > plan.maximumCreditHours) {
       final message = plan.halfLoad
           ? 'Half-load limit: GPA below 2.0 allows up to 9 credits, usually 3 courses.'
           : 'This selection would exceed the ${plan.maximumCreditHours}-credit maximum.';
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+          .showSnackBar(SnackBar(content: AppText(message)));
       return;
     }
-    setState(() {
-      if (selected) {
-        _selectedIds.add(course.id);
-      } else {
-        _selectedIds.remove(course.id);
-      }
-    });
+    setState(
+      () => _selectedIds
+        ..clear()
+        ..addAll(nextIds),
+    );
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text(
-        'Smart Semester Planner',
+      title: const AppText(
+        'Academic Roadmap',
         style: TextStyle(fontWeight: FontWeight.w900),
       ),
       actions: const [ThemeModeToggleButton(), SizedBox(width: 8)],
+    ),
+    floatingActionButton: AskAegisFab(
+      onPressed: () => openAskAegis(
+        context,
+        student: widget.student,
+        apiService: widget.apiService,
+        prompt: 'I am viewing my Academic Roadmap. Which courses should I take next, considering prerequisites, workload, and my GPA?',
+      ),
     ),
     body: _loading && _plan == null
         ? const Center(child: CircularProgressIndicator())
@@ -263,7 +289,7 @@ class _SemesterPlannerScreenState extends State<SemesterPlannerScreen> {
         ),
         const SizedBox(height: 24),
         _SectionHeading(
-          title: 'Best Graduation Path',
+          title: 'Accelerated Graduation Path',
           subtitle: plan.halfLoad
               ? 'Your 9-credit half-load route is the only available path until your GPA reaches 2.0.'
               : 'Compare normal study, a higher workload, and each available summer.',
@@ -285,7 +311,7 @@ class _SemesterPlannerScreenState extends State<SemesterPlannerScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        Text(
+        AppText(
           '${selectedRoute.title} plan',
           style: TextStyle(
             color: appScreenInk,
@@ -310,7 +336,7 @@ class _SemesterPlannerScreenState extends State<SemesterPlannerScreen> {
             ),
           ),
         const SizedBox(height: 4),
-        Text(
+        AppText(
           plan.graduationPolicyNote.isEmpty
               ? plan.graduationNote
               : plan.graduationPolicyNote,
@@ -356,7 +382,7 @@ class _PlannerHero extends StatelessWidget {
             color: _plannerIndigo.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(20),
           ),
-          child: Text(
+          child: AppText(
             'SEMESTER $nextSemester OF $maximumProgramSemesters',
             style: const TextStyle(
               color: _plannerIndigo,
@@ -367,7 +393,7 @@ class _PlannerHero extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
-        Text(
+        AppText(
           'Plan with confidence',
           style: TextStyle(
             color: appScreenInk,
@@ -376,7 +402,7 @@ class _PlannerHero extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        Text(
+        AppText(
           'Select courses and preview the academic impact before registration.',
           style: TextStyle(color: appScreenMuted, height: 1.4),
         ),
@@ -405,11 +431,11 @@ class _HeroStat extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        AppText(
           value,
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
         ),
-        Text(label, style: TextStyle(color: appScreenMuted, fontSize: 11)),
+        AppText(label, style: TextStyle(color: appScreenMuted, fontSize: 11)),
       ],
     ),
   );
@@ -423,12 +449,12 @@ class _SectionHeading extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(
+      AppText(
         title,
         style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
       ),
       const SizedBox(height: 3),
-      Text(subtitle, style: TextStyle(color: appScreenMuted, height: 1.35)),
+      AppText(subtitle, style: TextStyle(color: appScreenMuted, height: 1.35)),
     ],
   );
 }
@@ -482,7 +508,7 @@ class _CourseChoiceCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    AppText(
                       course.code,
                       style: const TextStyle(
                         color: _plannerIndigo,
@@ -490,7 +516,7 @@ class _CourseChoiceCard extends StatelessWidget {
                         fontWeight: FontWeight.w900,
                       ),
                     ),
-                    Text(
+                    AppText(
                       course.name,
                       maxLines: compact ? 1 : 2,
                       overflow: TextOverflow.ellipsis,
@@ -503,7 +529,7 @@ class _CourseChoiceCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
+              AppText(
                 '${course.creditHours} CR',
                 style: TextStyle(
                   color: appScreenMuted,
@@ -518,7 +544,7 @@ class _CourseChoiceCard extends StatelessWidget {
               children: [
                 _StatusPill(label: statusLabel, color: statusColor),
                 const Spacer(),
-                Text(
+                AppText(
                   'Curriculum S${course.curriculumSemester ?? '—'}',
                   style: TextStyle(color: appScreenMuted, fontSize: 12),
                 ),
@@ -530,7 +556,7 @@ class _CourseChoiceCard extends StatelessWidget {
               const SizedBox(height: 10),
               Align(
                 alignment: Alignment.centerLeft,
-                child: Text(
+                child: AppText(
                   'Prerequisites',
                   style: TextStyle(
                     color: appScreenMuted,
@@ -560,7 +586,7 @@ class _CourseChoiceCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 7),
                       Expanded(
-                        child: Text(
+                        child: AppText(
                           '${requirement.courseCode} · ${requirement.status.replaceAll('_', ' ')}',
                           style: const TextStyle(
                             fontSize: 12,
@@ -591,7 +617,7 @@ class _StatusPill extends StatelessWidget {
       color: color.withValues(alpha: 0.11),
       borderRadius: BorderRadius.circular(20),
     ),
-    child: Text(
+    child: AppText(
       label,
       style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900),
     ),
@@ -616,11 +642,11 @@ class _MoreCoursesCard extends StatelessWidget {
     ),
     clipBehavior: Clip.antiAlias,
     child: ExpansionTile(
-      title: const Text(
+      title: const AppText(
         'Other curriculum courses',
         style: TextStyle(fontWeight: FontWeight.w800),
       ),
-      subtitle: Text(
+      subtitle: AppText(
         '${courses.length} courses · blocked courses show what is missing',
       ),
       childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -696,7 +722,7 @@ class _ProjectionCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    AppText(
                       'Expected average',
                       style: TextStyle(color: appScreenMuted, fontSize: 12),
                     ),
@@ -708,7 +734,7 @@ class _ProjectionCard extends StatelessWidget {
                           .map(
                             (grade) => DropdownMenuItem(
                               value: grade,
-                              child: Text(
+                              child: AppText(
                                 '$grade  ·  ${_gradePoints[grade]!.toStringAsFixed(1)}',
                               ),
                             ),
@@ -732,7 +758,7 @@ class _ProjectionCard extends StatelessWidget {
           ),
           if (overloaded) ...[
             const SizedBox(height: 10),
-            Text(
+            AppText(
               'Remove a course to stay within the $maxCredits-credit maximum.',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.error,
@@ -741,7 +767,7 @@ class _ProjectionCard extends StatelessWidget {
             ),
           ] else if (halfLoad) ...[
             const SizedBox(height: 10),
-            Text(
+            AppText(
               'Half-load rule: because your GPA is below 2.0, you can select up to 9 credits—usually 3 courses. The limit is removed only after your GPA returns to 2.0 or higher.',
               style: const TextStyle(
                 color: _plannerAmber,
@@ -765,7 +791,7 @@ class _Metric extends StatelessWidget {
   Widget build(BuildContext context) => Expanded(
     child: Column(
       children: [
-        Text(
+        AppText(
           value,
           style: TextStyle(
             color: color,
@@ -773,7 +799,7 @@ class _Metric extends StatelessWidget {
             fontWeight: FontWeight.w900,
           ),
         ),
-        Text(label, style: TextStyle(color: appScreenMuted, fontSize: 12)),
+        AppText(label, style: TextStyle(color: appScreenMuted, fontSize: 12)),
       ],
     ),
   );
@@ -805,9 +831,12 @@ class _InfoCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+              AppText(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
               const SizedBox(height: 3),
-              Text(
+              AppText(
                 body,
                 style: TextStyle(
                   color: appScreenMuted,
@@ -866,7 +895,7 @@ class _ScheduleCard extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(
+            child: AppText(
               hasConflicts
                   ? conflicts
                         .map(
@@ -914,7 +943,7 @@ class _GraduationSummary extends StatelessWidget {
           ),
           const SizedBox(width: 13),
           Expanded(
-            child: Text(
+            child: AppText(
               plan.halfLoad
                   ? 'Best available path: Half-load route. Your GPA is below 2.0, so regular semesters are limited to 9 credits and graduation may take longer.'
                   : plan.bestOptionId == 'normal'
@@ -989,7 +1018,7 @@ class _GraduationOptionCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
+                    child: AppText(
                       option.title,
                       style: TextStyle(
                         color: option.available ? appScreenInk : appScreenMuted,
@@ -1007,7 +1036,7 @@ class _GraduationOptionCard extends StatelessWidget {
                         color: _plannerGreen.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Text(
+                      child: const AppText(
                         'BEST OPTION',
                         style: TextStyle(
                           color: _plannerGreen,
@@ -1017,7 +1046,7 @@ class _GraduationOptionCard extends StatelessWidget {
                       ),
                     )
                   else if (!option.available)
-                    const Text(
+                    const AppText(
                       'UNAVAILABLE',
                       style: TextStyle(
                         color: _plannerAmber,
@@ -1036,7 +1065,7 @@ class _GraduationOptionCard extends StatelessWidget {
               ),
               if (details.isNotEmpty) ...[
                 const SizedBox(height: 9),
-                Text(
+                AppText(
                   details.join(' · '),
                   style: TextStyle(
                     color: option.available ? appScreenInk : appScreenMuted,
@@ -1046,7 +1075,7 @@ class _GraduationOptionCard extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 6),
-              Text(
+              AppText(
                 option.note,
                 style: TextStyle(
                   color: appScreenMuted,
@@ -1096,11 +1125,11 @@ class _PathTermCard extends StatelessWidget {
           size: 20,
         ),
       ),
-      title: Text(
+      title: AppText(
         term.label,
         style: const TextStyle(fontWeight: FontWeight.w800),
       ),
-      subtitle: Text(
+      subtitle: AppText(
         '${term.courses.length} courses · ${term.creditHours} estimated credits',
       ),
       childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
@@ -1113,7 +1142,7 @@ class _PathTermCard extends StatelessWidget {
                   const Icon(Icons.arrow_right_rounded, color: _plannerCyan),
                   const SizedBox(width: 6),
                   Expanded(
-                    child: Text(
+                    child: AppText(
                       '${course.code} · ${course.name}',
                       style: const TextStyle(fontSize: 13),
                     ),
@@ -1144,12 +1173,12 @@ class _PlannerError extends StatelessWidget {
             color: Theme.of(context).colorScheme.error,
           ),
           const SizedBox(height: 12),
-          Text(message, textAlign: TextAlign.center),
+          AppText(message, textAlign: TextAlign.center),
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: onRetry,
             icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Try again'),
+            label: const AppText('Try again'),
           ),
         ],
       ),

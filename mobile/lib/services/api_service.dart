@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -6,9 +7,11 @@ import 'package:http/http.dart' as http;
 import '../models/advisor_message.dart';
 import '../models/grade_report.dart';
 import '../models/group_schedule.dart';
+import '../models/portal_message.dart';
 import '../models/semester_plan.dart';
 import '../models/student.dart';
 import '../models/student_course_schedule.dart';
+import '../models/student_group_schedule.dart';
 import '../models/student_notification.dart';
 import '../models/weekly_plan.dart';
 
@@ -27,14 +30,12 @@ class ApiService {
     this._shared = false,
   }) : baseUrl = baseUrl.replaceFirst(RegExp(r'/$'), '');
 
-  /// Android emulators reach the development machine through 10.0.2.2.
-  /// Port 8001 is reserved for AegisOS so another local service on 8000 cannot
-  /// be mistaken for this API.
-  /// Override this for a physical device or deployed API with:
+  /// Production builds use the public Railway service by default.
+  /// Override this only when intentionally testing another API with:
   /// --dart-define=API_BASE_URL=https://api.example.com
   static const String defaultBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://backend-production-6069.up.railway.app',
+    defaultValue: 'https://web-production-3a6ad.up.railway.app',
   );
 
   /// One keep-alive client is reused across login and every student screen.
@@ -169,7 +170,14 @@ class ApiService {
               'password': password,
             }),
           )
-          .timeout(const Duration(seconds: 15));
+          // Production password verification can be slower while Railway wakes
+          // the database. Keep login alive long enough to receive the real
+          // authentication result instead of reporting a network failure.
+          .timeout(const Duration(seconds: 90));
+    } on TimeoutException {
+      throw const ApiException(
+        'The sign-in service took too long to respond. Please try again.',
+      );
     } on Exception {
       throw const ApiException(
         'Could not reach UNI Track. Check your connection and try again.',
@@ -238,7 +246,7 @@ class ApiService {
           .timeout(const Duration(seconds: 120));
     } on Exception {
       throw const ApiException(
-        'Could not reach Advisor AI. Check that the backend is running and try again.',
+        'Could not reach Aegis AI. Check your connection and try again.',
       );
     }
 
@@ -248,16 +256,16 @@ class ApiService {
           jsonDecode(response.body) as Map<String, dynamic>,
         );
       } on FormatException {
-        throw const ApiException('Advisor AI returned an invalid response.');
+        throw const ApiException('Aegis AI returned an invalid response.');
       } on TypeError {
-        throw const ApiException('Advisor AI returned an invalid response.');
+        throw const ApiException('Aegis AI returned an invalid response.');
       }
     }
 
     throw ApiException(
       _errorDetail(
         response,
-        'Advisor AI could not answer your question (${response.statusCode}).',
+        'Aegis AI could not answer your question (${response.statusCode}).',
       ),
     );
   }
@@ -340,6 +348,48 @@ class ApiService {
       return jsonDecode(response.body) as Map<String, dynamic>;
     } on Exception {
       throw const ApiException('The server returned invalid progress data.');
+    }
+  }
+
+  Future<Map<String, dynamic>> simulateAssessmentGrade({
+    required String studentId,
+    required String courseId,
+    required String assessmentId,
+    required double hypotheticalGrade,
+  }) async {
+    final normalizedId = Uri.encodeComponent(studentId.trim());
+    final uri = Uri.parse('$baseUrl/progress/$normalizedId/what-if');
+    late http.Response response;
+    try {
+      response = await _client
+          .post(
+            uri,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'type': 'assessment_grade',
+              'course_id': courseId,
+              'assessment_id': assessmentId,
+              'hypothetical_grade': hypotheticalGrade,
+            }),
+          )
+          .timeout(const Duration(seconds: 120));
+    } on Exception {
+      throw const ApiException(
+        'Could not run the what-if simulation. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'What-if simulation could not complete (${response.statusCode}).',
+        ),
+      );
+    }
+    try {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } on Exception {
+      throw const ApiException('The server returned invalid simulation data.');
     }
   }
 
@@ -458,6 +508,41 @@ class ApiService {
     }
   }
 
+  Future<StudentGroupScheduleReport> getStudentGroupSchedule(
+    String studentId, {
+    bool forceRefresh = false,
+  }) async {
+    final normalizedId = Uri.encodeComponent(studentId.trim());
+    final uri = Uri.parse('$baseUrl/portal/students/$normalizedId/schedule');
+    late http.Response response;
+    try {
+      response = await _get(
+        uri,
+        cacheFor: const Duration(minutes: 1),
+        forceRefresh: forceRefresh,
+      );
+    } on Exception {
+      throw const ApiException(
+        'Could not load your university schedule. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not load your university schedule (${response.statusCode}).',
+        ),
+      );
+    }
+    try {
+      return StudentGroupScheduleReport.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
+    } on Exception {
+      throw const ApiException('The server returned invalid schedule data.');
+    }
+  }
+
   Future<SemesterPlan> getSemesterPlan(
     String studentId, {
     int maxCredits = 18,
@@ -562,6 +647,214 @@ class ApiService {
       DateTime.now().add(const Duration(minutes: 1)),
     );
     return _decodeNotifications(response);
+  }
+
+  Future<List<MessageContact>> getMessageContacts(String studentId) async {
+    final uri = Uri.parse('$baseUrl/messages/contacts').replace(
+      queryParameters: {'actor_type': 'student', 'actor_id': studentId.trim()},
+    );
+    late http.Response response;
+    try {
+      response = await _get(uri, cacheFor: const Duration(minutes: 5));
+    } on Exception {
+      throw const ApiException(
+        'Could not load your contacts. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not load your contacts (${response.statusCode}).',
+        ),
+      );
+    }
+    try {
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      final contacts = payload['contacts'] as List<dynamic>? ?? const [];
+      return contacts
+          .map(
+            (contact) =>
+                MessageContact.fromJson(contact as Map<String, dynamic>),
+          )
+          .where((contact) => contact.id.isNotEmpty)
+          .toList();
+    } on Exception {
+      throw const ApiException('The server returned invalid contact data.');
+    }
+  }
+
+  Future<List<PortalMessage>> getMessages(String studentId) async {
+    final uri = Uri.parse('$baseUrl/messages').replace(
+      queryParameters: {'actor_type': 'student', 'actor_id': studentId.trim()},
+    );
+    late http.Response response;
+    try {
+      response = await _get(
+        uri,
+        cacheFor: const Duration(seconds: 5),
+        forceRefresh: true,
+      );
+    } on Exception {
+      throw const ApiException(
+        'Could not load your messages. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not load your messages (${response.statusCode}).',
+        ),
+      );
+    }
+    try {
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      final messages = payload['messages'] as List<dynamic>? ?? const [];
+      return messages
+          .map(
+            (message) =>
+                PortalMessage.fromJson(message as Map<String, dynamic>),
+          )
+          .where((message) => message.messageId.isNotEmpty)
+          .toList();
+    } on Exception {
+      throw const ApiException('The server returned invalid message data.');
+    }
+  }
+
+  Future<PortalMessage> sendMessage({
+    required String studentId,
+    required MessageContact recipient,
+    required String body,
+  }) async {
+    final normalizedBody = body.trim();
+    if (normalizedBody.isEmpty) {
+      throw const ApiException('Write a message first.');
+    }
+    final uri = Uri.parse('$baseUrl/messages');
+    late http.Response response;
+    try {
+      response = await _client
+          .post(
+            uri,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'sender_type': 'student',
+              'sender_id': studentId.trim(),
+              'recipient_type': recipient.type,
+              'recipient_id': recipient.id,
+              'is_broadcast': false,
+              'body': normalizedBody,
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
+    } on Exception {
+      throw const ApiException(
+        'Could not send your message. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not send your message (${response.statusCode}).',
+        ),
+      );
+    }
+    _responseCache.remove(Uri.parse('$baseUrl/messages').toString());
+    try {
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      return PortalMessage.fromJson(payload['message'] as Map<String, dynamic>);
+    } on Exception {
+      throw const ApiException('The server returned invalid message data.');
+    }
+  }
+
+  Future<PortalMessage> sendMessageAttachment({
+    required String studentId,
+    required MessageContact recipient,
+    required String filename,
+    required Uint8List bytes,
+    String body = '',
+  }) async {
+    if (bytes.isEmpty) {
+      throw const ApiException('The selected document is empty.');
+    }
+    if (bytes.length > 10 * 1024 * 1024) {
+      throw const ApiException('Documents must be 10 MB or smaller.');
+    }
+    final uri = Uri.parse('$baseUrl/messages/attachments');
+    late http.Response response;
+    try {
+      final request = http.MultipartRequest('POST', uri)
+        ..fields.addAll({
+          'sender_type': 'student',
+          'sender_id': studentId.trim(),
+          'recipient_type': recipient.type,
+          'recipient_id': recipient.id,
+          'body': body.trim(),
+        })
+        ..files.add(
+          http.MultipartFile.fromBytes('file', bytes, filename: filename),
+        );
+      final streamed = await _client
+          .send(request)
+          .timeout(const Duration(seconds: 60));
+      response = await http.Response.fromStream(streamed);
+    } on Exception {
+      throw const ApiException(
+        'Could not send your document. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not send your document (${response.statusCode}).',
+        ),
+      );
+    }
+    try {
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      return PortalMessage.fromJson(payload['message'] as Map<String, dynamic>);
+    } on Exception {
+      throw const ApiException('The server returned invalid message data.');
+    }
+  }
+
+  Future<void> markMessagesRead({
+    required String studentId,
+    required List<String> messageIds,
+  }) async {
+    if (messageIds.isEmpty) return;
+    final uri = Uri.parse('$baseUrl/messages/read');
+    late http.Response response;
+    try {
+      response = await _client
+          .put(
+            uri,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'actor_type': 'student',
+              'actor_id': studentId.trim(),
+              'message_ids': messageIds,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+    } on Exception {
+      throw const ApiException(
+        'Could not update your messages. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not update your messages (${response.statusCode}).',
+        ),
+      );
+    }
   }
 
   Future<WeeklyPlan> getWeeklyPlan(
