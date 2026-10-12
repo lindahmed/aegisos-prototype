@@ -199,6 +199,79 @@ MESSAGE_DOCUMENT_MAX_BYTES = 10 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
 
+def _advisor_fallback(
+    message: str,
+    context: dict[str, object],
+    language: str,
+) -> dict[str, str]:
+    """Return a useful data-backed answer when the external AI is unavailable."""
+    courses = [
+        course
+        for course in context.get("courses", [])
+        if isinstance(course, dict)
+    ]
+    severity_order = {"high": 0, "medium": 1, "low": 2, None: 3, "": 3}
+    courses.sort(
+        key=lambda course: (
+            severity_order.get(course.get("risk_level"), 3),
+            float((course.get("metrics") or {}).get("course_health") or 100),
+        )
+    )
+    priority = courses[0] if courses else None
+    lowered = message.lower()
+    if any(word in lowered for word in ("semester", "course", "register", "prerequisite")):
+        intent = "semester_planning"
+    elif any(word in lowered for word in ("gpa", "grade", "what if", "what-if")):
+        intent = "what_if_simulation"
+    elif any(word in lowered for word in ("graduate", "credit", "audit")):
+        intent = "academic_audit"
+    elif any(word in lowered for word in ("lecture", "explain", "summar", "exam")):
+        intent = "course_material_help"
+    else:
+        intent = "general"
+
+    health = context.get("overall_academic_health")
+    week = context.get("current_week")
+    if language == "arabic":
+        if priority is None:
+            response = (
+                "أقدر أساعدك، لكن لا توجد بيانات تقدم أكاديمي كافية حاليًا. "
+                "جرّبي تحديث الصفحة ثم اسأليني عن مادة أو موعد محدد."
+            )
+        else:
+            risks = [risk for risk in priority.get("risks", []) if isinstance(risk, dict)]
+            risk_text = (
+                str(risks[0].get("message") or "تحتاج هذه المادة إلى متابعة.")
+                if risks
+                else "لا توجد مخاطر نشطة مسجلة لهذه المادة."
+            )
+            response = (
+                f"بناءً على بياناتك الحالية في الأسبوع {week}، صحتك الأكاديمية العامة "
+                f"هي {health}/100. الأولوية الآن هي {priority.get('course_name', 'المادة الأعلى أولوية')}. "
+                f"السبب: {risk_text} ابدئي بخطوة صغيرة اليوم: راجعي أضعف جزء لمدة 30 دقيقة، "
+                "ثم أضيفي جلسة متابعة من زر Add Study Session."
+            )
+    elif priority is None:
+        response = (
+            "I can help, but detailed academic progress data is not available right now. "
+            "Refresh your data, then ask me about a specific course or deadline."
+        )
+    else:
+        risks = [risk for risk in priority.get("risks", []) if isinstance(risk, dict)]
+        risk_text = (
+            str(risks[0].get("message") or "This course needs attention.")
+            if risks
+            else "No active risk is currently recorded for this course."
+        )
+        response = (
+            f"Based on your live week {week} data, your overall academic health is "
+            f"{health}/100. Your current priority is {priority.get('course_name', 'your highest-priority course')}. "
+            f"Why: {risk_text} Start with one focused 30-minute review today, then use "
+            "Add Study Session to reserve the follow-up."
+        )
+    return {"intent": intent, "response": response}
+
+
 def _weighted_total(record: dict[str, object]) -> float:
     fields = ("coursework_mark", "week7_exam_mark", "week12_exam_mark", "final_exam_mark")
     return round(sum(float(record.get(field, 0) or 0) for field in fields), 2)
@@ -705,6 +778,63 @@ def create_app(
     pdf_store = PortalPdfStore(repository)
     pdf_storage_root = material_storage_root / "portal-pdfs"
 
+    def authenticate_student(
+        student_id: str, password: str
+    ) -> Student | None:
+        """Authenticate through Supabase Auth when production is configured.
+
+        Calling PostgreSQL ``crypt`` directly against ``auth.users`` can be
+        extremely slow on a small database instance. Supabase Auth is the
+        owner of those hashes and is the correct service to verify them.
+        SQLite development keeps using its local credential store.
+        """
+        normalized_id = student_id.strip()
+        supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+        if not supabase_url or not anon_key or db_path is not None:
+            return repository.authenticate_student(normalized_id, password)
+
+        try:
+            response = httpx.post(
+                f"{supabase_url}/auth/v1/token?grant_type=password",
+                headers={"apikey": anon_key, "Content-Type": "application/json"},
+                json={
+                    "email": f"{normalized_id}@students.aegisos.local",
+                    "password": password,
+                },
+                timeout=10,
+            )
+        except httpx.RequestError as error:
+            raise HTTPException(
+                status_code=503,
+                detail="Authentication service is temporarily unavailable.",
+            ) from error
+
+        if response.status_code in {400, 401}:
+            return None
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=503,
+                detail="Authentication service is temporarily unavailable.",
+            )
+
+        payload = response.json()
+        user = payload.get("user") or {}
+        email = str(user.get("email") or "").lower()
+        user_id = str(user.get("id") or "")
+        metadata = user.get("app_metadata") or {}
+        expected_email = f"{normalized_id.lower()}@students.aegisos.local"
+        linked_by_metadata = (
+            metadata.get("portal_role") == "student"
+            and str(metadata.get("portal_id")) == normalized_id
+        )
+        linked_by_profile = bool(user_id) and pdf_store.is_registered_student_auth(
+            user_id, normalized_id
+        )
+        if email != expected_email or not (linked_by_metadata or linked_by_profile):
+            return None
+        return repository.get_student(normalized_id)
+
     def portal_actor(authorization: str | None = Header(default=None)) -> dict[str, str]:
         """Resolve a Supabase access token to a server-checked portal identity."""
         if not authorization or not authorization.startswith("Bearer "):
@@ -832,9 +962,7 @@ def create_app(
 
     @api.post("/student/login")
     def login_student(request: StudentLoginRequest, http: Request) -> dict[str, object]:
-        student = repository.authenticate_student(
-            request.student_id, request.password
-        )
+        student = authenticate_student(request.student_id, request.password)
         if student is None:
             raise HTTPException(
                 status_code=401, detail="Incorrect student ID or password."
@@ -1524,13 +1652,12 @@ def create_app(
                     "language": request.language,
                 }
             )
-        except AdvisorConfigurationError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
-        except Exception as error:
-            raise HTTPException(
-                status_code=502,
-                detail="Advisor AI could not complete the request.",
-            ) from error
+        except AdvisorConfigurationError:
+            logger.exception("Advisor AI is not configured; using academic fallback")
+            result = _advisor_fallback(request.message, context, request.language)
+        except Exception:
+            logger.exception("Advisor AI request failed; using academic fallback")
+            result = _advisor_fallback(request.message, context, request.language)
 
         _track(student.student_id, http, "advisor_question", None, str(result["intent"]))
         return AdvisorResponse(
@@ -1560,13 +1687,12 @@ def create_app(
                     "language": language,
                 }
             )
-        except AdvisorConfigurationError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
-        except Exception as error:
-            raise HTTPException(
-                status_code=502,
-                detail="Advisor AI could not complete the request.",
-            ) from error
+        except AdvisorConfigurationError:
+            logger.exception("Advisor voice AI is not configured; using academic fallback")
+            result = _advisor_fallback(transcript, context, language)
+        except Exception:
+            logger.exception("Advisor voice AI request failed; using academic fallback")
+            result = _advisor_fallback(transcript, context, language)
         return result
 
     @api.post("/advisor/voice", response_model=AdvisorVoiceResponse)
