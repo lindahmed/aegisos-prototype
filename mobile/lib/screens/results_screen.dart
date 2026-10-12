@@ -4,13 +4,14 @@ import '../models/grade_report.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ask_aegis_fab.dart';
 
 Color get _surface => appScreenSurface;
 Color get _summarySurface => appScreenSurfaceRaised;
 Color get _border => appScreenBorder;
 Color get _ink => appScreenInk;
 Color get _muted => appScreenMuted;
-const _teal = Color(0xFF0F7780);
+const _teal = uniTrackBlue;
 const _gradeInk = Color(0xFF16373A);
 
 class ResultsScreen extends StatefulWidget {
@@ -81,8 +82,8 @@ class _ResultsScreenState extends State<ResultsScreen> {
         elevation: 0,
         centerTitle: true,
         leading: const BackButton(color: Color(0xFF27BBD3)),
-        title: const Text(
-          'Results',
+        title: const AppText(
+          'Grades',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
@@ -92,10 +93,18 @@ class _ResultsScreenState extends State<ResultsScreen> {
             child: CircleAvatar(
               backgroundColor: _summarySurface,
               foregroundColor: _ink,
-              child: Text(_initials(widget.student.name)),
+              child: AppText(_initials(widget.student.name)),
             ),
           ),
         ],
+      ),
+      floatingActionButton: AskAegisFab(
+        onPressed: () => openAskAegis(
+          context,
+          student: widget.student,
+          apiService: _apiService,
+          prompt: 'I am viewing my Results. Explain my grades, strongest result, weakest result, and the best next action.',
+        ),
       ),
       body: _loading && _report == null
           ? const Center(child: CircularProgressIndicator(color: _teal))
@@ -149,7 +158,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              Text(
+              AppText(
                 'Semesters',
                 style: TextStyle(
                   color: _ink,
@@ -160,7 +169,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
               ),
               const SizedBox(height: 8),
               if (report.semesters.isEmpty)
-                Text(
+                AppText(
                   'No semesters are available yet.',
                   style: TextStyle(color: _muted),
                 )
@@ -175,7 +184,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                         child: ChoiceChip(
                           selected: selected,
                           showCheckmark: false,
-                          label: Text(summary.semester),
+                          label: AppText(summary.semester),
                           onSelected: (_) => setState(
                             () => _selectedSemester = summary.semester,
                           ),
@@ -197,7 +206,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
         if (_error != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
-            child: Text(
+            child: AppText(
               _error!,
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
@@ -283,7 +292,7 @@ class _SummaryMetric extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
+          AppText(
             value,
             style: TextStyle(
               color: _ink,
@@ -292,7 +301,7 @@ class _SummaryMetric extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Text(
+          AppText(
             label,
             textAlign: TextAlign.center,
             style: TextStyle(
@@ -334,7 +343,7 @@ class _GradeCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(14, 11, 14, 9),
             child: Column(
               children: [
-                Text(
+                AppText(
                   record.courseCode.toUpperCase(),
                   style: TextStyle(
                     color: _teal,
@@ -344,7 +353,7 @@ class _GradeCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
+                AppText(
                   record.courseName,
                   textAlign: TextAlign.center,
                   style: TextStyle(
@@ -403,7 +412,7 @@ class _MarkMetric extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
+          AppText(
             value?.toStringAsFixed(2) ?? '—',
             style: TextStyle(
               color: _ink,
@@ -412,7 +421,7 @@ class _MarkMetric extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
+          AppText(
             label,
             textAlign: TextAlign.center,
             maxLines: 1,
@@ -439,7 +448,7 @@ class _GradeTile extends StatelessWidget {
       width: 82,
       alignment: Alignment.center,
       color: _gradeColor(grade),
-      child: Text(
+      child: AppText(
         grade ?? '—',
         style: const TextStyle(
           color: _gradeInk,
@@ -471,7 +480,7 @@ class _EmptyResults extends StatelessWidget {
         children: [
           Icon(Icons.school_outlined, color: _muted, size: 46),
           const SizedBox(height: 12),
-          Text(
+          AppText(
             'No course results are available for this semester.',
             textAlign: TextAlign.center,
             style: TextStyle(color: _muted),
@@ -498,13 +507,13 @@ class _ErrorState extends StatelessWidget {
           children: [
             Icon(Icons.cloud_off_outlined, color: _muted, size: 44),
             const SizedBox(height: 14),
-            Text(
+            AppText(
               message,
               textAlign: TextAlign.center,
               style: TextStyle(color: _ink),
             ),
             const SizedBox(height: 16),
-            FilledButton(onPressed: onRetry, child: const Text('Try again')),
+            FilledButton(onPressed: onRetry, child: const AppText('Try again')),
           ],
         ),
       ),

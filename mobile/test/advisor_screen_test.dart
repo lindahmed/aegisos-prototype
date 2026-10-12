@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:uni_track_mobile/models/student.dart';
+import 'package:uni_track_mobile/localization/app_language.dart';
 import 'package:uni_track_mobile/screens/advisor_screen.dart';
 import 'package:uni_track_mobile/services/api_service.dart';
 import 'package:uni_track_mobile/services/advisor_voice_service.dart';
@@ -66,14 +67,40 @@ void main() {
     courses: ['Artificial Intelligence'],
   );
 
+  setUp(() => appLanguageController.value = const Locale('en'));
+
   testWidgets('asks Advisor AI and displays its response', (tester) async {
     final voiceService = FakeAdvisorVoiceService();
+    String? lastLanguage;
     final service = ApiService(
       baseUrl: 'https://api.example.test',
       client: MockClient((request) async {
+        if (request.url.path.endsWith('/weekly-plan')) {
+          return http.Response(
+            jsonEncode({
+              'student_id': student.studentId,
+              'semester': 'Fall 2026',
+              'current_week': 5,
+              'items': <dynamic>[],
+            }),
+            200,
+          );
+        }
         final body = jsonDecode(request.body) as Map<String, dynamic>;
+        lastLanguage = body['language'] as String?;
         expect(body['student_id'], student.studentId);
+        if (body['message'] == 'مرحبا') {
+          return http.Response(
+            jsonEncode({
+              'intent': 'general',
+              'response': 'مرحبًا، كيف أساعدك؟',
+              'language': 'arabic',
+            }),
+            200,
+          );
+        }
         expect(body['message'], 'What careers fit me?');
+        expect(body['language'], 'english');
         return http.Response(
           jsonEncode({
             'intent': 'career_guidance',
@@ -106,6 +133,78 @@ void main() {
       find.text('Explore software engineering and AI roles.'),
       findsOneWidget,
     );
+    expect(find.byKey(const Key('advisor-language-english')), findsNothing);
+    expect(find.byKey(const Key('advisor-language-arabic')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('advisor-action-addStudySession')));
+    await tester.pumpAndSettle();
+    expect(find.text('Add study session'), findsOneWidget);
+    expect(find.text('Date'), findsOneWidget);
+    expect(find.text('Start time'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('advisor-input')), 'مرحبا');
+    await tester.tap(find.byKey(const Key('advisor-send')));
+    await tester.pumpAndSettle();
+    expect(lastLanguage, 'arabic');
+    service.close();
+  });
+
+  testWidgets('uses live progress when the remote Advisor is unavailable', (
+    tester,
+  ) async {
+    final voiceService = FakeAdvisorVoiceService();
+    final service = ApiService(
+      baseUrl: 'https://api.example.test',
+      client: MockClient((request) async {
+        if (request.url.path == '/advisor') {
+          return http.Response(
+            jsonEncode({
+              'detail': 'Advisor AI could not complete the request.',
+            }),
+            502,
+          );
+        }
+        expect(request.url.path, '/progress/${student.studentId}');
+        return http.Response(
+          jsonEncode({
+            'current_week': 6,
+            'overall_academic_health': 72,
+            'courses': [
+              {
+                'course_name': 'Artificial Intelligence',
+                'risk_level': 'medium',
+                'risks': [
+                  {'message': 'Lecture completion needs attention.'},
+                ],
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AdvisorScreen(
+          student: student,
+          apiService: service,
+          voiceService: voiceService,
+        ),
+      ),
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('advisor-input')),
+      'What should I study?',
+    );
+    await tester.tap(find.byKey(const Key('advisor-send')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('advisor-error')), findsNothing);
+    expect(find.textContaining('Artificial Intelligence'), findsOneWidget);
+    expect(find.textContaining('Lecture completion'), findsOneWidget);
     service.close();
   });
 

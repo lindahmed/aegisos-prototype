@@ -3,29 +3,39 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/student.dart';
+import '../models/calendar_event.dart';
 import '../models/student_notification.dart';
+import '../models/weekly_plan.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ask_aegis_fab.dart';
+import '../widgets/risk_details_sheet.dart';
+import '../widgets/study_session_dialog.dart';
+import '../widgets/today_dashboard_card.dart';
 import 'advisor_screen.dart';
 import 'calendar_screen.dart';
 import 'courses_schedule_screen.dart';
+import 'enrolled_courses_screen.dart';
 import 'login_screen.dart';
+import 'messages_screen.dart';
+import 'meetings_screen.dart';
 import 'results_screen.dart';
 import 'semester_planner_screen.dart';
 import 'weekly_plan_screen.dart';
+import 'what_if_simulator_screen.dart';
 
 Color get _dashboardInk => appScreenInk;
 Color get _dashboardMuted => appScreenMuted;
 Color get _dashboardBorder => appScreenBorder;
 Color get _dashboardSurface => appScreenSurface;
 Color get _dashboardHeroStart =>
-    isDarkModeEnabled ? const Color(0xFF16243E) : const Color(0xFFEDF0FF);
+    isDarkModeEnabled ? const Color(0xFF16243E) : const Color(0xFFEAF2FF);
 Color get _dashboardHeroEnd =>
-    isDarkModeEnabled ? const Color(0xFF12313D) : const Color(0xFFE7F7FA);
+    isDarkModeEnabled ? const Color(0xFF12344B) : const Color(0xFFE8F8FF);
 Color get _dashboardTrack =>
     isDarkModeEnabled ? const Color(0xFF2A3952) : const Color(0xFFE4EDF3);
 const _dashboardIndigo = uniTrackNavy;
-const _dashboardCyan = uniTrackBlue;
+const _dashboardCyan = uniTrackBlueMid;
 const _dashboardCoral = Color(0xFFFF647C);
 
 class StudentHomeScreen extends StatefulWidget {
@@ -42,27 +52,30 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   late final ApiService _apiService;
   late final bool _ownsApiService;
   Map<String, dynamic>? _progress;
+  WeeklyPlan? _weeklyPlan;
+  List<StudentCalendarEvent> _localEvents = const [];
   String? _error;
   bool _loading = true;
   int _selectedIndex = 0;
 
   Student get student => widget.student;
 
-  List<Map<String, dynamic>> get _courses =>
-      ((_progress?['courses'] as List<dynamic>?) ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .toList();
-
   @override
   void initState() {
     super.initState();
     _ownsApiService = widget.apiService == null;
     _apiService = widget.apiService ?? ApiService();
+    appLanguageController.addListener(_refreshLanguage);
     unawaited(_loadProgress());
+  }
+
+  void _refreshLanguage() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    appLanguageController.removeListener(_refreshLanguage);
     if (_ownsApiService) _apiService.close();
     super.dispose();
   }
@@ -79,6 +92,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         _progress = progress;
         _error = null;
       });
+      await _loadHomeExtras(forceRefresh: forceRefresh);
     } on ApiException catch (error) {
       if (mounted) setState(() => _error = error.message);
     } finally {
@@ -86,13 +100,36 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     }
   }
 
-  void _openAdvisor() {
-    Navigator.of(context).push(
+  Future<void> _loadHomeExtras({bool forceRefresh = false}) async {
+    try {
+      final events = await StudentCalendarStore.load(student.studentId);
+      if (mounted) setState(() => _localEvents = events);
+    } catch (_) {
+      // Local calendar data should never block the Today dashboard.
+    }
+    try {
+      final plan = await _apiService.getWeeklyPlan(
+        student.studentId,
+        forceRefresh: forceRefresh,
+      );
+      if (mounted) setState(() => _weeklyPlan = plan);
+    } catch (_) {
+      // Progress remains usable if the weekly-plan endpoint is unavailable.
+    }
+  }
+
+  Future<void> _openAdvisor([String? initialMessage]) async {
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            AdvisorScreen(student: student, apiService: _apiService),
+        builder: (_) => AdvisorScreen(
+          student: student,
+          apiService: _apiService,
+          initialMessage: initialMessage,
+        ),
       ),
     );
+    final localEvents = await StudentCalendarStore.load(student.studentId);
+    if (mounted) setState(() => _localEvents = localEvents);
   }
 
   void _openResults() {
@@ -113,13 +150,29 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  void _openWeeklyPlan() {
+  void _openEnrolledCourses() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) =>
-            WeeklyPlanScreen(student: student, apiService: _apiService),
+            EnrolledCoursesScreen(student: student, apiService: _apiService),
       ),
     );
+  }
+
+  void _openWeeklyPlan() {
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => WeeklyPlanScreen(
+              student: student,
+              apiService: _apiService,
+              onPlanChanged: (plan) {
+                if (mounted) setState(() => _weeklyPlan = plan);
+              },
+            ),
+          ),
+        )
+        .then((_) => _loadHomeExtras(forceRefresh: true));
   }
 
   void _openSemesterPlanner() {
@@ -132,13 +185,122 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   void _openCalendar() {
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                CalendarScreen(student: student, apiService: _apiService),
+          ),
+        )
+        .then((_) async {
+          final localEvents = await StudentCalendarStore.load(
+            student.studentId,
+          );
+          if (mounted) setState(() => _localEvents = localEvents);
+        });
+  }
+
+  void _openWhatIf() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) =>
-            CalendarScreen(student: student, apiService: _apiService),
+            WhatIfSimulatorScreen(student: student, apiService: _apiService),
       ),
     );
   }
+
+  void _openMessages() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            MessagesScreen(student: student, apiService: _apiService),
+      ),
+    );
+  }
+
+  void _openMeetings() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => MeetingsScreen(student: student)),
+    );
+  }
+
+  Future<void> _addRiskSession(
+    Map<String, dynamic> course,
+    Map<String, dynamic> risk,
+  ) async {
+    final courseId = course['course_id']?.toString();
+    final courseName = course['course_name']?.toString() ?? 'Focused Study';
+    final event = await showStudySessionDialog(
+      context,
+      courseId: courseId,
+      courseName: courseName,
+      reason: risk['message']?.toString() ?? 'Added from academic risk.',
+      alreadyInWeekPlanner: _courseIsInWeekPlanner(courseId, courseName),
+    );
+    if (event == null) return;
+    try {
+      final localEvents = await StudentCalendarStore.load(student.studentId);
+      final updated = [...localEvents, event];
+      await StudentCalendarStore.save(student.studentId, updated);
+      if (!mounted) return;
+      setState(() => _localEvents = updated);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: AppText(
+            'Study session added to Calendar on ${event.startAt.day}/${event.startAt.month}.',
+          ),
+        ),
+      );
+    } on Exception {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: AppText('Could not save the study session.')),
+      );
+    }
+  }
+
+  bool _courseIsInWeekPlanner(String? courseId, String courseName) {
+    final normalizedName = courseName.trim().toLowerCase();
+    return _weeklyPlan?.items.any(
+          (item) =>
+              item.courseId == courseId ||
+              item.courseName.trim().toLowerCase() == normalizedName,
+        ) ??
+        false;
+  }
+
+  Future<void> _showCourseRisks(Map<String, dynamic> course) async {
+    if (_weeklyPlan == null) {
+      try {
+        final plan = await _apiService.getWeeklyPlan(student.studentId);
+        if (mounted) setState(() => _weeklyPlan = plan);
+      } catch (_) {
+        // Risk details still open if Week Planner cannot be refreshed.
+      }
+    }
+    if (!mounted) return;
+    final courseId = course['course_id']?.toString();
+    final courseName = course['course_name']?.toString() ?? 'Course';
+    await showCourseRisksSheet(
+      context,
+      course: course,
+      alreadyInWeekPlanner: _courseIsInWeekPlanner(courseId, courseName),
+      onFix: _openWeeklyPlan,
+      onAddSession: (risk) => _addRiskSession(course, risk),
+      onAskAegis: (risk) => _openAdvisor(
+        'Explain this $courseName risk and give me a practical recovery plan: ${risk['message']}',
+      ),
+    );
+  }
+
+  String _contextPrompt() => switch (_selectedIndex) {
+    0 => 'I am on my Home dashboard. Explain my day and tell me the most important next action.',
+    1 => 'I am viewing Academic Progress. Explain my progress and the main risk I should fix.',
+    2 => 'Analyze my progress and tell me what I should study today.',
+    3 =>
+      'I am viewing Academics. Which assessment or course should I prioritize?',
+    _ => 'Give me a concise academic status update and my best next action.',
+  };
 
   void _signOut() {
     Navigator.of(context).pushReplacement(
@@ -151,10 +313,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     final colors = Theme.of(context).colorScheme;
     final titles = [
       'Home',
-      'Academic Progress',
-      'Aegis Advisor',
+      'Progress & Risks',
+      'AI Advisor',
       'Academics',
-      'Profile',
+      'Student Profile',
     ];
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -168,7 +330,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  AppText(
                     _greeting(),
                     style: TextStyle(
                       color: _dashboardMuted,
@@ -176,17 +338,18 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  Text(
+                  AppText(
                     student.name.split(RegExp(r'\s+')).first,
                     style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
                   ),
                 ],
               )
-            : Text(
+            : AppText(
                 titles[_selectedIndex],
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
         actions: [
+          if (_selectedIndex == 0) const AppLanguageToggleButton(),
           const ThemeModeToggleButton(),
           _NotificationButton(
             studentId: student.studentId,
@@ -195,9 +358,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 14),
             child: CircleAvatar(
-              backgroundColor: const Color(0xFFE6E9FF),
+              backgroundColor: uniTrackBlueSoft,
               foregroundColor: _dashboardIndigo,
-              child: Text(
+              child: AppText(
                 _initials(student.name),
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
@@ -215,57 +378,72 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   _HomeDashboard(
                     student: student,
                     progress: _progress,
+                    weeklyPlan: _weeklyPlan,
+                    localEvents: _localEvents,
                     error: _error,
                     onFixWeek: _openWeeklyPlan,
-                    onResults: _openResults,
-                    onCourses: _openCourses,
+                    onCourses: _openEnrolledCourses,
+                    onMessages: _openMessages,
+                    onMeetings: _openMeetings,
+                    onAskDay: () => _openAdvisor(
+                      'I am on my Home dashboard. Plan my day using my real courses, risks, and deadlines.',
+                    ),
                   ),
-                  _ProgressDashboard(progress: _progress, error: _error),
+                  _ProgressDashboard(
+                    progress: _progress,
+                    error: _error,
+                    onCourseTap: _showCourseRisks,
+                  ),
                   _AdvisorLanding(
                     student: student,
-                    onOpenAdvisor: _openAdvisor,
+                    onStartConversation: () => _openAdvisor(),
+                    onSuggestionSelected: (prompt) => _openAdvisor(prompt),
                   ),
                   _AcademicsDashboard(
-                    courses: _courses,
+                    onCourses: _openCourses,
                     onResults: _openResults,
                     onPlanner: _openSemesterPlanner,
                     onCalendar: _openCalendar,
+                    onWhatIf: _openWhatIf,
                   ),
                   _ProfileDashboard(student: student, onSignOut: _signOut),
                 ],
               ),
             ),
+      floatingActionButton: _selectedIndex == 2
+          ? null
+          : AskAegisFab(onPressed: () => _openAdvisor(_contextPrompt())),
       bottomNavigationBar: NavigationBar(
         backgroundColor: colors.surface,
         indicatorColor: colors.primaryContainer,
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) =>
             setState(() => _selectedIndex = index),
-        destinations: const [
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded),
-            label: 'Home',
+            icon: const Icon(Icons.home_outlined),
+            selectedIcon: const Icon(Icons.home_rounded),
+            label: tr('Home'),
           ),
           NavigationDestination(
-            icon: Icon(Icons.insights_outlined),
-            selectedIcon: Icon(Icons.insights_rounded),
-            label: 'Progress',
+            icon: const Icon(Icons.insights_outlined),
+            selectedIcon: const Icon(Icons.insights_rounded),
+            label: tr('Progress'),
           ),
           NavigationDestination(
-            icon: Icon(Icons.auto_awesome_outlined),
-            selectedIcon: Icon(Icons.auto_awesome_rounded),
-            label: 'Advisor',
+            icon: const Icon(Icons.auto_awesome_outlined),
+            selectedIcon: const Icon(Icons.auto_awesome_rounded),
+            label: tr('AI Advisor'),
           ),
           NavigationDestination(
-            icon: Icon(Icons.check_circle_outline_rounded),
-            selectedIcon: Icon(Icons.check_circle_rounded),
-            label: 'Academics',
+            icon: const Icon(Icons.school_outlined),
+            selectedIcon: const Icon(Icons.school_rounded),
+            label: tr('Academics'),
           ),
           NavigationDestination(
-            icon: Icon(Icons.account_circle_outlined),
-            selectedIcon: Icon(Icons.account_circle_rounded),
-            label: 'Profile',
+            icon: const Icon(Icons.account_circle_outlined),
+            selectedIcon: const Icon(Icons.account_circle_rounded),
+            label: tr('Profile'),
           ),
         ],
       ),
@@ -296,331 +474,223 @@ List<Map<String, dynamic>> _progressCourses(Map<String, dynamic>? progress) =>
         .whereType<Map<String, dynamic>>()
         .toList();
 
+String _currentSemesterNumber(Student student, Map<String, dynamic>? progress) {
+  final academicYear = student.year.clamp(1, 4);
+  final term = progress?['semester']?.toString().toLowerCase() ?? '';
+  final isSecondTerm = term.contains('spring') || term.contains('summer');
+  return '${((academicYear - 1) * 2) + (isSecondTerm ? 2 : 1)}';
+}
+
 class _HomeDashboard extends StatelessWidget {
   const _HomeDashboard({
     required this.student,
     required this.progress,
+    required this.weeklyPlan,
+    required this.localEvents,
     required this.error,
     required this.onFixWeek,
-    required this.onResults,
     required this.onCourses,
+    required this.onMessages,
+    required this.onMeetings,
+    required this.onAskDay,
   });
 
   final Student student;
   final Map<String, dynamic>? progress;
+  final WeeklyPlan? weeklyPlan;
+  final List<StudentCalendarEvent> localEvents;
   final String? error;
   final VoidCallback onFixWeek;
-  final VoidCallback onResults;
   final VoidCallback onCourses;
+  final VoidCallback onMessages;
+  final VoidCallback onMeetings;
+  final VoidCallback onAskDay;
 
   @override
   Widget build(BuildContext context) {
     final courses = _progressCourses(progress);
-    final health = _asDouble(progress?['overall_academic_health']);
-    final assessments = courses
-        .expand(
-          (course) => (course['assessments'] as List<dynamic>?) ?? const [],
-        )
-        .whereType<Map<String, dynamic>>()
-        .toList();
-    final completedWork = assessments
-        .where((item) => item['mark'] != null)
-        .length;
-    final needsAttention = courses
-        .where((course) => course['risk_level'] != null)
-        .length;
+    final semesterNumber = _currentSemesterNumber(student, progress);
     return ListView(
       key: const PageStorageKey('home-dashboard'),
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
       children: [
         if (error != null) _InlineError(message: error!),
-        _HealthCard(
-          health: health,
-          semester: (progress?['semester'] as String?) ?? 'Current semester',
-          studentId: student.studentId,
+        TodayDashboardCard(
+          progress: progress,
+          weeklyPlan: weeklyPlan,
+          localEvents: localEvents,
+          onAskAegis: onAskDay,
         ),
         const SizedBox(height: 18),
-        GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: 2,
-          childAspectRatio: 1.12,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          children: [
-            _MetricCard(
-              icon: Icons.school_outlined,
-              color: _dashboardCyan,
-              value: student.gpa?.toStringAsFixed(2) ?? '—',
-              title: 'Current GPA',
-              subtitle: 'Official student record',
-            ),
-            _MetricCard(
-              icon: Icons.task_alt,
-              color: const Color(0xFF22B98B),
-              value: '$completedWork',
-              title: 'Completed work',
-              subtitle: 'Recorded assessments',
-            ),
-            _MetricCard(
-              key: const Key('open-courses'),
-              icon: Icons.menu_book_outlined,
-              color: _dashboardIndigo,
-              value:
-                  '${courses.isEmpty ? student.courses.length : courses.length}',
-              title: 'Courses',
-              subtitle: 'Tap for courses & schedule',
-              onTap: onCourses,
-            ),
-            _MetricCard(
-              icon: Icons.bolt,
-              color: _dashboardCoral,
-              value: '$needsAttention',
-              title: 'Need attention',
-              subtitle: 'Review recommended',
-            ),
-          ],
+        _SnapshotStrip(
+          gpa: student.gpa,
+          semesterNumber: semesterNumber,
+          courseCount: courses.isEmpty
+              ? student.courses.length
+              : courses.length,
+          onCourses: onCourses,
         ),
         const SizedBox(height: 18),
         _GradientAction(
           key: const Key('fix-my-week'),
           icon: Icons.auto_awesome,
-          title: 'FIX MY WEEK',
-          subtitle: 'Turn your priorities into a focused plan',
+          title: 'WEEK PLANNER',
+          subtitle: 'Review priorities and complete this week\'s study tasks',
           onTap: onFixWeek,
         ),
-        const SizedBox(height: 12),
-        _SurfaceAction(
-          key: const Key('open-results'),
-          icon: Icons.assessment_outlined,
-          title: 'Results',
-          subtitle: 'View marks from the shared AAST database',
-          onTap: onResults,
+        const SizedBox(height: 18),
+        _CampusCommunicationCard(
+          onMessages: onMessages,
+          onMeetings: onMeetings,
         ),
-        const SizedBox(height: 24),
-        Text(
-          'Academic insights',
-          style: TextStyle(
-            fontSize: 25,
-            fontWeight: FontWeight.w900,
-            color: _dashboardInk,
-          ),
-        ),
-        const SizedBox(height: 5),
-        Text(
-          'Generated from your live progress data',
-          style: TextStyle(color: _dashboardMuted),
-        ),
-        const SizedBox(height: 12),
-        ...courses.expand((course) {
-          final risks = ((course['risks'] as List<dynamic>?) ?? const [])
-              .whereType<Map<String, dynamic>>()
-              .take(2);
-          return risks.map(
-            (risk) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _RiskCard(course: course, risk: risk),
-            ),
-          );
-        }),
       ],
     );
   }
 }
 
-class _HealthCard extends StatelessWidget {
-  const _HealthCard({
-    required this.health,
-    required this.semester,
-    required this.studentId,
+class _SnapshotStrip extends StatelessWidget {
+  const _SnapshotStrip({
+    required this.gpa,
+    required this.semesterNumber,
+    required this.courseCount,
+    required this.onCourses,
   });
-  final double? health;
-  final String semester;
-  final String studentId;
+
+  final double? gpa;
+  final String semesterNumber;
+  final int courseCount;
+  final VoidCallback onCourses;
 
   @override
-  Widget build(BuildContext context) {
-    final score = health?.round();
-    final attention = score != null && score < 60;
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_dashboardHeroStart, _dashboardHeroEnd],
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 18),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        colors: [_dashboardHeroStart, _dashboardHeroEnd],
+      ),
+      borderRadius: BorderRadius.circular(24),
+      border: Border.all(color: _dashboardBorder),
+    ),
+    child: Row(
+      children: [
+        _SnapshotValue(label: 'GPA', value: gpa?.toStringAsFixed(2) ?? '—'),
+        const _SnapshotDivider(),
+        _SnapshotValue(label: 'Current semester', value: semesterNumber),
+        const _SnapshotDivider(),
+        _SnapshotValue(
+          key: const Key('home-enrolled-courses'),
+          label: 'Courses',
+          value: '$courseCount',
+          onTap: onCourses,
+          showArrow: true,
         ),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: _dashboardBorder),
-      ),
-      child: Row(
-        children: [
-          SizedBox.square(
-            dimension: 112,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                CircularProgressIndicator(
-                  value: health == null ? 0 : (health! / 100).clamp(0, 1),
-                  strokeWidth: 11,
-                  backgroundColor: _dashboardTrack,
-                  color: attention ? _dashboardCoral : _dashboardCyan,
-                ),
-                Center(
-                  child: Text(
-                    score == null ? '—' : '$score%',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
-                      color: _dashboardInk,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 20),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'ACADEMIC HEALTH',
-                  style: TextStyle(
-                    color: _dashboardMuted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: attention
-                        ? const Color(0xFFFFE4E9)
-                        : const Color(0xFFDDF7F1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    attention ? 'NEEDS ATTENTION' : 'ON TRACK',
-                    style: TextStyle(
-                      color: attention
-                          ? const Color(0xFFD84460)
-                          : const Color(0xFF148267),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  semester,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: _dashboardInk,
-                  ),
-                ),
-                Text(studentId, style: TextStyle(color: _dashboardMuted)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+      ],
+    ),
+  );
 }
 
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({
-    super.key,
-    required this.icon,
-    required this.color,
+class _SnapshotValue extends StatelessWidget {
+  const _SnapshotValue({
+    required this.label,
     required this.value,
-    required this.title,
-    required this.subtitle,
     this.onTap,
+    this.showArrow = false,
+    super.key,
   });
-  final IconData icon;
-  final Color color;
+
+  final String label;
   final String value;
-  final String title;
-  final String subtitle;
   final VoidCallback? onTap;
+  final bool showArrow;
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: _dashboardSurface,
-    borderRadius: BorderRadius.circular(22),
-    child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(22),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: _dashboardBorder),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+  Widget build(BuildContext context) => Expanded(
+    child: Semantics(
+      button: onTap != null,
+      label: onTap == null ? null : '$label, $value. Open enrolled courses',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: Column(
               children: [
-                Container(
-                  padding: const EdgeInsets.all(9),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(13),
+                AppText(
+                  value,
+                  style: TextStyle(
+                    color: _dashboardInk,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
                   ),
-                  child: Icon(icon, color: color),
                 ),
-                if (onTap != null) ...[
-                  const Spacer(),
-                  Icon(Icons.arrow_forward_rounded, size: 18, color: color),
-                ],
+                const SizedBox(height: 3),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Flexible(
+                      child: AppText(
+                        label,
+                        style: TextStyle(color: _dashboardMuted, fontSize: 12),
+                      ),
+                    ),
+                    if (showArrow) ...[
+                      const SizedBox(width: 2),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 15,
+                        color: _dashboardCyan,
+                      ),
+                    ],
+                  ],
+                ),
               ],
             ),
-            const Spacer(),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 25,
-                fontWeight: FontWeight.w900,
-                color: _dashboardInk,
-              ),
-            ),
-            Text(
-              title,
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                color: _dashboardInk,
-              ),
-            ),
-            Text(
-              subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: _dashboardMuted),
-            ),
-          ],
+          ),
         ),
       ),
     ),
   );
 }
 
+class _SnapshotDivider extends StatelessWidget {
+  const _SnapshotDivider();
+
+  @override
+  Widget build(BuildContext context) =>
+      Container(width: 1, height: 38, color: _dashboardBorder);
+}
+
 class _ProgressDashboard extends StatelessWidget {
-  const _ProgressDashboard({required this.progress, required this.error});
+  const _ProgressDashboard({
+    required this.progress,
+    required this.error,
+    required this.onCourseTap,
+  });
   final Map<String, dynamic>? progress;
   final String? error;
+  final Future<void> Function(Map<String, dynamic>) onCourseTap;
 
   @override
   Widget build(BuildContext context) {
     final courses = _progressCourses(progress);
     final week = (progress?['current_week'] as num?)?.toInt() ?? 1;
     final semester = progress?['semester'] as String? ?? 'Current semester';
+    final academicHealth = _asDouble(progress?['overall_academic_health']);
+    final activeRisks =
+        ((progress?['active_risks'] as List<dynamic>?) ?? const []).length;
+    final recommendation =
+        progress?['current_recommendation']?.toString().trim() ?? '';
+    final weeklyHistory =
+        ((progress?['weekly_history'] as List<dynamic>?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .toList();
+    final interventions =
+        ((progress?['recent_interventions'] as List<dynamic>?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .toList();
     return ListView(
       key: const PageStorageKey('progress-dashboard'),
       physics: const AlwaysScrollableScrollPhysics(),
@@ -640,7 +710,7 @@ class _ProgressDashboard extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: Text(
+                    child: AppText(
                       semester,
                       style: const TextStyle(
                         fontSize: 22,
@@ -652,7 +722,7 @@ class _ProgressDashboard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 6),
-              Text(
+              AppText(
                 'Week $week of 14',
                 style: TextStyle(color: _dashboardMuted),
               ),
@@ -665,15 +735,26 @@ class _ProgressDashboard extends StatelessWidget {
                 backgroundColor: _dashboardTrack,
               ),
               const SizedBox(height: 8),
-              Text(
+              AppText(
                 '${((week / 14) * 100).round()}% of the semester timeline',
                 style: TextStyle(color: _dashboardMuted),
               ),
             ],
           ),
         ),
+        if (progress != null) ...[
+          const SizedBox(height: 14),
+          _LiveAcademicUpdateCard(
+            academicHealth: academicHealth,
+            activeRisks: activeRisks,
+            recommendation: recommendation,
+            courses: courses,
+            weeklyHistory: weeklyHistory,
+            interventions: interventions,
+          ),
+        ],
         const SizedBox(height: 24),
-        Text(
+        AppText(
           'Course performance',
           style: TextStyle(
             fontSize: 25,
@@ -682,8 +763,8 @@ class _ProgressDashboard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          'Health, completion, and current trend',
+        AppText(
+          'Health, completion, and explained academic risks',
           style: TextStyle(color: _dashboardMuted),
         ),
         const SizedBox(height: 14),
@@ -694,7 +775,10 @@ class _ProgressDashboard extends StatelessWidget {
         ...courses.map(
           (course) => Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: _CourseProgressCard(course: course),
+            child: _CourseProgressCard(
+              course: course,
+              onTap: () => onCourseTap(course),
+            ),
           ),
         ),
       ],
@@ -702,9 +786,292 @@ class _ProgressDashboard extends StatelessWidget {
   }
 }
 
+class _LiveAcademicUpdateCard extends StatelessWidget {
+  const _LiveAcademicUpdateCard({
+    required this.academicHealth,
+    required this.activeRisks,
+    required this.recommendation,
+    required this.courses,
+    required this.weeklyHistory,
+    required this.interventions,
+  });
+
+  final double? academicHealth;
+  final int activeRisks;
+  final String recommendation;
+  final List<Map<String, dynamic>> courses;
+  final List<Map<String, dynamic>> weeklyHistory;
+  final List<Map<String, dynamic>> interventions;
+
+  @override
+  Widget build(BuildContext context) {
+    final latestSnapshot = weeklyHistory.isEmpty ? null : weeklyHistory.last;
+    final latestIntervention = interventions.isEmpty
+        ? null
+        : interventions.first;
+    return Container(
+      key: const Key('database-academic-update'),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isDarkModeEnabled
+              ? const [Color(0xFF122844), Color(0xFF123943)]
+              : const [Color(0xFFEAF2FF), Color(0xFFE9FAF7)],
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: _dashboardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: _dashboardCyan.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.sync_rounded, color: _dashboardCyan),
+              ),
+              const SizedBox(width: 11),
+              const Expanded(
+                child: AppText(
+                  'Live academic update',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF20B486).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const AppText(
+                  'DATABASE',
+                  style: TextStyle(
+                    color: Color(0xFF168668),
+                    fontSize: 9,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: .8,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _AcademicUpdateMetric(
+                  label: 'Academic health',
+                  value: academicHealth == null
+                      ? '—'
+                      : '${academicHealth!.round()}%',
+                  icon: Icons.monitor_heart_outlined,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _AcademicUpdateMetric(
+                  label: 'Active risks',
+                  value: '$activeRisks',
+                  icon: Icons.warning_amber_rounded,
+                  accent: activeRisks > 0 ? _dashboardCoral : _dashboardCyan,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 15),
+          const AppText(
+            'CURRENT RECOMMENDATION',
+            style: TextStyle(
+              color: _dashboardIndigo,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 6),
+          AppText(
+            _recommendationText(),
+            style: TextStyle(color: _dashboardInk, height: 1.45),
+          ),
+          if (latestSnapshot != null) ...[
+            const SizedBox(height: 14),
+            _AcademicDatabaseRow(
+              icon: Icons.show_chart_rounded,
+              label: 'Latest recorded trend',
+              title:
+                  latestSnapshot['course_name']?.toString() ??
+                  latestSnapshot['course_id']?.toString() ??
+                  'Course',
+              detail: _snapshotDetail(latestSnapshot),
+            ),
+          ],
+          if (latestIntervention != null) ...[
+            const SizedBox(height: 10),
+            _AcademicDatabaseRow(
+              icon: Icons.task_alt_rounded,
+              label: 'Latest advisor follow-up',
+              title:
+                  latestIntervention['course_name']?.toString() ??
+                  latestIntervention['course_id']?.toString() ??
+                  'Course',
+              detail: _interventionDetail(latestIntervention),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _recommendationText() {
+    if (recommendation.isEmpty) return 'No recommendation is available yet.';
+    if (!isArabicApp) return recommendation;
+    final priorityCourses = courses
+        .where(
+          (course) =>
+              ((course['risks'] as List<dynamic>?) ?? const []).isNotEmpty,
+        )
+        .toList();
+    if (priorityCourses.isEmpty) {
+      return 'بياناتك الأكاديمية محدثة ولا توجد توصية عاجلة حاليًا.';
+    }
+    final course = priorityCourses.first;
+    final name = course['course_name']?.toString() ?? 'المقرر';
+    final risks = ((course['risks'] as List<dynamic>?) ?? const []).length;
+    return 'ركّزي هذا الأسبوع على $name لأنه يحتوي على $risks من إشارات الخطر النشطة. افتحي تفاصيل المقرر لمعرفة الأسباب والخطوات المقترحة.';
+  }
+
+  String _snapshotDetail(Map<String, dynamic> snapshot) {
+    final week = (snapshot['week_number'] as num?)?.toInt();
+    final health = _asDouble(snapshot['course_health']);
+    final trend = snapshot['trend']?.toString() ?? 'new';
+    final parts = <String>[
+      if (week != null) '${tr('Week')} $week',
+      if (health != null) '${tr('Academic health')} ${health.round()}%',
+      tr(trend),
+    ];
+    return parts.join(' · ');
+  }
+
+  String _interventionDetail(Map<String, dynamic> intervention) {
+    if (isArabicApp) {
+      final status = tr(intervention['status']?.toString() ?? 'active');
+      final week = (intervention['week_number'] as num?)?.toInt();
+      return '${week == null ? '' : '${tr('Week')} $week · '}$status';
+    }
+    final message = intervention['message']?.toString().trim() ?? '';
+    if (message.isNotEmpty) return message;
+    return intervention['status']?.toString() ?? 'Active follow-up';
+  }
+}
+
+class _AcademicUpdateMetric extends StatelessWidget {
+  const _AcademicUpdateMetric({
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.accent = _dashboardCyan,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: _dashboardSurface.withValues(alpha: .82),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: _dashboardBorder),
+    ),
+    child: Row(
+      children: [
+        Icon(icon, color: accent, size: 21),
+        const SizedBox(width: 9),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AppText(
+                value,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              AppText(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: _dashboardMuted, fontSize: 10),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _AcademicDatabaseRow extends StatelessWidget {
+  const _AcademicDatabaseRow({
+    required this.icon,
+    required this.label,
+    required this.title,
+    required this.detail,
+  });
+
+  final IconData icon;
+  final String label;
+  final String title;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: _dashboardSurface.withValues(alpha: .76),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: _dashboardBorder),
+    ),
+    child: Row(
+      children: [
+        Icon(icon, color: _dashboardIndigo, size: 22),
+        const SizedBox(width: 11),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AppText(
+                label,
+                style: TextStyle(color: _dashboardMuted, fontSize: 10),
+              ),
+              const SizedBox(height: 2),
+              AppText(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              AppText(
+                detail,
+                style: TextStyle(color: _dashboardMuted, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class _CourseProgressCard extends StatelessWidget {
-  const _CourseProgressCard({required this.course});
+  const _CourseProgressCard({required this.course, required this.onTap});
   final Map<String, dynamic> course;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -713,72 +1080,108 @@ class _CourseProgressCard extends StatelessWidget {
     final lectures = _asDouble(metrics['lecture_completion']) ?? 0;
     final assessments = _asDouble(metrics['assessment_completion']) ?? 0;
     final risky = course['risk_level'] != null;
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: _dashboardSurface,
+    final risks = ((course['risks'] as List<dynamic>?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: risks.isEmpty ? null : onTap,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: _dashboardBorder),
-      ),
-      child: Column(
-        children: [
-          Row(
+        child: Ink(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: _dashboardSurface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: _dashboardBorder),
+          ),
+          child: Column(
             children: [
-              Container(
-                padding: const EdgeInsets.all(11),
-                decoration: BoxDecoration(
-                  color: (risky ? _dashboardCoral : _dashboardCyan).withValues(
-                    alpha: 0.12,
-                  ),
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: Icon(
-                  Icons.menu_book_outlined,
-                  color: risky ? _dashboardCoral : _dashboardCyan,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      course['course_name'] as String? ?? 'Course',
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w900,
-                      ),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(11),
+                    decoration: BoxDecoration(
+                      color: (risky ? _dashboardCoral : _dashboardCyan)
+                          .withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(15),
                     ),
-                    Text(
-                      course['course_id']?.toString() ?? '',
-                      style: TextStyle(color: _dashboardMuted),
+                    child: Icon(
+                      Icons.menu_book_outlined,
+                      color: risky ? _dashboardCoral : _dashboardCyan,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AppText(
+                          course['course_name'] as String? ?? 'Course',
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        AppText(
+                          course['course_id']?.toString() ?? '',
+                          style: TextStyle(color: _dashboardMuted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  AppText(
+                    health == null ? '—' : '${health.round()}%',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      color: risky ? _dashboardCoral : _dashboardCyan,
+                    ),
+                  ),
+                  if (risks.isNotEmpty) ...[
+                    const SizedBox(width: 4),
+                    const Icon(Icons.chevron_right_rounded),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 18),
+              _ProgressLine(
+                label: 'Lectures',
+                value: lectures,
+                color: _dashboardCyan,
+              ),
+              const SizedBox(height: 10),
+              _ProgressLine(
+                label: 'Assessments',
+                value: assessments,
+                color: _dashboardIndigo,
+              ),
+              if (risks.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      size: 18,
+                      color: _dashboardCoral,
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: AppText(
+                        '${risks.length} risk${risks.length == 1 ? '' : 's'} · Tap to see why and recommended actions',
+                        style: const TextStyle(
+                          color: _dashboardCoral,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
                   ],
                 ),
-              ),
-              Text(
-                health == null ? '—' : '${health.round()}%',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  color: risky ? _dashboardCoral : _dashboardCyan,
-                ),
-              ),
+              ],
             ],
           ),
-          const SizedBox(height: 18),
-          _ProgressLine(
-            label: 'Lectures',
-            value: lectures,
-            color: _dashboardCyan,
-          ),
-          const SizedBox(height: 10),
-          _ProgressLine(
-            label: 'Assessments',
-            value: assessments,
-            color: _dashboardIndigo,
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -798,7 +1201,7 @@ class _ProgressLine extends StatelessWidget {
     children: [
       SizedBox(
         width: 88,
-        child: Text(label, style: TextStyle(color: _dashboardMuted)),
+        child: AppText(label, style: TextStyle(color: _dashboardMuted)),
       ),
       Expanded(
         child: LinearProgressIndicator(
@@ -812,7 +1215,7 @@ class _ProgressLine extends StatelessWidget {
       const SizedBox(width: 10),
       SizedBox(
         width: 40,
-        child: Text(
+        child: AppText(
           '${value.round()}%',
           textAlign: TextAlign.end,
           style: TextStyle(color: _dashboardMuted),
@@ -823,9 +1226,14 @@ class _ProgressLine extends StatelessWidget {
 }
 
 class _AdvisorLanding extends StatelessWidget {
-  const _AdvisorLanding({required this.student, required this.onOpenAdvisor});
+  const _AdvisorLanding({
+    required this.student,
+    required this.onStartConversation,
+    required this.onSuggestionSelected,
+  });
   final Student student;
-  final VoidCallback onOpenAdvisor;
+  final VoidCallback onStartConversation;
+  final ValueChanged<String> onSuggestionSelected;
   @override
   Widget build(BuildContext context) => ListView(
     physics: const AlwaysScrollableScrollPhysics(),
@@ -835,7 +1243,9 @@ class _AdvisorLanding extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xFF5965F2), Color(0xFF8252E9)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [uniTrackBlue, uniTrackSky],
           ),
           borderRadius: BorderRadius.circular(28),
         ),
@@ -844,8 +1254,8 @@ class _AdvisorLanding extends StatelessWidget {
           children: [
             const Icon(Icons.auto_awesome, color: Colors.white, size: 42),
             const SizedBox(height: 40),
-            Text(
-              'Hi ${student.name.split(' ').first}, what are we solving?',
+            AppText(
+              'Hi ${student.name.split(' ').first}, what can I help you solve?',
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 27,
@@ -853,15 +1263,15 @@ class _AdvisorLanding extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-            const Text(
-              'I can explain your progress, identify weak areas, help you prioritize coursework, and build a study strategy using your academic context.',
-              style: TextStyle(color: Color(0xFFE4E6FF), height: 1.5),
+            const AppText(
+              'Ask about your courses, grades, risks, timetable, or study priorities. Answers use your current academic data.',
+              style: TextStyle(color: Color(0xFFEAF5FF), height: 1.5),
             ),
           ],
         ),
       ),
       const SizedBox(height: 24),
-      Text(
+      AppText(
         'Try asking',
         style: TextStyle(
           fontSize: 25,
@@ -870,21 +1280,38 @@ class _AdvisorLanding extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 12),
-      for (final label in [
-        'Analyze my progress',
-        'What should I study today?',
-        'Find my weak courses',
+      for (final suggestion in [
+        (
+          label: 'Explain my academic progress',
+          prompt: 'Explain my academic progress and the main reason behind each risk.',
+        ),
+        (
+          label: 'Plan what I should study today',
+          prompt:
+              'Using my real courses and deadlines, what should I study today?',
+        ),
+        (
+          label: 'Show my highest-priority course',
+          prompt: 'Which course needs my attention most, why, and what should I do next?',
+        ),
       ])
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: OutlinedButton.icon(
-            onPressed: onOpenAdvisor,
-            icon: const Icon(Icons.north_east),
+            onPressed: () => onSuggestionSelected(suggestion.prompt),
+            style: OutlinedButton.styleFrom(
+              backgroundColor: _dashboardSurface,
+              foregroundColor: _dashboardIndigo,
+              side: BorderSide(color: uniTrackBlue.withValues(alpha: 0.38)),
+              shape: const StadiumBorder(),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+            ),
+            icon: const Icon(Icons.north_east_rounded, size: 20),
             label: Align(
               alignment: Alignment.centerLeft,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                child: Text(label),
+                child: AppText(suggestion.label),
               ),
             ),
           ),
@@ -892,11 +1319,15 @@ class _AdvisorLanding extends StatelessWidget {
       const SizedBox(height: 8),
       FilledButton.icon(
         key: const Key('open-advisor'),
-        onPressed: onOpenAdvisor,
+        onPressed: onStartConversation,
         icon: const Icon(Icons.auto_awesome),
+        style: FilledButton.styleFrom(
+          backgroundColor: uniTrackBlue,
+          shape: const StadiumBorder(),
+        ),
         label: const Padding(
           padding: EdgeInsets.symmetric(vertical: 15),
-          child: Text('Open Advisor chat'),
+          child: AppText('Start a conversation'),
         ),
       ),
     ],
@@ -905,159 +1336,252 @@ class _AdvisorLanding extends StatelessWidget {
 
 class _AcademicsDashboard extends StatelessWidget {
   const _AcademicsDashboard({
-    required this.courses,
+    required this.onCourses,
     required this.onResults,
     required this.onPlanner,
     required this.onCalendar,
+    required this.onWhatIf,
   });
-  final List<Map<String, dynamic>> courses;
+  final VoidCallback onCourses;
   final VoidCallback onResults;
   final VoidCallback onPlanner;
   final VoidCallback onCalendar;
+  final VoidCallback onWhatIf;
 
   @override
   Widget build(BuildContext context) {
-    final assessments =
-        <({Map<String, dynamic> course, Map<String, dynamic> assessment})>[];
-    for (final course in courses) {
-      for (final assessment
-          in ((course['assessments'] as List<dynamic>?) ?? const [])
-              .whereType<Map<String, dynamic>>()) {
-        assessments.add((course: course, assessment: assessment));
-      }
-    }
     return ListView(
       key: const PageStorageKey('academics-dashboard'),
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
       children: [
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: _dashboardSurface,
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: _dashboardBorder),
-          ),
+        const _AcademicHubHero(),
+        const SizedBox(height: 24),
+        const _HubSectionTitle(
+          eyebrow: 'CORE ACADEMICS',
+          title: 'Classes and grades',
+          subtitle: 'One clear place for official university information.',
+        ),
+        const SizedBox(height: 12),
+        _SurfaceAction(
+          key: const Key('open-courses-from-hub'),
+          icon: Icons.calendar_view_week_rounded,
+          title: 'Class Timetable',
+          subtitle: 'Courses, lecture times, sections, labs, and rooms',
+          onTap: onCourses,
+        ),
+        const SizedBox(height: 10),
+        _SurfaceAction(
+          icon: Icons.workspace_premium_outlined,
+          title: 'Grades',
+          subtitle: 'Official marks, course grades, and semester GPA',
+          onTap: onResults,
+        ),
+        const SizedBox(height: 26),
+        const _HubSectionTitle(
+          eyebrow: 'PLAN & PREPARE',
+          title: 'Planning tools',
+          subtitle: 'Personal planning, separate from your class timetable.',
+        ),
+        const SizedBox(height: 12),
+        _SurfaceAction(
+          key: const Key('open-calendar'),
+          icon: Icons.event_note_rounded,
+          title: 'Calendar',
+          subtitle: 'Academic deadlines and events you add',
+          onTap: onCalendar,
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 176,
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Icon(Icons.info_outline, color: _dashboardCyan),
-              SizedBox(width: 14),
               Expanded(
-                child: Text(
-                  'Assessment marks and due weeks come directly from UNI Track.',
-                  style: TextStyle(color: _dashboardInk, height: 1.4),
+                child: _PlanningTool(
+                  key: const Key('open-semester-planner'),
+                  icon: Icons.route_rounded,
+                  title: 'Academic Roadmap',
+                  subtitle:
+                      'Future courses, prerequisites, and graduation routes',
+                  onTap: onPlanner,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _PlanningTool(
+                  key: const Key('open-what-if-simulator'),
+                  icon: Icons.science_outlined,
+                  title: 'Grade Simulator',
+                  subtitle: 'Preview grade impact',
+                  onTap: onWhatIf,
                 ),
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 18),
-        if (assessments.isEmpty)
-          const _EmptyCard(message: 'No assessments have been recorded yet.'),
-        ...assessments.map(
-          (item) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _AssessmentCard(
-              course: item.course,
-              assessment: item.assessment,
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        _SurfaceAction(
-          key: const Key('open-calendar'),
-          icon: Icons.calendar_month_rounded,
-          title: 'My Calendar',
-          subtitle: 'Exams, deadlines, personal events, and AI study time',
-          onTap: onCalendar,
-        ),
-        const SizedBox(height: 10),
-        _SurfaceAction(
-          key: const Key('open-semester-planner'),
-          icon: Icons.route_rounded,
-          title: 'Smart Semester Planner',
-          subtitle: 'Plan courses, prerequisites, GPA, and graduation',
-          onTap: onPlanner,
-        ),
-        const SizedBox(height: 10),
-        _SurfaceAction(
-          icon: Icons.assessment_outlined,
-          title: 'Results',
-          subtitle: 'Open your complete semester results',
-          onTap: onResults,
         ),
       ],
     );
   }
 }
 
-class _AssessmentCard extends StatelessWidget {
-  const _AssessmentCard({required this.course, required this.assessment});
-  final Map<String, dynamic> course;
-  final Map<String, dynamic> assessment;
+class _AcademicHubHero extends StatelessWidget {
+  const _AcademicHubHero();
+
   @override
-  Widget build(BuildContext context) {
-    final mark = _asDouble(assessment['mark']);
-    final max =
-        _asDouble(assessment['max_marks']) ??
-        _asDouble(assessment['weight']) ??
-        0;
-    final recorded = mark != null;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: _dashboardSurface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _dashboardBorder),
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(22),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        colors: isDarkModeEnabled
+            ? const [Color(0xFF152845), Color(0xFF123B43)]
+            : const [Color(0xFFEAF0FF), Color(0xFFE8FAF8)],
       ),
-      child: Row(
-        children: [
-          Icon(
-            recorded ? Icons.check_box : Icons.check_box_outline_blank,
-            color: recorded ? const Color(0xFF1CA77F) : _dashboardMuted,
+      borderRadius: BorderRadius.circular(28),
+      border: Border.all(color: _dashboardBorder),
+    ),
+    child: Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _dashboardIndigo.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(18),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  assessment['name'] as String? ?? 'Assessment',
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                Text(
-                  '${course['course_name']} · ${assessment['assessment_type']}',
-                  style: TextStyle(color: _dashboardMuted),
-                ),
-              ],
-            ),
+          child: const Icon(
+            Icons.school_rounded,
+            color: _dashboardIndigo,
+            size: 30,
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            decoration: BoxDecoration(
-              color: recorded
-                  ? const Color(0xFFDDF7F1)
-                  : const Color(0xFFEEF1F5),
-              borderRadius: BorderRadius.circular(20),
+        ),
+        const SizedBox(width: 15),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AppText(
+                'Everything academic, organised',
+                style: TextStyle(
+                  color: _dashboardInk,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 5),
+              AppText(
+                'Open the exact record or planning tool you need.',
+                style: TextStyle(color: _dashboardMuted, height: 1.35),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _HubSectionTitle extends StatelessWidget {
+  const _HubSectionTitle({
+    required this.eyebrow,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String eyebrow;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      AppText(
+        eyebrow,
+        style: const TextStyle(
+          color: _dashboardCyan,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1,
+        ),
+      ),
+      const SizedBox(height: 4),
+      AppText(
+        title,
+        style: TextStyle(
+          color: _dashboardInk,
+          fontSize: 21,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      const SizedBox(height: 3),
+      AppText(subtitle, style: TextStyle(color: _dashboardMuted, height: 1.35)),
+    ],
+  );
+}
+
+class _PlanningTool extends StatelessWidget {
+  const _PlanningTool({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: _dashboardSurface,
+    borderRadius: BorderRadius.circular(22),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(22),
+      child: Ink(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          border: Border.all(color: _dashboardBorder),
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: uniTrackBlueSoft,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(icon, color: uniTrackBlue, size: 24),
             ),
-            child: Text(
-              recorded
-                  ? '${mark.toStringAsFixed(mark % 1 == 0 ? 0 : 1)}/${max.toStringAsFixed(0)}'
-                  : 'DUE W${assessment['due_week']}',
+            const Spacer(),
+            AppText(
+              title,
               style: TextStyle(
-                color: recorded ? const Color(0xFF148267) : _dashboardMuted,
-                fontSize: 12,
+                color: _dashboardInk,
+                fontSize: 15,
                 fontWeight: FontWeight.w900,
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 4),
+            AppText(
+              subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _dashboardMuted,
+                fontSize: 11,
+                height: 1.25,
+              ),
+            ),
+          ],
+        ),
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _ProfileDashboard extends StatelessWidget {
@@ -1080,9 +1604,9 @@ class _ProfileDashboard extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 48,
-              backgroundColor: const Color(0xFFE6E9FF),
+              backgroundColor: uniTrackBlueSoft,
               foregroundColor: _dashboardIndigo,
-              child: Text(
+              child: AppText(
                 _initials(student.name),
                 style: const TextStyle(
                   fontSize: 28,
@@ -1091,7 +1615,7 @@ class _ProfileDashboard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            Text(
+            AppText(
               student.name,
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -1101,13 +1625,16 @@ class _ProfileDashboard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            Text(student.studentId, style: TextStyle(color: _dashboardMuted)),
+            AppText(
+              student.studentId,
+              style: TextStyle(color: _dashboardMuted),
+            ),
             const SizedBox(height: 12),
             Chip(
-              label: Text(student.major.toUpperCase()),
-              backgroundColor: const Color(0xFFE7F7FA),
+              label: AppText(student.major.toUpperCase()),
+              backgroundColor: uniTrackBlueSoft,
               labelStyle: const TextStyle(
-                color: Color(0xFF16879B),
+                color: uniTrackBlue,
                 fontWeight: FontWeight.w900,
               ),
             ),
@@ -1115,7 +1642,7 @@ class _ProfileDashboard extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 22),
-      Text(
+      AppText(
         'Academic information',
         style: TextStyle(
           fontSize: 24,
@@ -1156,7 +1683,7 @@ class _ProfileDashboard extends StatelessWidget {
         icon: const Icon(Icons.logout),
         label: const Padding(
           padding: EdgeInsets.symmetric(vertical: 14),
-          child: Text('Sign out'),
+          child: AppText('Sign out'),
         ),
       ),
     ],
@@ -1171,6 +1698,114 @@ class _ProfileDashboard extends StatelessWidget {
       .join();
 }
 
+class _CampusCommunicationCard extends StatelessWidget {
+  const _CampusCommunicationCard({
+    required this.onMessages,
+    required this.onMeetings,
+  });
+
+  final VoidCallback onMessages;
+  final VoidCallback onMeetings;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const AppText(
+        'Campus communication',
+        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+      ),
+      const SizedBox(height: 10),
+      Container(
+        decoration: BoxDecoration(
+          color: _dashboardSurface,
+          border: Border.all(color: _dashboardBorder),
+          borderRadius: BorderRadius.circular(22),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            _CommunicationAction(
+              key: const Key('open-messages'),
+              icon: Icons.forum_rounded,
+              title: 'Messages',
+              subtitle: 'Chat with professors and classmates',
+              onTap: onMessages,
+            ),
+            Divider(height: 1, indent: 72, color: _dashboardBorder),
+            _CommunicationAction(
+              key: const Key('open-meetings'),
+              icon: Icons.video_call_rounded,
+              title: 'Live Meetings',
+              subtitle: 'Host or join lectures and study rooms',
+              onTap: onMeetings,
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+class _CommunicationAction extends StatelessWidget {
+  const _CommunicationAction({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: uniTrackBlueSoft,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(icon, color: uniTrackBlue, size: 26),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppText(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  AppText(
+                    subtitle,
+                    style: TextStyle(color: _dashboardMuted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _ProfileRow extends StatelessWidget {
   const _ProfileRow({
     required this.icon,
@@ -1183,54 +1818,9 @@ class _ProfileRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListTile(
     leading: Icon(icon, color: _dashboardIndigo),
-    title: Text(label),
-    subtitle: Text(value),
+    title: AppText(label),
+    subtitle: AppText(value),
     shape: Border(bottom: BorderSide(color: _dashboardBorder)),
-  );
-}
-
-class _RiskCard extends StatelessWidget {
-  const _RiskCard({required this.course, required this.risk});
-  final Map<String, dynamic> course;
-  final Map<String, dynamic> risk;
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: _dashboardSurface,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(
-        color: isDarkModeEnabled
-            ? const Color(0xFF713746)
-            : const Color(0xFFFFD3DB),
-      ),
-    ),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Icon(Icons.warning_amber_rounded, color: _dashboardCoral),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${course['course_name']} needs attention',
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: _dashboardInk,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                risk['message'] as String? ?? '',
-                style: TextStyle(color: _dashboardMuted, height: 1.35),
-              ),
-            ],
-          ),
-        ),
-      ],
-    ),
   );
 }
 
@@ -1275,16 +1865,16 @@ class _GradientAction extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  AppText(
                     title,
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                  Text(
+                  AppText(
                     subtitle,
-                    style: TextStyle(color: Color(0xFFE8E8FF), fontSize: 12),
+                    style: TextStyle(color: Color(0xFFEAF5FF), fontSize: 12),
                   ),
                 ],
               ),
@@ -1325,8 +1915,8 @@ class _SurfaceAction extends StatelessWidget {
         child: Row(
           children: [
             CircleAvatar(
-              backgroundColor: const Color(0xFFE7F7FA),
-              foregroundColor: _dashboardCyan,
+              backgroundColor: uniTrackBlueSoft,
+              foregroundColor: uniTrackBlue,
               child: Icon(icon),
             ),
             const SizedBox(width: 14),
@@ -1334,14 +1924,14 @@ class _SurfaceAction extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  AppText(
                     title,
                     style: TextStyle(
                       fontWeight: FontWeight.w900,
                       color: _dashboardInk,
                     ),
                   ),
-                  Text(
+                  AppText(
                     subtitle,
                     style: TextStyle(color: _dashboardMuted, fontSize: 12),
                   ),
@@ -1362,13 +1952,13 @@ class _LiveBadge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     decoration: BoxDecoration(
-      color: const Color(0xFFE7F7FA),
+      color: uniTrackBlueSoft,
       borderRadius: BorderRadius.circular(20),
     ),
-    child: const Text(
+    child: const AppText(
       'LIVE DATA',
       style: TextStyle(
-        color: Color(0xFF16879B),
+        color: uniTrackBlue,
         fontSize: 11,
         fontWeight: FontWeight.w900,
       ),
@@ -1387,7 +1977,7 @@ class _InlineError extends StatelessWidget {
       color: Theme.of(context).colorScheme.errorContainer,
       borderRadius: BorderRadius.circular(14),
     ),
-    child: Text(
+    child: AppText(
       message,
       style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
     ),
@@ -1405,7 +1995,7 @@ class _EmptyCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(20),
       border: Border.all(color: _dashboardBorder),
     ),
-    child: Text(
+    child: AppText(
       message,
       textAlign: TextAlign.center,
       style: TextStyle(color: _dashboardMuted),
@@ -1485,7 +2075,7 @@ class _NotificationButtonState extends State<_NotificationButton>
       setState(() => _error = error.message);
       if (showError) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(error.message)));
+            .showSnackBar(SnackBar(content: AppText(error.message)));
       }
     } finally {
       _loading = false;
@@ -1522,7 +2112,7 @@ class _NotificationButtonState extends State<_NotificationButton>
     final countLabel = _unreadCount > 99 ? '99+' : _unreadCount.toString();
     return IconButton(
       key: const Key('notifications-button'),
-      tooltip: 'Notifications',
+      tooltip: tr('Notifications'),
       onPressed: _openNotifications,
       icon: Stack(
         clipBehavior: Clip.none,
@@ -1539,7 +2129,7 @@ class _NotificationButtonState extends State<_NotificationButton>
                   color: Theme.of(context).colorScheme.error,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(
+                child: AppText(
                   countLabel,
                   textAlign: TextAlign.center,
                   style: TextStyle(
@@ -1638,7 +2228,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
+                    child: AppText(
                       'Notifications',
                       style: Theme.of(context).textTheme.titleLarge
                           ?.copyWith(fontWeight: FontWeight.bold),
@@ -1649,10 +2239,10 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                       onPressed: _updating
                           ? null
                           : () => _setRead(unreadIds, true),
-                      child: const Text('Mark all read'),
+                      child: const AppText('Mark all read'),
                     ),
                   IconButton(
-                    tooltip: 'Close notifications',
+                    tooltip: tr('Close notifications'),
                     onPressed: () => Navigator.of(context).pop(_notifications),
                     icon: const Icon(Icons.close),
                   ),
@@ -1663,7 +2253,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-                child: Text(
+                child: AppText(
                   _error!,
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
@@ -1678,7 +2268,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                 itemBuilder: (context, index) {
                   final filter = _filters[index];
                   return ChoiceChip(
-                    label: Text(filter),
+                    label: AppText(filter),
                     selected: filter == _filter,
                     showCheckmark: false,
                     onSelected: (_) => setState(() => _filter = filter),
@@ -1692,7 +2282,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                   ? const Center(
                       child: Padding(
                         padding: EdgeInsets.all(24),
-                        child: Text(
+                        child: AppText(
                           'You are all caught up. No notifications match this filter.',
                           textAlign: TextAlign.center,
                         ),
@@ -1724,7 +2314,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                                 _notificationIcon(notification.category),
                               ),
                             ),
-                            title: Text(
+                            title: AppText(
                               notification.title,
                               style: TextStyle(
                                 fontWeight: notification.read
@@ -1737,9 +2327,9 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(notification.body),
+                                  AppText(notification.body),
                                   const SizedBox(height: 5),
-                                  Text(
+                                  AppText(
                                     '${notification.category} · ${notification.timestamp}',
                                     style: Theme.of(context)
                                         .textTheme

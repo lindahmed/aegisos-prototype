@@ -6,22 +6,25 @@ import '../models/student.dart';
 import '../models/weekly_plan.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ask_aegis_fab.dart';
 
 Color get _ink => appScreenInk;
 Color get _muted => appScreenMuted;
 Color get _surface => appScreenSurface;
 Color get _border => appScreenBorder;
-const _indigo = Color(0xFF5965F2);
+const _indigo = uniTrackBlue;
 
 class WeeklyPlanScreen extends StatefulWidget {
   const WeeklyPlanScreen({
     required this.student,
     required this.apiService,
+    this.onPlanChanged,
     super.key,
   });
 
   final Student student;
   final ApiService apiService;
+  final ValueChanged<WeeklyPlan>? onPlanChanged;
 
   @override
   State<WeeklyPlanScreen> createState() => _WeeklyPlanScreenState();
@@ -56,6 +59,7 @@ class _WeeklyPlanScreenState extends State<WeeklyPlanScreen> {
         _plan = plan;
         _loading = false;
       });
+      widget.onPlanChanged?.call(plan);
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() {
@@ -68,12 +72,14 @@ class _WeeklyPlanScreenState extends State<WeeklyPlanScreen> {
   Future<void> _setCompleted(WeeklyPlanItem item, bool completed) async {
     if (_savingTaskIds.contains(item.taskId) || _plan == null) return;
     final previous = item;
+    final optimistic = _plan!.replaceItem(
+      item.withStatus(completed ? 'completed' : 'pending'),
+    );
     setState(() {
       _savingTaskIds.add(item.taskId);
-      _plan = _plan!.replaceItem(
-        item.withStatus(completed ? 'completed' : 'pending'),
-      );
+      _plan = optimistic;
     });
+    widget.onPlanChanged?.call(optimistic);
     try {
       final saved = await widget.apiService.setWeeklyPlanItemStatus(
         studentId: widget.student.studentId,
@@ -81,12 +87,16 @@ class _WeeklyPlanScreenState extends State<WeeklyPlanScreen> {
         completed: completed,
       );
       if (!mounted) return;
-      setState(() => _plan = _plan!.replaceItem(saved));
+      final updated = _plan!.replaceItem(saved);
+      setState(() => _plan = updated);
+      widget.onPlanChanged?.call(updated);
     } on ApiException catch (error) {
       if (!mounted) return;
-      setState(() => _plan = _plan!.replaceItem(previous));
+      final restored = _plan!.replaceItem(previous);
+      setState(() => _plan = restored);
+      widget.onPlanChanged?.call(restored);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(error.message)));
+          .showSnackBar(SnackBar(content: AppText(error.message)));
     } finally {
       if (mounted) {
         setState(() => _savingTaskIds.remove(item.taskId));
@@ -103,18 +113,26 @@ class _WeeklyPlanScreenState extends State<WeeklyPlanScreen> {
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         foregroundColor: colors.onSurface,
         surfaceTintColor: Colors.transparent,
-        title: const Text(
-          'Fix My Week',
+        title: const AppText(
+          'Week Planner',
           style: TextStyle(fontWeight: FontWeight.w900),
         ),
         actions: [
           IconButton(
-            tooltip: 'Refresh plan',
+            tooltip: tr('Refresh plan'),
             onPressed: _loading ? null : () => _loadPlan(forceRefresh: true),
             icon: const Icon(Icons.refresh_rounded),
           ),
           const ThemeModeToggleButton(),
         ],
+      ),
+      floatingActionButton: AskAegisFab(
+        onPressed: () => openAskAegis(
+          context,
+          student: widget.student,
+          apiService: widget.apiService,
+          prompt: 'I am viewing Week Planner. Explain my priorities and tell me which task to start first.',
+        ),
       ),
       body: SafeArea(child: _buildBody()),
     );
@@ -141,7 +159,7 @@ class _WeeklyPlanScreenState extends State<WeeklyPlanScreen> {
             padding: const EdgeInsets.all(22),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF5965F2), Color(0xFF27BBD3)],
+                colors: [uniTrackBlue, uniTrackSky],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -150,7 +168,7 @@ class _WeeklyPlanScreenState extends State<WeeklyPlanScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                AppText(
                   'WEEK ${plan.currentWeek} PLAN',
                   style: const TextStyle(
                     color: Colors.white70,
@@ -159,7 +177,7 @@ class _WeeklyPlanScreenState extends State<WeeklyPlanScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text(
+                AppText(
                   '${widget.student.name.split(RegExp(r'\s+')).first}, focus on what matters most.',
                   style: const TextStyle(
                     color: Colors.white,
@@ -169,7 +187,7 @@ class _WeeklyPlanScreenState extends State<WeeklyPlanScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Text(
+                AppText(
                   '$remaining ${remaining == 1 ? 'priority' : 'priorities'} remaining this week.',
                   style: const TextStyle(color: Colors.white),
                 ),
@@ -177,7 +195,7 @@ class _WeeklyPlanScreenState extends State<WeeklyPlanScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          Text(
+          AppText(
             'Your priorities',
             style: TextStyle(
               color: _ink,
@@ -186,7 +204,7 @@ class _WeeklyPlanScreenState extends State<WeeklyPlanScreen> {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
+          AppText(
             'Your progress is saved and a fresh plan appears each week.',
             style: TextStyle(color: _muted),
           ),
@@ -257,7 +275,7 @@ class _PriorityCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    AppText(
                       '${item.position}. ${item.courseName}',
                       style: TextStyle(
                         color: color,
@@ -266,7 +284,7 @@ class _PriorityCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 5),
-                    Text(
+                    AppText(
                       item.title,
                       style: TextStyle(
                         color: _ink,
@@ -278,13 +296,13 @@ class _PriorityCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 5),
-                    Text(
+                    AppText(
                       item.detail,
                       style: TextStyle(color: _muted, height: 1.35),
                     ),
                     if (item.isCompleted) ...[
                       const SizedBox(height: 8),
-                      const Text(
+                      const AppText(
                         'Completed',
                         style: TextStyle(
                           color: Color(0xFF22B98B),
@@ -334,12 +352,12 @@ class _PlanError extends StatelessWidget {
         children: [
           const Icon(Icons.cloud_off_rounded, size: 44, color: _indigo),
           const SizedBox(height: 12),
-          Text(message, textAlign: TextAlign.center),
+          AppText(message, textAlign: TextAlign.center),
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: () => onRetry(forceRefresh: true),
             icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Try again'),
+            label: const AppText('Try again'),
           ),
         ],
       ),
@@ -366,7 +384,7 @@ class _EmptyPlan extends StatelessWidget {
           size: 42,
         ),
         const SizedBox(height: 12),
-        Text(
+        AppText(
           'You are on track',
           style: TextStyle(
             color: _ink,
@@ -375,7 +393,7 @@ class _EmptyPlan extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        Text(
+        AppText(
           'No urgent risks or upcoming ungraded assessments were found.',
           textAlign: TextAlign.center,
           style: TextStyle(color: _muted),

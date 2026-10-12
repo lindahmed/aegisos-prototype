@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 abstract interface class AdvisorVoiceService {
@@ -38,7 +38,9 @@ class DeviceAdvisorVoiceService implements AdvisorVoiceService {
   }) async {
     _recognizedWords = '';
     final available = await _speech.initialize(
-      options: [SpeechToText.androidNoBluetooth],
+      options: defaultTargetPlatform == TargetPlatform.android
+          ? [SpeechToText.androidNoBluetooth]
+          : const [],
     );
     if (!available) return false;
     final localePrefix = language == 'arabic' ? 'ar' : 'en';

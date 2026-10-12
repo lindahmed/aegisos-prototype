@@ -36,15 +36,20 @@ flutter pub get
 flutter run
 ```
 
-The default API URL is `http://10.0.2.2:8001` for an Android emulator. Override it for
-other targets without editing source:
+The default API URL is the deployed Railway service:
+
+```text
+https://web-production-3a6ad.up.railway.app
+```
+
+Override it only when intentionally testing another backend:
 
 ```bash
 flutter run --dart-define=API_BASE_URL=http://192.168.1.50:8001
 ```
 
-For a physical device, replace the example address with the development computer's LAN IP
-and allow port 8001 through the local firewall. Use an HTTPS API URL for production builds.
+For local development on an Android emulator, use `http://10.0.2.2:8001`
+after starting FastAPI on port 8001.
 
 ## Checks
 
@@ -52,3 +57,26 @@ and allow port 8001 through the local firewall. Use an HTTPS API URL for product
 flutter analyze
 flutter test
 ```
+
+## iOS
+
+The iOS app uses Swift Package Manager for Flutter plugins and supports iOS 15
+or later. Microphone and speech-recognition permission descriptions are already
+configured for Advisor AI.
+
+Build and run on an iPhone Simulator:
+
+```bash
+flutter pub get
+flutter run -d "iPhone 18 Pro"
+```
+
+Build a release for a physical iPhone without signing:
+
+```bash
+flutter build ios --release --no-codesign
+```
+
+To install on a physical iPhone or create an IPA, open
+`ios/Runner.xcworkspace` in Xcode, select an Apple development Team under
+Signing & Capabilities, and build the Runner target.

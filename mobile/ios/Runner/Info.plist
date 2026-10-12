@@ -27,7 +27,16 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>UNI Track uses the microphone so you can speak with Advisor AI.</string>
+	<string>UNI Track uses the microphone for Advisor AI and live meetings.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>UNI Track uses the camera when you turn on video in a live meeting.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>UNI Track connects to live meetings hosted by nearby devices on your local network.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>UNI Track converts your speech into an Advisor AI question.</string>
 	<key>UIApplicationSceneManifest</key>

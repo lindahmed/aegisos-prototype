@@ -7,8 +7,8 @@ import '../models/student.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
-const _calendarIndigo = Color(0xFF5965F2);
-const _calendarCyan = Color(0xFF20B8CD);
+const _calendarIndigo = uniTrackBlue;
+const _calendarCyan = uniTrackSky;
 const _calendarGreen = Color(0xFF1A9B78);
 const _calendarAmber = Color(0xFFF0A12A);
 const _calendarCoral = Color(0xFFFF647C);
@@ -76,17 +76,24 @@ class _CalendarScreenState extends State<CalendarScreen> {
       ]);
       final saved = results[0] as List<StudentCalendarEvent>;
       final academics = results[1] as Map<String, dynamic>;
-      final planned = StudentCalendarBuilder.addUrgentStudySessions(
-        academics: academics,
-        customEvents: saved,
-      );
-      if (planned.length != saved.length) {
-        await StudentCalendarStore.save(widget.student.studentId, planned);
+      final personalEvents = saved
+          .where(
+            (event) =>
+                !(event.source == StudentCalendarEventSource.ai &&
+                    event.urgent &&
+                    event.id.startsWith('ai:')),
+          )
+          .toList();
+      if (personalEvents.length != saved.length) {
+        await StudentCalendarStore.save(
+          widget.student.studentId,
+          personalEvents,
+        );
       }
       if (!mounted) return;
       setState(() {
         _academics = academics;
-        _customEvents = planned;
+        _customEvents = personalEvents;
       });
     } on ApiException catch (error) {
       if (mounted) setState(() => _error = error.message);
@@ -114,29 +121,20 @@ class _CalendarScreenState extends State<CalendarScreen> {
     await StudentCalendarStore.save(widget.student.studentId, events);
   }
 
-  Future<void> _planWithAi() async {
-    final academics = _academics;
-    if (academics == null) return;
-    final next = StudentCalendarBuilder.addUrgentStudySessions(
-      academics: academics,
-      customEvents: _customEvents,
-    );
-    final added = next.length - _customEvents.length;
-    await _saveCustom(next);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          added == 0
-              ? 'No new urgent study sessions are needed right now.'
-              : 'AI scheduled $added urgent study session${added == 1 ? '' : 's'}.',
-        ),
-      ),
-    );
-  }
-
   Future<void> _removeEvent(StudentCalendarEvent event) =>
       _saveCustom(_customEvents.where((item) => item.id != event.id).toList());
+
+  Future<void> _toggleCompleted(StudentCalendarEvent event) async {
+    await _saveCustom(
+      _customEvents
+          .map(
+            (item) => item.id == event.id
+                ? item.copyWith(completed: !item.completed)
+                : item,
+          )
+          .toList(),
+    );
+  }
 
   Future<void> _openAddEvent([DateTime? date]) async {
     final chosenDate = date ?? _selectedDate;
@@ -155,8 +153,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
       );
       _month = DateTime(event.startAt.year, event.startAt.month);
     });
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Calendar event added.')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: AppText('Calendar event added.')));
   }
 
   @override
@@ -166,7 +165,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       key: const Key('calendar-page'),
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text('My Calendar'),
+        title: const AppText('Calendar'),
         actions: const [ThemeModeToggleButton(), SizedBox(width: 8)],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -175,7 +174,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         backgroundColor: _calendarIndigo,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add_rounded),
-        label: const Text('Add event'),
+        label: const AppText('Add event'),
       ),
       body: _loading && _academics == null
           ? const Center(child: CircularProgressIndicator())
@@ -191,7 +190,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     semester: _academics?['semester']?.toString() ?? '',
                     currentWeek:
                         (_academics?['current_week'] as num?)?.toInt() ?? 1,
-                    onPlanWithAi: _planWithAi,
                   ),
                   const SizedBox(height: 12),
                   Container(
@@ -239,7 +237,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                       padding: const EdgeInsets.symmetric(
                                         vertical: 8,
                                       ),
-                                      child: Text(
+                                      child: AppText(
                                         day,
                                         textAlign: TextAlign.center,
                                         style: TextStyle(
@@ -286,10 +284,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     events: _eventsOn(_selectedDate),
                     onAdd: () => _openAddEvent(),
                     onDelete: _removeEvent,
+                    onToggleCompleted: _toggleCompleted,
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 12),
-                    Text(_error!, style: TextStyle(color: colors.error)),
+                    AppText(_error!, style: TextStyle(color: colors.error)),
                   ],
                 ],
               ),
@@ -299,15 +298,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
 }
 
 class _CalendarIntro extends StatelessWidget {
-  const _CalendarIntro({
-    required this.semester,
-    required this.currentWeek,
-    required this.onPlanWithAi,
-  });
+  const _CalendarIntro({required this.semester, required this.currentWeek});
 
   final String semester;
   final int currentWeek;
-  final VoidCallback onPlanWithAi;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -329,22 +323,16 @@ class _CalendarIntro extends StatelessWidget {
             const Icon(Icons.calendar_month_rounded, color: _calendarIndigo),
             const SizedBox(width: 9),
             Expanded(
-              child: Text(
+              child: AppText(
                 '$semester · Week $currentWeek',
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
             ),
-            FilledButton.tonalIcon(
-              key: const Key('calendar-plan-ai'),
-              onPressed: onPlanWithAi,
-              icon: const Icon(Icons.auto_awesome_rounded, size: 17),
-              label: const Text('Plan with AI'),
-            ),
           ],
         ),
         const SizedBox(height: 10),
-        Text(
-          'Exams are placed Monday at 9:00 AM and coursework deadlines Sunday at 10:00 PM of their academic week.',
+        AppText(
+          'Academic deadlines appear automatically. Personal events are the ones you add here; weekly priorities stay in Week Planner.',
           style: TextStyle(color: appScreenMuted, fontSize: 12, height: 1.45),
         ),
       ],
@@ -371,23 +359,23 @@ class _MonthToolbar extends StatelessWidget {
     child: Row(
       children: [
         IconButton(
-          tooltip: 'Previous month',
+          tooltip: tr('Previous month'),
           onPressed: onPrevious,
           icon: const Icon(Icons.chevron_left_rounded),
         ),
         Expanded(
-          child: Text(
+          child: AppText(
             '${_months[month.month - 1]} ${month.year}',
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
           ),
         ),
         IconButton(
-          tooltip: 'Next month',
+          tooltip: tr('Next month'),
           onPressed: onNext,
           icon: const Icon(Icons.chevron_right_rounded),
         ),
-        TextButton(onPressed: onToday, child: const Text('Today')),
+        TextButton(onPressed: onToday, child: const AppText('Today')),
       ],
     ),
   );
@@ -440,7 +428,7 @@ class _CalendarDay extends StatelessWidget {
               color: today ? _calendarIndigo : Colors.transparent,
               shape: BoxShape.circle,
             ),
-            child: Text(
+            child: AppText(
               '${date.day}',
               style: TextStyle(
                 color: today
@@ -473,7 +461,7 @@ class _CalendarDay extends StatelessWidget {
                 .toList(),
           ),
           if (events.length > 4)
-            Text(
+            AppText(
               '+${events.length - 4}',
               style: TextStyle(color: appScreenMuted, fontSize: 8),
             ),
@@ -518,7 +506,7 @@ class _LegendItem extends StatelessWidget {
         decoration: BoxDecoration(color: color, shape: BoxShape.circle),
       ),
       const SizedBox(width: 5),
-      Text(label, style: TextStyle(color: appScreenMuted, fontSize: 11)),
+      AppText(label, style: TextStyle(color: appScreenMuted, fontSize: 11)),
     ],
   );
 }
@@ -529,12 +517,14 @@ class _Agenda extends StatelessWidget {
     required this.events,
     required this.onAdd,
     required this.onDelete,
+    required this.onToggleCompleted,
   });
 
   final DateTime date;
   final List<StudentCalendarEvent> events;
   final VoidCallback onAdd;
   final ValueChanged<StudentCalendarEvent> onDelete;
+  final ValueChanged<StudentCalendarEvent> onToggleCompleted;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -553,7 +543,7 @@ class _Agenda extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  const AppText(
                     'SELECTED DAY',
                     style: TextStyle(
                       color: _calendarCyan,
@@ -563,7 +553,7 @@ class _Agenda extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 3),
-                  Text(
+                  AppText(
                     '${_weekdays[date.weekday % 7]}, ${_months[date.month - 1]} ${date.day}',
                     style: const TextStyle(
                       fontSize: 16,
@@ -574,7 +564,7 @@ class _Agenda extends StatelessWidget {
               ),
             ),
             IconButton(
-              tooltip: 'Add event on selected day',
+              tooltip: tr('Add event on selected day'),
               onPressed: onAdd,
               icon: const Icon(Icons.add_circle_outline_rounded),
             ),
@@ -593,7 +583,7 @@ class _Agenda extends StatelessWidget {
               children: [
                 Icon(Icons.event_available_outlined, color: appScreenMuted),
                 const SizedBox(height: 7),
-                Text(
+                AppText(
                   'No events on this day.',
                   style: TextStyle(color: appScreenMuted),
                 ),
@@ -604,7 +594,11 @@ class _Agenda extends StatelessWidget {
           ...events.map(
             (event) => Padding(
               padding: const EdgeInsets.only(bottom: 9),
-              child: _AgendaCard(event: event, onDelete: () => onDelete(event)),
+              child: _AgendaCard(
+                event: event,
+                onDelete: () => onDelete(event),
+                onToggleCompleted: () => onToggleCompleted(event),
+              ),
             ),
           ),
       ],
@@ -613,16 +607,21 @@ class _Agenda extends StatelessWidget {
 }
 
 class _AgendaCard extends StatelessWidget {
-  const _AgendaCard({required this.event, required this.onDelete});
+  const _AgendaCard({
+    required this.event,
+    required this.onDelete,
+    required this.onToggleCompleted,
+  });
 
   final StudentCalendarEvent event;
   final VoidCallback onDelete;
+  final VoidCallback onToggleCompleted;
 
   @override
   Widget build(BuildContext context) {
     final color = _eventColor(event.type);
     return Opacity(
-      opacity: event.completed ? 0.62 : 1,
+      opacity: event.completed ? 0.68 : 1,
       child: Container(
         padding: const EdgeInsets.fromLTRB(13, 11, 8, 11),
         decoration: BoxDecoration(
@@ -637,7 +636,7 @@ class _AgendaCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  AppText(
                     _sourceLabel(event),
                     style: TextStyle(
                       color: color,
@@ -647,18 +646,23 @@ class _AgendaCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
+                  AppText(
                     event.title,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      decoration: event.completed
+                          ? TextDecoration.lineThrough
+                          : null,
+                    ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
+                  AppText(
                     '${_time(event.startAt)}–${_time(event.endAt)}',
                     style: TextStyle(color: appScreenMuted, fontSize: 12),
                   ),
                   if (event.description.isNotEmpty) ...[
                     const SizedBox(height: 6),
-                    Text(
+                    AppText(
                       event.description,
                       style: TextStyle(
                         color: appScreenMuted,
@@ -667,26 +671,33 @@ class _AgendaCard extends StatelessWidget {
                       ),
                     ),
                   ],
-                  if (event.completed) ...[
-                    const SizedBox(height: 6),
-                    const Text(
-                      'COMPLETED',
-                      style: TextStyle(
-                        color: _calendarGreen,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
             if (event.source != StudentCalendarEventSource.academic)
-              IconButton(
-                tooltip: 'Delete ${event.title}',
-                onPressed: onDelete,
-                icon: const Icon(Icons.delete_outline_rounded, size: 19),
-                color: _calendarCoral,
+              Column(
+                children: [
+                  IconButton(
+                    key: Key('calendar-complete-${event.id}'),
+                    tooltip: event.completed
+                        ? 'Mark as not completed'
+                        : 'Mark as completed',
+                    onPressed: onToggleCompleted,
+                    icon: Icon(
+                      event.completed
+                          ? Icons.check_circle_rounded
+                          : Icons.radio_button_unchecked_rounded,
+                      size: 22,
+                    ),
+                    color: _calendarGreen,
+                  ),
+                  IconButton(
+                    tooltip: 'Delete ${event.title}',
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline_rounded, size: 19),
+                    color: _calendarCoral,
+                  ),
+                ],
               ),
           ],
         ),
@@ -751,7 +762,7 @@ class _AddCalendarEventDialogState extends State<_AddCalendarEventDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Add calendar event'),
+    title: const AppText('Add calendar event'),
     content: SizedBox(
       width: 440,
       child: Form(
@@ -765,9 +776,9 @@ class _AddCalendarEventDialogState extends State<_AddCalendarEventDialog> {
                 controller: _title,
                 maxLength: 100,
                 autofocus: true,
-                decoration: const InputDecoration(labelText: 'Event title'),
+                decoration: InputDecoration(labelText: tr('Event title')),
                 validator: (value) => value == null || value.trim().isEmpty
-                    ? 'Enter an event title.'
+                    ? tr('Enter an event title.')
                     : null,
               ),
               const SizedBox(height: 10),
@@ -775,9 +786,7 @@ class _AddCalendarEventDialogState extends State<_AddCalendarEventDialog> {
                 controller: _description,
                 maxLength: 400,
                 maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Notes (optional)',
-                ),
+                decoration: InputDecoration(labelText: tr('Notes (optional)')),
               ),
               const SizedBox(height: 10),
               Row(
@@ -794,7 +803,7 @@ class _AddCalendarEventDialogState extends State<_AddCalendarEventDialog> {
                         if (value != null) setState(() => _date = value);
                       },
                       icon: const Icon(Icons.calendar_today_outlined, size: 17),
-                      label: Text(
+                      label: AppText(
                         '${_date.year}-${_date.month.toString().padLeft(2, '0')}-${_date.day.toString().padLeft(2, '0')}',
                       ),
                     ),
@@ -810,7 +819,7 @@ class _AddCalendarEventDialogState extends State<_AddCalendarEventDialog> {
                         if (value != null) setState(() => _time = value);
                       },
                       icon: const Icon(Icons.schedule_outlined, size: 17),
-                      label: Text(_time.format(context)),
+                      label: AppText(_time.format(context)),
                     ),
                   ),
                 ],
@@ -818,27 +827,27 @@ class _AddCalendarEventDialogState extends State<_AddCalendarEventDialog> {
               const SizedBox(height: 10),
               DropdownButtonFormField<int>(
                 initialValue: _duration,
-                decoration: const InputDecoration(labelText: 'Duration'),
+                decoration: InputDecoration(labelText: tr('Duration')),
                 items: const [
-                  DropdownMenuItem(value: 30, child: Text('30 minutes')),
-                  DropdownMenuItem(value: 60, child: Text('1 hour')),
-                  DropdownMenuItem(value: 90, child: Text('1.5 hours')),
-                  DropdownMenuItem(value: 120, child: Text('2 hours')),
+                  DropdownMenuItem(value: 30, child: AppText('30 minutes')),
+                  DropdownMenuItem(value: 60, child: AppText('1 hour')),
+                  DropdownMenuItem(value: 90, child: AppText('1.5 hours')),
+                  DropdownMenuItem(value: 120, child: AppText('2 hours')),
                 ],
                 onChanged: (value) => setState(() => _duration = value ?? 60),
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<StudentCalendarEventType>(
                 initialValue: _type,
-                decoration: const InputDecoration(labelText: 'Event type'),
+                decoration: InputDecoration(labelText: tr('Event type')),
                 items: const [
                   DropdownMenuItem(
                     value: StudentCalendarEventType.studySession,
-                    child: Text('Study session'),
+                    child: AppText('Study session'),
                   ),
                   DropdownMenuItem(
                     value: StudentCalendarEventType.personal,
-                    child: Text('Personal event'),
+                    child: AppText('Personal event'),
                   ),
                 ],
                 onChanged: (value) => setState(
@@ -853,9 +862,9 @@ class _AddCalendarEventDialogState extends State<_AddCalendarEventDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Cancel'),
+        child: const AppText('Cancel'),
       ),
-      FilledButton(onPressed: _submit, child: const Text('Add to calendar')),
+      FilledButton(onPressed: _submit, child: const AppText('Add to calendar')),
     ],
   );
 }
@@ -879,12 +888,12 @@ class _CalendarError extends StatelessWidget {
             color: Theme.of(context).colorScheme.error,
           ),
           const SizedBox(height: 12),
-          Text(message, textAlign: TextAlign.center),
+          AppText(message, textAlign: TextAlign.center),
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: onRetry,
             icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Try again'),
+            label: const AppText('Try again'),
           ),
         ],
       ),
