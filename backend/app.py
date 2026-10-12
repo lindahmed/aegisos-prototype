@@ -147,6 +147,13 @@ class PortalMessageCreateRequest(BaseModel):
     recipient_id: str | None = Field(default=None, max_length=64)
     is_broadcast: bool = False
     body: str = Field(default="", max_length=4000)
+    group_id: str | None = Field(default=None, max_length=64)
+
+
+class PortalGroupCreateRequest(BaseModel):
+    creator_id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=80)
+    student_ids: list[str] = Field(min_length=1, max_length=100)
 
 
 class PortalMessageReadRequest(BaseModel):
@@ -949,7 +956,9 @@ def create_app(
                 str(result["sender_type"]), str(result["sender_id"])
             )
             result["sender_name"] = sender["name"]
-        if result.get("recipient_id") and result.get("recipient_type"):
+        if result.get("group_id"):
+            result["recipient_name"] = result.get("group_name") or "Group chat"
+        elif result.get("recipient_id") and result.get("recipient_type"):
             if not result.get("recipient_name"):
                 recipient = messaging_participant(
                     str(result["recipient_type"]), str(result["recipient_id"])
@@ -996,6 +1005,27 @@ def create_app(
             ] + students
         return {"actor": actor, "contacts": contacts}
 
+    @api.get("/messages/groups")
+    def get_message_groups(actor_type: Literal["student", "staff"], actor_id: str) -> dict[str, object]:
+        actor = messaging_participant(actor_type, actor_id)
+        return {"groups": repository.list_portal_groups(actor["id"])}
+
+    @api.post("/messages/groups", status_code=201)
+    def create_message_group(request: PortalGroupCreateRequest) -> dict[str, object]:
+        creator = messaging_participant("student", request.creator_id)
+        student_ids = list(dict.fromkeys([creator["id"], *(value.strip() for value in request.student_ids)]))
+        if len(student_ids) < 2:
+            raise HTTPException(status_code=400, detail="Choose at least one other student")
+        for student_id in student_ids:
+            messaging_participant("student", student_id)
+        name = request.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Enter a group name")
+        group = {"group_id": str(uuid4()), "name": name, "creator_id": creator["id"],
+                 "member_count": len(student_ids), "created_at": datetime.now(UTC).isoformat()}
+        repository.create_portal_group(group, student_ids)
+        return {"group": group}
+
     @api.get("/messages")
     def get_messages(actor_type: Literal["student", "staff"], actor_id: str) -> dict[str, object]:
         actor = messaging_participant(actor_type, actor_id)
@@ -1028,13 +1058,19 @@ def create_app(
             recipient_type = None
             recipient_id = None
         else:
-            if request.recipient_type is None or not request.recipient_id:
+            if not request.group_id and (request.recipient_type is None or not request.recipient_id):
                 raise HTTPException(status_code=400, detail="Choose a message recipient")
-            recipient = messaging_participant(request.recipient_type, request.recipient_id)
-            if request.sender_type == "staff" and recipient["type"] != "student":
-                raise HTTPException(status_code=400, detail="Staff messages must be sent to students")
-            recipient_type = recipient["type"]
-            recipient_id = recipient["id"]
+            if request.group_id:
+                group = next((item for item in repository.list_portal_groups(sender["id"])
+                              if item["group_id"] == request.group_id), None)
+                if request.sender_type != "student" or not group:
+                    raise HTTPException(status_code=403, detail="You are not a member of this group")
+                recipient_type, recipient_id = "student", request.group_id
+            else:
+                recipient = messaging_participant(request.recipient_type, request.recipient_id)
+                if request.sender_type == "staff" and recipient["type"] != "student":
+                    raise HTTPException(status_code=400, detail="Staff messages must be sent to students")
+                recipient_type, recipient_id = recipient["type"], recipient["id"]
         message = repository.create_portal_message(
             {
                 "message_id": str(uuid4()),
@@ -1042,6 +1078,7 @@ def create_app(
                 "sender_id": sender["id"],
                 "recipient_type": recipient_type,
                 "recipient_id": recipient_id,
+                "group_id": request.group_id,
                 "is_broadcast": request.is_broadcast,
                 "body": body,
                 "attachment": attachment,
@@ -1061,12 +1098,16 @@ def create_app(
         file: UploadFile = File(...),
         sender_type: Literal["student", "staff"] = Form(...),
         sender_id: str = Form(..., min_length=1, max_length=64),
-        recipient_type: Literal["student", "staff"] = Form(...),
-        recipient_id: str = Form(..., min_length=1, max_length=64),
+        recipient_type: Literal["student", "staff"] | None = Form(None),
+        recipient_id: str | None = Form(None, max_length=64),
+        group_id: str | None = Form(None, max_length=64),
         body: str = Form("", max_length=4000),
     ) -> dict[str, object]:
         messaging_participant(sender_type, sender_id)
-        messaging_participant(recipient_type, recipient_id)
+        if not group_id:
+            if not recipient_type or not recipient_id:
+                raise HTTPException(status_code=400, detail="Choose a message recipient")
+            messaging_participant(recipient_type, recipient_id)
         filename = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
         if not filename or len(filename) > 255 or any(ord(char) < 32 for char in filename):
             raise HTTPException(status_code=400, detail="Choose a document with a valid filename")
@@ -1082,6 +1123,7 @@ def create_app(
             PortalMessageCreateRequest(
                 sender_type=sender_type, sender_id=sender_id,
                 recipient_type=recipient_type, recipient_id=recipient_id,
+                group_id=group_id,
                 body=body,
             ),
             attachment={"filename": filename, "size_bytes": len(content)},

@@ -312,6 +312,14 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
                         read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         PRIMARY KEY (message_id, reader_type, reader_id)
                     );
+                    CREATE TABLE IF NOT EXISTS portal_groups (
+                        group_id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                        creator_id TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    CREATE TABLE IF NOT EXISTS portal_group_members (
+                        group_id TEXT NOT NULL REFERENCES portal_groups(group_id) ON DELETE CASCADE,
+                        student_id TEXT NOT NULL, PRIMARY KEY (group_id, student_id)
+                    );
                     CREATE TABLE IF NOT EXISTS portal_message_deliveries (
                         message_id TEXT NOT NULL REFERENCES portal_messages(message_id)
                             ON DELETE CASCADE,
@@ -322,6 +330,7 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
                     );
                     ALTER TABLE portal_messages ADD COLUMN IF NOT EXISTS attachment TEXT;
                     ALTER TABLE portal_messages ADD COLUMN IF NOT EXISTS attachment_content BYTEA;
+                    ALTER TABLE portal_messages ADD COLUMN IF NOT EXISTS group_id TEXT;
                     CREATE INDEX IF NOT EXISTS idx_portal_messages_sender
                         ON portal_messages(sender_type, sender_id, created_at);
                     CREATE INDEX IF NOT EXISTS idx_portal_messages_recipient
@@ -659,6 +668,20 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
             for row in rows
         ]
 
+    def create_portal_group(self, group: dict[str, Any], student_ids: list[str]) -> None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("INSERT INTO portal_groups (group_id, name, creator_id, created_at) VALUES (%s, %s, %s, %s)",
+                               (group["group_id"], group["name"], group["creator_id"], group["created_at"]))
+                cursor.executemany("INSERT INTO portal_group_members (group_id, student_id) VALUES (%s, %s)",
+                                   [(group["group_id"], student_id) for student_id in dict.fromkeys(student_ids)])
+
+    def list_portal_groups(self, student_id: str) -> list[dict[str, Any]]:
+        return self._fetch_all("""SELECT g.group_id, g.name, g.creator_id,
+            (SELECT COUNT(*) FROM portal_group_members m WHERE m.group_id=g.group_id) AS member_count
+            FROM portal_groups g JOIN portal_group_members mine ON mine.group_id=g.group_id
+            WHERE mine.student_id=%s ORDER BY g.name""", (student_id,))
+
     def create_portal_message(
         self, message: dict[str, Any], *, attachment_content: bytes | None = None
     ) -> dict[str, Any]:
@@ -667,8 +690,8 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
                 cursor.execute(
                     """INSERT INTO portal_messages (
                            message_id, sender_type, sender_id, recipient_type,
-                           recipient_id, is_broadcast, body, created_at, attachment, attachment_content
-                       ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                           recipient_id, is_broadcast, body, created_at, attachment, attachment_content, group_id
+                       ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (
                         message["message_id"],
                         message["sender_type"],
@@ -680,6 +703,7 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
                         message["created_at"],
                         json.dumps(message["attachment"]) if message.get("attachment") else None,
                         attachment_content,
+                        message.get("group_id"),
                     ),
                 )
         return dict(message)
@@ -691,6 +715,11 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
             """SELECT m.message_id, m.sender_type, m.sender_id, m.recipient_type,
                       m.recipient_id, m.is_broadcast, m.body, m.created_at, m.attachment,
                       sender.full_name AS sender_name, recipient.full_name AS recipient_name,
+                      m.group_id, g.name AS group_name,
+                      (SELECT string_agg(s.full_name, ', ') FROM portal_message_reads rr
+                       JOIN students s ON s.student_id::text=rr.reader_id
+                       WHERE rr.message_id=m.message_id AND rr.reader_type='student'
+                         AND rr.reader_id<>m.sender_id) AS seen_by_names,
                       CASE WHEN r.message_id IS NULL THEN FALSE ELSE TRUE END AS was_read,
                       """ + STATUS_COLUMNS_SQL + """
                FROM portal_messages AS m
@@ -698,11 +727,13 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
                  ON m.sender_type = 'student' AND sender.student_id::text = m.sender_id
                LEFT JOIN students AS recipient
                  ON m.recipient_type = 'student' AND recipient.student_id::text = m.recipient_id
+               LEFT JOIN portal_groups g ON g.group_id=m.group_id
                LEFT JOIN portal_message_reads AS r
                  ON r.message_id = m.message_id
                 AND r.reader_type = %s AND r.reader_id = %s
                WHERE (m.sender_type = %s AND m.sender_id = %s)
                   OR (m.recipient_type = %s AND m.recipient_id = %s)
+                  OR (m.group_id IN (SELECT group_id FROM portal_group_members WHERE student_id=%s))
                   OR (%s = 'student' AND m.is_broadcast = TRUE)
                ORDER BY m.created_at, m.message_id""",
             (
@@ -711,6 +742,7 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
                 actor_type,
                 actor_id,
                 actor_type,
+                actor_id,
                 actor_id,
                 actor_type,
             ),
@@ -736,6 +768,7 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
                            (message_id, reader_type, reader_id, delivered_at)
                        SELECT m.message_id, %s, %s, NOW() FROM portal_messages AS m
                        WHERE ((m.recipient_type = %s AND m.recipient_id = %s)
+                              OR (m.group_id IN (SELECT group_id FROM portal_group_members WHERE student_id=%s))
                               OR (%s = 'student' AND m.is_broadcast = TRUE))
                          AND NOT (m.sender_type = %s AND m.sender_id = %s)
                          AND NOT EXISTS (
@@ -743,7 +776,7 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
                              WHERE d.message_id = m.message_id
                                AND d.reader_type = %s AND d.reader_id = %s)
                        ON CONFLICT (message_id, reader_type, reader_id) DO NOTHING""",
-                    (actor_type, actor_id, actor_type, actor_id, actor_type,
+                    (actor_type, actor_id, actor_type, actor_id, actor_id, actor_type,
                      actor_type, actor_id, actor_type, actor_id),
                 )
 

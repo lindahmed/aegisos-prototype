@@ -1345,13 +1345,24 @@ function contactKey(contact) {
 }
 
 
+function isSelfChatMessage(message) {
+  const studentId = String(currentStudent?.student_id ?? '');
+  return Boolean(studentId)
+    && message.sender_type === 'student'
+    && message.recipient_type === 'student'
+    && String(message.sender_id) === studentId
+    && String(message.recipient_id) === studentId;
+}
+
+
 function messagesForContact(contact) {
   if (!contact) return [];
+  if (contact.type === 'group') return campusMessages.filter((message) => message.group_id === String(contact.id));
   if (contact.type === 'broadcast') {
     return campusMessages.filter((message) => message.is_broadcast);
   }
   return campusMessages.filter((message) => {
-    if (message.is_broadcast) return false;
+    if (message.is_broadcast || isSelfChatMessage(message)) return false;
     return (
       (message.sender_type === contact.type && String(message.sender_id) === String(contact.id))
       || (message.recipient_type === contact.type && String(message.recipient_id) === String(contact.id))
@@ -1363,6 +1374,8 @@ function messagesForContact(contact) {
 function conversationContacts() {
   const contacts = new Map();
   for (const message of campusMessages) {
+    if (message.group_id) continue;
+    if (isSelfChatMessage(message)) continue;
     if (message.is_broadcast) {
       contacts.set('broadcast:all-students', {
         type: 'broadcast', id: 'all-students', name: 'Professor broadcasts',
@@ -1432,7 +1445,7 @@ function renderConversationList() {
   for (const message of campusMessages) {
     const outgoing = message.sender_type === 'student'
       && String(message.sender_id) === String(currentStudent?.student_id);
-    const key = message.is_broadcast ? 'broadcast:all-students' : contactKey({
+    const key = message.group_id ? `group:${message.group_id}` : message.is_broadcast ? 'broadcast:all-students' : contactKey({
       type: outgoing ? message.recipient_type : message.sender_type,
       id: outgoing ? message.recipient_id : message.sender_id,
     });
@@ -1561,6 +1574,7 @@ function messageStatusLabel(message) {
     if (message.delivered_count > 0) return `✓✓ Delivered to ${message.delivered_count} of ${total}`;
     return '✓ Sent';
   }
+  if (message.group_id && message.seen_by_names) return `✓✓ Seen by ${message.seen_by_names}`;
   if (message.status === 'seen') return '✓✓ Seen';
   if (message.status === 'delivered') return '✓✓ Delivered';
   return '✓ Sent';
@@ -1576,7 +1590,7 @@ function renderMessageThread(forceScroll = false) {
   conversationSubtitle.textContent = selectedMessageContact.subtitle;
   messageComposeForm.hidden = selectedMessageContact.type === 'broadcast';
   const key = contactKey(selectedMessageContact);
-  const signature = JSON.stringify(thread.map((item) => [item.message_id, item.body, item.attachment, item.created_at, item.status, item.delivered_count, item.seen_count]));
+  const signature = JSON.stringify(thread.map((item) => [item.message_id, item.body, item.attachment, item.created_at, item.status, item.delivered_count, item.seen_count, item.seen_by_names]));
   if (key === renderedMessageThreadKey && signature === renderedMessageThreadSignature) {
     if (forceScroll) {
       messageThread.scrollTop = messageThread.scrollHeight;
@@ -1599,7 +1613,7 @@ function renderMessageThread(forceScroll = false) {
   for (const item of thread) {
     const outgoing = isOutgoingMessage(item);
     const bubble = document.createElement('article');
-    bubble.className = `campus-message ${outgoing ? 'outgoing' : 'incoming'}${item.is_broadcast ? ' broadcast' : ''}`;
+    bubble.className = `campus-message ${outgoing ? 'outgoing' : 'incoming'}${item.is_broadcast ? ' broadcast' : ''}${item.group_id ? ' group' : ''}`;
     const meta = document.createElement('div');
     meta.className = 'campus-message-meta';
     const sender = document.createElement('strong');
@@ -1669,6 +1683,8 @@ async function markSelectedConversationRead() {
 
 function selectMessageConversation(contact) {
   if (messageSending) return;
+  if (contact.type === 'student'
+      && String(contact.id) === String(currentStudent?.student_id)) return;
   if (!selectedMessageContact || contactKey(contact) !== contactKey(selectedMessageContact)) {
     clearMessageAttachment();
     messageComposeInput.value = '';
@@ -1757,10 +1773,15 @@ async function refreshMessages(showErrors = false) {
     const params = new URLSearchParams({ actor_type: 'student', actor_id: actorId });
     const loadDirectory = !messageDirectoryUpdatedAt || Date.now() - messageDirectoryUpdatedAt >= MESSAGE_DIRECTORY_POLL_MS;
     const [contactsResult, messagesResult] = await Promise.allSettled([
-      loadDirectory ? academicApiRequest(`/messages/contacts?${params}`, { signal: AbortSignal.timeout(12000) }).then((response) => {
+      loadDirectory ? academicApiRequest(`/messages/contacts?${params}`, { signal: AbortSignal.timeout(12000) }).then(async (response) => {
         if (!isCurrent()) return;
         const merged = new Map(lookedUpMessageContacts);
         for (const contact of response.contacts || []) merged.set(contactKey(contact), contact);
+        const groups = await academicApiRequest(`/messages/groups?${params}`, { signal: AbortSignal.timeout(12000) });
+        for (const group of groups.groups || []) merged.set(`group:${group.group_id}`, {
+          type: 'group', id: String(group.group_id), name: group.name,
+          subtitle: `${group.member_count} students`, creator_id: String(group.creator_id),
+        });
         messageContacts = [...merged.values()];
         messageDirectoryUpdatedAt = Date.now();
         if (selectedMessageContact && selectedMessageContact.type !== 'broadcast') {
@@ -1772,9 +1793,11 @@ async function refreshMessages(showErrors = false) {
       academicApiRequest(`/messages?${params}`, { signal: AbortSignal.timeout(12000) }).then((response) => {
         if (!isCurrent()) return;
         if (!Array.isArray(response.messages)) throw new Error('The message service returned an invalid inbox. Please restart the backend.');
-        const receivedIds = new Set(response.messages.map((message) => message.message_id));
-        const addedDuringSync = campusMessages.filter((message) => !existingIds.has(message.message_id) && !receivedIds.has(message.message_id));
-        campusMessages = [...response.messages, ...addedDuringSync].map((message) => {
+        const inboxMessages = response.messages.filter((message) => !isSelfChatMessage(message));
+        const receivedIds = new Set(inboxMessages.map((message) => message.message_id));
+        const addedDuringSync = campusMessages.filter((message) => !isSelfChatMessage(message)
+          && !existingIds.has(message.message_id) && !receivedIds.has(message.message_id));
+        campusMessages = [...inboxMessages, ...addedDuringSync].map((message) => {
           if (message.read) pendingMessageReads.delete(message.message_id);
           return pendingMessageReads.has(message.message_id) ? { ...message, read: true } : message;
         });
@@ -1970,6 +1993,129 @@ document.querySelector('#new-message-button').addEventListener('click', () => {
   renderConversationList();
   showMessageSidebar('contacts', true);
 });
+const groupChatDialog = document.querySelector('#group-chat-dialog');
+const groupChatForm = document.querySelector('#group-chat-form');
+const groupChatName = document.querySelector('#group-chat-name');
+const groupChatSearch = document.querySelector('#group-chat-search');
+const groupChatStudentList = document.querySelector('#group-chat-student-list');
+const groupChatSelectionCount = document.querySelector('#group-chat-selection-count');
+const groupChatStatus = document.querySelector('#group-chat-status');
+const groupChatSubmit = document.querySelector('#group-chat-submit');
+let groupChatSelectedStudents = new Set();
+
+function renderGroupChatStudentChoices() {
+  const query = groupChatSearch.value.trim().toLocaleLowerCase();
+  const students = messageContacts
+    .filter((contact) => contact.type === 'student'
+      && String(contact.id) !== String(currentStudent?.student_id))
+    .filter((contact) => `${contact.name} ${contact.id} ${contact.subtitle}`.toLocaleLowerCase().includes(query))
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+  groupChatStudentList.replaceChildren();
+  if (!students.length) {
+    const empty = document.createElement('p');
+    empty.className = 'message-search-help';
+    empty.textContent = query ? 'No students match that search.' : 'No students are available.';
+    groupChatStudentList.append(empty);
+  }
+  for (const student of students) {
+    const label = document.createElement('label');
+    label.className = 'group-chat-student-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = student.id;
+    checkbox.checked = groupChatSelectedStudents.has(String(student.id));
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) groupChatSelectedStudents.add(String(student.id));
+      else groupChatSelectedStudents.delete(String(student.id));
+      updateGroupChatSelectionCount();
+    });
+    const copy = document.createElement('span');
+    const name = document.createElement('strong');
+    name.textContent = student.name;
+    const detail = document.createElement('small');
+    detail.textContent = `ID ${student.id}${student.subtitle ? ` · ${student.subtitle}` : ''}`;
+    copy.append(name, detail);
+    label.append(checkbox, copy);
+    groupChatStudentList.append(label);
+  }
+  updateGroupChatSelectionCount();
+}
+
+function updateGroupChatSelectionCount() {
+  const count = groupChatSelectedStudents.size;
+  groupChatSelectionCount.textContent = `${count} student${count === 1 ? '' : 's'} selected`;
+}
+
+document.querySelector('#new-group-button').addEventListener('click', async () => {
+  if (!currentStudent) {
+    setMessage(messageStatus, 'Sign in as a student before creating a group chat.', true);
+    return;
+  }
+  if (messageSending) return;
+  groupChatForm.reset();
+  groupChatSelectedStudents = new Set();
+  groupChatStudentList.replaceChildren();
+  setMessage(groupChatStatus, '');
+  groupChatDialog.showModal();
+  groupChatName.focus();
+  try {
+    const params = new URLSearchParams({ actor_type: 'student', actor_id: currentStudent.student_id });
+    const response = await academicApiRequest(`/messages/contacts?${params}`);
+    if (currentStudent && response.contacts) {
+      for (const contact of response.contacts) {
+        if (!messageContacts.some((existing) => contactKey(existing) === contactKey(contact))) messageContacts.push(contact);
+      }
+      renderGroupChatStudentChoices();
+    }
+  } catch (error) {
+    setMessage(groupChatStatus, `Could not load students: ${error.message}`, true);
+  }
+});
+groupChatSearch.addEventListener('input', renderGroupChatStudentChoices);
+document.querySelector('#group-chat-cancel').addEventListener('click', () => groupChatDialog.close());
+groupChatForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!currentStudent || messageSending) return;
+  const name = groupChatName.value.trim();
+  const studentIds = [...groupChatSelectedStudents];
+  if (!name) {
+    setMessage(groupChatStatus, 'Enter a group name.', true);
+    groupChatName.focus();
+    return;
+  }
+  if (studentIds.length === 0) {
+    setMessage(groupChatStatus, 'Select at least one other student.', true);
+    groupChatSearch.focus();
+    return;
+  }
+  groupChatSubmit.disabled = true;
+  setMessage(groupChatStatus, 'Creating group chat…');
+  try {
+    const result = await academicApiRequest('/messages/groups', {
+      method: 'POST',
+      body: JSON.stringify({ creator_id: currentStudent.student_id, name, student_ids: studentIds }),
+    });
+    const group = result.group;
+    const contact = {
+      type: 'group', id: String(group.group_id), name: group.name,
+      subtitle: `${group.member_count} students`, creator_id: String(group.creator_id),
+    };
+    messageContacts.push(contact);
+    selectedMessageContact = contact;
+    messageDirectoryUpdatedAt = 0;
+    renderConversationList();
+    renderMessageThread(true);
+    messageComposeForm.hidden = false;
+    showMessageSidebar('recent');
+    setMessage(messageStatus, 'Group chat created.');
+    groupChatDialog.close();
+    refreshMessages();
+  } catch (error) {
+    setMessage(groupChatStatus, error.message, true);
+  } finally {
+    groupChatSubmit.disabled = false;
+  }
+});
 messageSearch.addEventListener('input', () => {
   cancelMessageStudentLookup();
   renderConversationList();
@@ -2001,8 +2147,11 @@ messageComposeForm.addEventListener('submit', async (event) => {
       const formData = new FormData();
       formData.append('sender_type', 'student');
       formData.append('sender_id', senderId);
-      formData.append('recipient_type', recipient.type);
-      formData.append('recipient_id', recipient.id);
+      if (recipient.type === 'group') formData.append('group_id', recipient.id);
+      else {
+        formData.append('recipient_type', recipient.type);
+        formData.append('recipient_id', recipient.id);
+      }
       formData.append('body', body);
       formData.append('file', file);
       sent = await academicApiRequest('/messages/attachments', { method: 'POST', body: formData });
@@ -2012,8 +2161,10 @@ messageComposeForm.addEventListener('submit', async (event) => {
         body: JSON.stringify({
           sender_type: 'student',
           sender_id: senderId,
-          recipient_type: recipient.type,
-          recipient_id: recipient.id,
+          ...(recipient.type === 'group' ? { group_id: recipient.id } : {
+            recipient_type: recipient.type,
+            recipient_id: recipient.id,
+          }),
           body,
         }),
       });

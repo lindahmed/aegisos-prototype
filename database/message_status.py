@@ -19,7 +19,9 @@ STATUS_COLUMNS_SQL = """
     (SELECT COUNT(*) FROM portal_message_reads rr
       WHERE rr.message_id = m.message_id
         AND NOT (rr.reader_type = m.sender_type AND rr.reader_id = m.sender_id)) AS read_count,
-    CASE WHEN m.is_broadcast THEN (SELECT COUNT(*) FROM students) ELSE 1 END AS recipient_count
+    CASE WHEN m.is_broadcast THEN (SELECT COUNT(*) FROM students)
+         WHEN m.group_id IS NOT NULL THEN (SELECT COUNT(*) FROM portal_group_members gm WHERE gm.group_id=m.group_id)
+         ELSE 1 END AS recipient_count
 """
 
 

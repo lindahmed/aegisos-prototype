@@ -369,6 +369,17 @@ class StudentRepository(ScheduleGroupStoreMixin):
                     FOREIGN KEY (message_id) REFERENCES portal_messages(message_id)
                         ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS portal_groups (
+                    group_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    creator_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS portal_group_members (
+                    group_id TEXT NOT NULL REFERENCES portal_groups(group_id) ON DELETE CASCADE,
+                    student_id TEXT NOT NULL,
+                    PRIMARY KEY (group_id, student_id)
+                );
                 CREATE TABLE IF NOT EXISTS portal_message_deliveries (
                     message_id TEXT NOT NULL,
                     reader_type TEXT NOT NULL CHECK(reader_type IN ('student', 'staff')),
@@ -418,6 +429,8 @@ class StudentRepository(ScheduleGroupStoreMixin):
                 connection.execute("ALTER TABLE portal_messages ADD COLUMN attachment TEXT")
             if "attachment_content" not in message_columns:
                 connection.execute("ALTER TABLE portal_messages ADD COLUMN attachment_content BLOB")
+            if "group_id" not in message_columns:
+                connection.execute("ALTER TABLE portal_messages ADD COLUMN group_id TEXT")
             if "status" not in course_columns:
                 connection.execute(
                     "ALTER TABLE courses ADD COLUMN status TEXT NOT NULL DEFAULT 'Current'"
@@ -761,6 +774,21 @@ class StudentRepository(ScheduleGroupStoreMixin):
             for row in rows
         ]
 
+    def create_portal_group(self, group: dict[str, Any], student_ids: list[str]) -> None:
+        with self._connect() as connection:
+            connection.execute("INSERT INTO portal_groups (group_id, name, creator_id, created_at) VALUES (?, ?, ?, ?)",
+                               (group["group_id"], group["name"], group["creator_id"], group["created_at"]))
+            connection.executemany("INSERT INTO portal_group_members (group_id, student_id) VALUES (?, ?)",
+                                   ((group["group_id"], student_id) for student_id in dict.fromkeys(student_ids)))
+
+    def list_portal_groups(self, student_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("""SELECT g.group_id, g.name, g.creator_id,
+                (SELECT COUNT(*) FROM portal_group_members m WHERE m.group_id=g.group_id) AS member_count
+                FROM portal_groups g JOIN portal_group_members mine ON mine.group_id=g.group_id
+                WHERE mine.student_id=? ORDER BY g.name""", (student_id,)).fetchall()
+        return [dict(row) for row in rows]
+
     def create_portal_message(
         self, message: dict[str, Any], *, attachment_content: bytes | None = None
     ) -> dict[str, Any]:
@@ -768,8 +796,8 @@ class StudentRepository(ScheduleGroupStoreMixin):
             connection.execute(
                 """INSERT INTO portal_messages (
                        message_id, sender_type, sender_id, recipient_type,
-                       recipient_id, is_broadcast, body, created_at, attachment, attachment_content
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       recipient_id, is_broadcast, body, created_at, attachment, attachment_content, group_id
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     message["message_id"],
                     message["sender_type"],
@@ -781,6 +809,7 @@ class StudentRepository(ScheduleGroupStoreMixin):
                     message["created_at"],
                     json.dumps(message["attachment"]) if message.get("attachment") else None,
                     attachment_content,
+                    message.get("group_id"),
                 ),
             )
         return dict(message)
@@ -793,6 +822,11 @@ class StudentRepository(ScheduleGroupStoreMixin):
                 """SELECT m.message_id, m.sender_type, m.sender_id, m.recipient_type,
                           m.recipient_id, m.is_broadcast, m.body, m.created_at, m.attachment,
                           sender.name AS sender_name, recipient.name AS recipient_name,
+                          m.group_id, g.name AS group_name,
+                          (SELECT group_concat(s.name, ', ') FROM portal_message_reads rr
+                           JOIN students s ON s.student_id=rr.reader_id
+                           WHERE rr.message_id=m.message_id AND rr.reader_type='student'
+                             AND rr.reader_id<>m.sender_id) AS seen_by_names,
                           CASE WHEN r.message_id IS NULL THEN 0 ELSE 1 END AS was_read,
                           """ + STATUS_COLUMNS_SQL + """
                    FROM portal_messages AS m
@@ -800,11 +834,13 @@ class StudentRepository(ScheduleGroupStoreMixin):
                      ON m.sender_type = 'student' AND sender.student_id = m.sender_id
                    LEFT JOIN students AS recipient
                      ON m.recipient_type = 'student' AND recipient.student_id = m.recipient_id
+                   LEFT JOIN portal_groups g ON g.group_id=m.group_id
                    LEFT JOIN portal_message_reads AS r
                      ON r.message_id = m.message_id
                     AND r.reader_type = ? AND r.reader_id = ?
                    WHERE (m.sender_type = ? AND m.sender_id = ?)
                       OR (m.recipient_type = ? AND m.recipient_id = ?)
+                      OR (m.group_id IN (SELECT group_id FROM portal_group_members WHERE student_id=?))
                       OR (? = 'student' AND m.is_broadcast = 1)
                    ORDER BY m.created_at, m.message_id""",
                 (
@@ -813,6 +849,7 @@ class StudentRepository(ScheduleGroupStoreMixin):
                     actor_type,
                     actor_id,
                     actor_type,
+                    actor_id,
                     actor_id,
                     actor_type,
                 ),
@@ -836,13 +873,14 @@ class StudentRepository(ScheduleGroupStoreMixin):
                        (message_id, reader_type, reader_id, delivered_at)
                    SELECT m.message_id, ?, ?, ? FROM portal_messages AS m
                    WHERE ((m.recipient_type = ? AND m.recipient_id = ?)
+                          OR (m.group_id IN (SELECT group_id FROM portal_group_members WHERE student_id=?))
                           OR (? = 'student' AND m.is_broadcast = 1))
                      AND NOT (m.sender_type = ? AND m.sender_id = ?)
                      AND NOT EXISTS (
                          SELECT 1 FROM portal_message_deliveries d
                          WHERE d.message_id = m.message_id
                            AND d.reader_type = ? AND d.reader_id = ?)""",
-                (actor_type, actor_id, delivered_at, actor_type, actor_id, actor_type,
+                (actor_type, actor_id, delivered_at, actor_type, actor_id, actor_id, actor_type,
                  actor_type, actor_id, actor_type, actor_id),
             )
 
