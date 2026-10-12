@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .academic_calendar import FALL_2026_START_DATE, academic_week
+from .message_status import STATUS_COLUMNS_SQL, apply_message_status
 from .schedule_groups import (
     ACTIVITY_INDEX,
     ACTIVITY_TABLE_SQLITE,
@@ -364,6 +365,15 @@ class StudentRepository(ScheduleGroupStoreMixin):
                     reader_type TEXT NOT NULL CHECK(reader_type IN ('student', 'staff')),
                     reader_id TEXT NOT NULL,
                     read_at TEXT NOT NULL,
+                    PRIMARY KEY (message_id, reader_type, reader_id),
+                    FOREIGN KEY (message_id) REFERENCES portal_messages(message_id)
+                        ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS portal_message_deliveries (
+                    message_id TEXT NOT NULL,
+                    reader_type TEXT NOT NULL CHECK(reader_type IN ('student', 'staff')),
+                    reader_id TEXT NOT NULL,
+                    delivered_at TEXT NOT NULL,
                     PRIMARY KEY (message_id, reader_type, reader_id),
                     FOREIGN KEY (message_id) REFERENCES portal_messages(message_id)
                         ON DELETE CASCADE
@@ -783,7 +793,8 @@ class StudentRepository(ScheduleGroupStoreMixin):
                 """SELECT m.message_id, m.sender_type, m.sender_id, m.recipient_type,
                           m.recipient_id, m.is_broadcast, m.body, m.created_at, m.attachment,
                           sender.name AS sender_name, recipient.name AS recipient_name,
-                          CASE WHEN r.message_id IS NULL THEN 0 ELSE 1 END AS was_read
+                          CASE WHEN r.message_id IS NULL THEN 0 ELSE 1 END AS was_read,
+                          """ + STATUS_COLUMNS_SQL + """
                    FROM portal_messages AS m
                    LEFT JOIN students AS sender
                      ON m.sender_type = 'student' AND sender.student_id = m.sender_id
@@ -814,7 +825,26 @@ class StudentRepository(ScheduleGroupStoreMixin):
                 message["sender_type"] == actor_type
                 and message["sender_id"] == actor_id
             ) or bool(message.pop("was_read"))
-        return messages
+        return apply_message_status(messages, actor_type, actor_id)
+
+    def mark_portal_messages_delivered(self, actor_type: str, actor_id: str) -> None:
+        """Record that this person's app/website has fetched every message addressed to them."""
+        delivered_at = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO portal_message_deliveries
+                       (message_id, reader_type, reader_id, delivered_at)
+                   SELECT m.message_id, ?, ?, ? FROM portal_messages AS m
+                   WHERE ((m.recipient_type = ? AND m.recipient_id = ?)
+                          OR (? = 'student' AND m.is_broadcast = 1))
+                     AND NOT (m.sender_type = ? AND m.sender_id = ?)
+                     AND NOT EXISTS (
+                         SELECT 1 FROM portal_message_deliveries d
+                         WHERE d.message_id = m.message_id
+                           AND d.reader_type = ? AND d.reader_id = ?)""",
+                (actor_type, actor_id, delivered_at, actor_type, actor_id, actor_type,
+                 actor_type, actor_id, actor_type, actor_id),
+            )
 
     def get_portal_message_attachment(self, message_id: str) -> bytes | None:
         with self._connect() as connection:
@@ -1421,25 +1451,6 @@ class StudentRepository(ScheduleGroupStoreMixin):
             "week_number": week_number,
             "rows": [dict(row) for row in rows],
         }
-
-    def get_student_week_attendance(
-        self, student_id: str, semester: str, week_number: int
-    ) -> list[dict[str, Any]]:
-        """Return recorded attendance for one student in a semester week."""
-        with self._connect() as connection:
-            rows = connection.execute(
-                """SELECT attendance.course_code AS course_id, attendance.status
-                   FROM attendance
-                   JOIN course_offerings offering
-                     ON offering.course_id = attendance.course_code
-                    AND offering.semester = attendance.semester_id
-                   WHERE attendance.student_id = ?
-                     AND offering.semester = ?
-                     AND attendance.week_number = ?
-                   ORDER BY attendance.course_code""",
-                (student_id, semester, week_number),
-            ).fetchall()
-        return [dict(row) for row in rows]
 
     def save_portal_course_attendance(
         self, course_id: str, session_date: date, rows: list[dict[str, Any]]

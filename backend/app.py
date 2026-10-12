@@ -51,7 +51,6 @@ from backend.progress.narrative import generate_weekly_narrative
 from backend.progress.scheduler import run_analysis_cycle
 from backend.progress.scoring import leaderboard
 from backend.progress.service import build_student_twin
-from backend.progress.suggestions import build_study_suggestion
 from backend.planner.service import build_semester_plan
 from backend.progress_agent.graph import (
     StudentNotFoundError,
@@ -76,6 +75,8 @@ class WorkspaceRequest(BaseModel):
 
 class WorkstationSetupRequest(WorkspaceRequest):
     requirements: list[str] = Field(default_factory=list, max_length=50)
+    # The packages the student ticked. None = keep their last choice (or everything).
+    selected_requirements: list[str] | None = Field(default=None, max_length=50)
     install: bool = True
 
 
@@ -97,6 +98,8 @@ class WorkstationSetupResponse(BaseModel):
     python_version: str | None = None
     virtual_environment_found: bool
     requirements: list[str]
+    selected_requirements: list[str] = Field(default_factory=list)
+    satisfied_requirements: list[str] = Field(default_factory=list)
     missing_requirements: list[str]
     installed_requirements: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
@@ -868,6 +871,10 @@ def create_app(
     @api.get("/messages")
     def get_messages(actor_type: Literal["student", "staff"], actor_id: str) -> dict[str, object]:
         actor = messaging_participant(actor_type, actor_id)
+        try:  # fetching the inbox is what "delivered" means; never fail the request over it
+            repository.mark_portal_messages_delivered(actor_type, actor["id"])
+        except Exception:
+            pass
         messages = [
             enrich_message(message)
             for message in repository.list_portal_messages(actor_type, actor["id"])
@@ -914,6 +921,10 @@ def create_app(
                 "read": True,
             },
             attachment_content=attachment_content,
+        )
+        message.update(
+            status="sent", delivered_count=0, seen_count=0,
+            recipient_count=0 if request.is_broadcast else 1,
         )
         return {"message": enrich_message(message)}
 
@@ -1445,6 +1456,7 @@ def create_app(
                 student.student_id,
                 course,
                 request.requirements,
+                request.selected_requirements,
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -1469,6 +1481,7 @@ def create_app(
                 course,
                 request.requirements,
                 install=request.install,
+                selected_requirements=request.selected_requirements,
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -1642,27 +1655,6 @@ def create_app(
         if twin is None:
             raise HTTPException(status_code=404, detail="Student not found")
         return twin
-
-    @api.get("/progress/{student_id}/suggestion")
-    def get_study_suggestion(
-        student_id: str, skip: str = ""
-    ) -> dict[str, object]:
-        """Return the next available lecture the student should study.
-
-        skip accepts a comma-separated list of lecture IDs already dismissed
-        by the student, allowing the client to request the next suitable
-        lecture without changing stored academic progress.
-        """
-        twin = build_student_twin(repository, student_id)
-        if twin is None:
-            raise HTTPException(status_code=404, detail="Student not found")
-        skipped = {item.strip() for item in skip.split(",") if item.strip()}
-        return {
-            "student_id": student_id,
-            "semester": twin.semester,
-            "current_week": twin.current_week,
-            "suggestion": build_study_suggestion(twin, skipped),
-        }
 
     @api.post("/progress/analyze/{student_id}")
     def analyze_progress(student_id: str) -> dict[str, object]:

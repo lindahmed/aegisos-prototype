@@ -257,44 +257,131 @@ function customRequirements() {
 }
 
 
+// The student's own package: which of the course's requirements they want installed.
+let workstationSelection = new Set();
+
+function ensureWorkstationToolbar() {
+  let toolbar = document.querySelector('#workstation-toolbar');
+  if (toolbar) return toolbar;
+  toolbar = document.createElement('div');
+  toolbar.id = 'workstation-toolbar';
+  toolbar.className = 'package-toolbar';
+  const count = document.createElement('span');
+  count.id = 'workstation-selection-count';
+  count.className = 'package-count';
+  const all = document.createElement('button');
+  all.type = 'button';
+  all.className = 'text-button';
+  all.textContent = 'Select all';
+  all.addEventListener('click', () => setWorkstationSelection(workstationProfile?.requirements || []));
+  const none = document.createElement('button');
+  none.type = 'button';
+  none.className = 'text-button';
+  none.textContent = 'Clear';
+  none.addEventListener('click', () => setWorkstationSelection([]));
+  toolbar.append(count, all, none);
+  workstationPackages.before(toolbar);
+  return toolbar;
+}
+
+
+function setWorkstationSelection(requirements) {
+  workstationSelection = new Set(requirements);
+  for (const box of workstationPackages.querySelectorAll('input[type="checkbox"]')) {
+    box.checked = workstationSelection.has(box.value);
+    box.closest('.package-option').classList.toggle('is-skipped', !box.checked);
+  }
+  updateWorkstationSummary();
+}
+
+
+function updateWorkstationSummary() {
+  const status = workstationProfile;
+  if (!status) return;
+  const offered = status.requirements || [];
+  const satisfied = new Set(status.satisfied_requirements || []);
+  const chosen = offered.filter((requirement) => workstationSelection.has(requirement));
+  const toInstall = chosen.filter((requirement) => !satisfied.has(requirement));
+  ensureWorkstationToolbar().hidden = offered.length === 0;
+  document.querySelector('#workstation-selection-count').textContent =
+    `${chosen.length} of ${offered.length} selected`;
+
+  workstationBadge.classList.remove('is-checking', 'is-missing');
+  if (offered.length === 0) return;
+  if (chosen.length === 0) {
+    workstationBadge.textContent = 'Nothing selected';
+    workstationBadge.classList.add('is-checking');
+    workstationSummary.textContent = `${status.profile_label}. No packages are selected, so the workspace will be created without installing anything.`;
+  } else if (toInstall.length === 0) {
+    workstationBadge.textContent = 'Ready';
+    workstationSummary.textContent = `${status.profile_label} is ready${status.python_version ? ` with ${status.python_version}` : ''}. Your ${chosen.length} selected package${chosen.length === 1 ? ' is' : 's are'} already installed.`;
+  } else {
+    workstationBadge.textContent = `${toInstall.length} to install`;
+    workstationBadge.classList.add('is-checking');
+    const environment = status.virtual_environment_found ? 'Course environment found.' : 'A private course environment will be created.';
+    workstationSummary.textContent = `${status.profile_label}. ${environment} ${toInstall.length} selected package${toInstall.length === 1 ? '' : 's'} will be installed.`;
+  }
+}
+
+
 function renderWorkstationStatus(status) {
   workstationProfile = status;
   customRequirementsField.hidden = status.known_course;
   workstationPackages.replaceChildren();
-  const missing = new Set(status.missing_requirements || []);
+  workstationSelection = new Set(status.selected_requirements || status.requirements || []);
+  const satisfied = new Set(status.satisfied_requirements || []);
   for (const requirement of status.requirements || []) {
-    const chip = document.createElement('span');
-    chip.className = `package-chip${missing.has(requirement) ? '' : ' is-installed'}`;
-    chip.textContent = requirement;
-    chip.title = missing.has(requirement) ? 'Will be installed' : 'Already installed';
-    workstationPackages.append(chip);
+    const option = document.createElement('label');
+    option.className = `package-chip package-option${satisfied.has(requirement) ? ' is-installed' : ''}${workstationSelection.has(requirement) ? '' : ' is-skipped'}`;
+    option.title = satisfied.has(requirement) ? 'Already installed' : 'Tick to install this package';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = requirement;
+    box.checked = workstationSelection.has(requirement);
+    box.addEventListener('change', () => {
+      if (box.checked) workstationSelection.add(requirement);
+      else workstationSelection.delete(requirement);
+      option.classList.toggle('is-skipped', !box.checked);
+      updateWorkstationSummary();
+    });
+    const name = document.createElement('span');
+    name.textContent = requirement;
+    option.append(box, name);
+    if (satisfied.has(requirement)) {
+      const state = document.createElement('small');
+      state.textContent = 'installed';
+      option.append(state);
+    }
+    workstationPackages.append(option);
   }
 
-  workstationBadge.classList.remove('is-checking', 'is-missing');
   if (!status.known_course && !status.requirements.length) {
+    ensureWorkstationToolbar().hidden = true;
+    workstationBadge.classList.remove('is-checking', 'is-missing');
     workstationBadge.textContent = 'Requirements needed';
     workstationBadge.classList.add('is-missing');
     workstationSummary.textContent = 'No saved profile exists for this course. Add the requirements supplied by the instructor, then create the workspace.';
     return;
   }
-  if (status.setup_complete) {
+  if (!status.requirements.length) {
+    ensureWorkstationToolbar().hidden = true;
+    workstationBadge.classList.remove('is-checking', 'is-missing');
     workstationBadge.textContent = 'Ready';
     workstationSummary.textContent = `${status.profile_label} is ready${status.python_version ? ` with ${status.python_version}` : ''}.`;
     return;
   }
-  workstationBadge.textContent = `${status.missing_requirements.length} to install`;
-  workstationBadge.classList.add('is-checking');
-  const environment = status.virtual_environment_found ? 'Course environment found.' : 'A private course environment will be created.';
-  workstationSummary.textContent = `${status.profile_label}. ${environment} ${status.missing_requirements.length} missing dependencies will be installed.`;
+  updateWorkstationSummary();
 }
 
 
-async function inspectWorkstation(course, requirements = []) {
+async function inspectWorkstation(course, requirements = [], selected = null) {
   if (!currentStudent || !course) return;
   const requestId = ++workstationRequestId;
   workstationProfile = null;
   customRequirementsField.hidden = true;
   workstationPackages.replaceChildren();
+  const toolbar = document.querySelector('#workstation-toolbar');
+  if (toolbar) toolbar.hidden = true;
   workstationBadge.textContent = 'Checking device';
   workstationBadge.classList.add('is-checking');
   workstationBadge.classList.remove('is-missing');
@@ -306,6 +393,7 @@ async function inspectWorkstation(course, requirements = []) {
         student_id: currentStudent.student_id,
         course,
         requirements,
+        selected_requirements: selected,
         install: false,
       }),
     });
@@ -322,7 +410,12 @@ async function inspectWorkstation(course, requirements = []) {
 
 
 customRequirementsInput.addEventListener('change', () => {
-  if (selectedCourse) inspectWorkstation(selectedCourse, customRequirements());
+  if (!selectedCourse) return;
+  // Keep what the student already ticked; packages they just typed start out ticked.
+  const typed = customRequirements();
+  const before = new Set(workstationProfile?.requirements || []);
+  const selected = typed.filter((item) => workstationSelection.has(item) || !before.has(item));
+  inspectWorkstation(selectedCourse, typed, selected);
 });
 
 function renderWorkspaceOverview() {
@@ -1460,6 +1553,20 @@ function isMessageThreadAtBottom() {
 }
 
 
+// "Sent" = stored on the server, "Delivered" = the recipient's app fetched it, "Seen" = they opened it.
+function messageStatusLabel(message) {
+  const total = message.recipient_count || 1;
+  if (message.is_broadcast && total > 1) {
+    if (message.seen_count > 0) return `✓✓ Seen by ${message.seen_count} of ${total}`;
+    if (message.delivered_count > 0) return `✓✓ Delivered to ${message.delivered_count} of ${total}`;
+    return '✓ Sent';
+  }
+  if (message.status === 'seen') return '✓✓ Seen';
+  if (message.status === 'delivered') return '✓✓ Delivered';
+  return '✓ Sent';
+}
+
+
 function renderMessageThread(forceScroll = false) {
   if (!selectedMessageContact) return;
   const thread = messagesForContact(selectedMessageContact).sort((left, right) =>
@@ -1469,7 +1576,7 @@ function renderMessageThread(forceScroll = false) {
   conversationSubtitle.textContent = selectedMessageContact.subtitle;
   messageComposeForm.hidden = selectedMessageContact.type === 'broadcast';
   const key = contactKey(selectedMessageContact);
-  const signature = JSON.stringify(thread.map((item) => [item.message_id, item.body, item.attachment, item.created_at]));
+  const signature = JSON.stringify(thread.map((item) => [item.message_id, item.body, item.attachment, item.created_at, item.status, item.delivered_count, item.seen_count]));
   if (key === renderedMessageThreadKey && signature === renderedMessageThreadSignature) {
     if (forceScroll) {
       messageThread.scrollTop = messageThread.scrollHeight;
@@ -1511,6 +1618,12 @@ function renderMessageThread(forceScroll = false) {
       documentButton.setAttribute('aria-label', `Download ${item.attachment.filename}`);
       documentButton.addEventListener('click', () => downloadMessageDocument(item, documentButton));
       bubble.append(documentButton);
+    }
+    if (outgoing && item.status) {
+      const status = document.createElement('span');
+      status.className = `message-status is-${item.status}`;
+      status.textContent = messageStatusLabel(item);
+      bubble.append(status);
     }
     messageThread.append(bubble);
   }
@@ -1962,79 +2075,6 @@ function addAdvisorMessage(role, content, audioUrl = null) {
 }
 
 
-const suggestionAlert = document.querySelector('#suggestion-alert');
-const suggestionTitle = document.querySelector('#suggestion-alert-title');
-const suggestionText = document.querySelector('#suggestion-alert-text');
-const suggestionStartButton = document.querySelector('#suggestion-start-button');
-let currentSuggestion = null;
-let suggestionRequestId = 0;
-
-
-function hideSuggestionAlert() {
-  suggestionAlert.hidden = true;
-  suggestionAlert.classList.remove('leaving');
-}
-
-
-function dismissSuggestionAlert() {
-  if (suggestionAlert.hidden) return;
-  suggestionAlert.classList.add('leaving');
-  setTimeout(hideSuggestionAlert, 200);
-}
-
-
-function showSuggestionAlert(suggestion) {
-  currentSuggestion = suggestion;
-  suggestionTitle.textContent = suggestion.title;
-  suggestionText.textContent = suggestion.reason + ' You have studied ' +
-    suggestion.completed_lectures + ' of ' + suggestion.available_lectures +
-    ' available lectures.';
-  suggestionAlert.classList.remove('leaving');
-  suggestionAlert.hidden = false;
-  suggestionStartButton.focus({ preventScroll: true });
-}
-
-
-async function loadStudySuggestion(studentId) {
-  const requestId = ++suggestionRequestId;
-  try {
-    const result = await apiRequest(
-      '/progress/' + encodeURIComponent(studentId) + '/suggestion',
-    );
-    if (requestId !== suggestionRequestId || currentStudent?.student_id !== studentId) return;
-    if (result.suggestion) showSuggestionAlert(result.suggestion);
-  } catch (_error) {
-    // The suggestion is optional; login and the workspace still work without it.
-  }
-}
-
-
-function startSuggestedStudy() {
-  const suggestion = currentSuggestion;
-  hideSuggestionAlert();
-  if (!suggestion || !currentStudent) return;
-  if (currentStudent.courses.includes(suggestion.course_name)) {
-    selectCourse(suggestion.course_name);
-  }
-  showDashboardSection('advisor');
-  if (advisorSendButton.disabled) return;
-  addAdvisorMessage(
-    'assistant',
-    suggestion.title + '. ' + suggestion.reason + ' Let me walk you through it.',
-  );
-  sendAdvisorMessage(suggestion.chat_prompt);
-}
-
-
-suggestionStartButton.addEventListener('click', startSuggestedStudy);
-document.querySelector('#suggestion-later-button').addEventListener('click', dismissSuggestionAlert);
-document.querySelector('#suggestion-dismiss-button').addEventListener('click', dismissSuggestionAlert);
-suggestionAlert.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') dismissSuggestionAlert();
-});
-
-
-
 function resetAdvisor() {
   advisorHistory = [];
   advisorMessages.replaceChildren();
@@ -2090,8 +2130,6 @@ function renderStudent(student) {
   loadScores(student.student_id);
   startNotificationSync();
   startMessageSync();
-  hideSuggestionAlert();
-  loadStudySuggestion(student.student_id);
 
   if (student.courses.length > 0) {
     selectCourse(student.courses[0]);
@@ -2168,13 +2206,14 @@ createWorkspaceButton.addEventListener('click', () => {
       student_id: currentStudent.student_id,
       course,
       requirements,
+      selected_requirements: workstationProfile ? [...workstationSelection] : null,
       install: true,
     }),
   }).then((result) => {
     if (selectedCourse === course) renderWorkstationStatus(result);
     const installed = result.installed_requirements.length
       ? ` Installed ${result.installed_requirements.join(', ')}.`
-      : ' Everything required was already installed.';
+      : (result.selected_requirements.length ? ' Everything you selected was already installed.' : ' No packages were selected, so nothing was installed.');
     setMessage(actionStatus, `Smart workspace ready: ${result.path}.${installed}`);
   }).catch((error) => {
     setMessage(actionStatus, error.message, true);
@@ -2279,12 +2318,18 @@ calendarEventForm.addEventListener('submit', (event) => {
 });
 
 
-async function sendAdvisorMessage(message) {
-  if (!currentStudent || !message) return;
+advisorForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!currentStudent) return;
+
+  const message = advisorInput.value.trim();
+  if (!message) return;
 
   const priorHistory = advisorHistory.slice(-10);
   advisorHistory.push({ role: 'user', content: message });
   addAdvisorMessage('user', message);
+  advisorInput.value = '';
+  resizeAdvisorInput();
   setAdvisorBusy(true);
   advisorIntent.textContent = 'Thinking';
   setMessage(advisorStatus, 'Advisor AI is processing your request...');
@@ -2314,16 +2359,6 @@ async function sendAdvisorMessage(message) {
     setAdvisorBusy(false);
     advisorInput.focus();
   }
-}
-
-
-advisorForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const message = advisorInput.value.trim();
-  if (!message) return;
-  advisorInput.value = '';
-  resizeAdvisorInput();
-  await sendAdvisorMessage(message);
 });
 
 advisorInput.addEventListener('input', resizeAdvisorInput);
@@ -2497,9 +2532,6 @@ document.querySelector('#sign-out-button').addEventListener('click', async () =>
   campusMessages = [];
   selectedMessageContact = null;
   toastContainer.replaceChildren();
-  suggestionRequestId += 1;
-  currentSuggestion = null;
-  hideSuggestionAlert();
   notifPanel.hidden = true;
   notifButton.setAttribute('aria-expanded', 'false');
   currentStudent = null;

@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/advisor_message.dart';
 import '../models/grade_report.dart';
+import '../models/group_schedule.dart';
 import '../models/semester_plan.dart';
 import '../models/student.dart';
 import '../models/student_course_schedule.dart';
@@ -492,6 +493,36 @@ class ApiService {
       );
     } on Exception {
       throw const ApiException('The server returned invalid planner data.');
+    }
+  }
+
+  /// The student's common group schedule plus the names of everyone who shares it.
+  /// The first visit builds the group on the server, so this allows a longer wait.
+  Future<GroupSchedule> getGroupSchedule(String studentId) async {
+    final normalizedId = Uri.encodeComponent(studentId.trim());
+    final uri = Uri.parse('$baseUrl/portal/students/$normalizedId/schedule');
+    late http.Response response;
+    try {
+      response = await _client.get(uri).timeout(const Duration(seconds: 45));
+    } on Exception {
+      throw const ApiException(
+        'Could not load your schedule. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _errorDetail(
+          response,
+          'Could not load your schedule (${response.statusCode}).',
+        ),
+      );
+    }
+    try {
+      return GroupSchedule.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
+    } on Exception {
+      throw const ApiException('The server returned invalid schedule data.');
     }
   }
 

@@ -9,6 +9,7 @@ import '../theme/app_theme.dart';
 import 'advisor_screen.dart';
 import 'calendar_screen.dart';
 import 'courses_schedule_screen.dart';
+import 'group_schedule_screen.dart';
 import 'login_screen.dart';
 import 'results_screen.dart';
 import 'semester_planner_screen.dart';
@@ -109,6 +110,15 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       MaterialPageRoute<void>(
         builder: (_) =>
             CoursesScheduleScreen(student: student, apiService: _apiService),
+      ),
+    );
+  }
+
+  void _openGroupSchedule() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            GroupScheduleScreen(student: student, apiService: _apiService),
       ),
     );
   }
@@ -230,6 +240,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     onResults: _openResults,
                     onPlanner: _openSemesterPlanner,
                     onCalendar: _openCalendar,
+                    onGroupSchedule: _openGroupSchedule,
                   ),
                   _ProfileDashboard(student: student, onSignOut: _signOut),
                 ],
@@ -909,11 +920,13 @@ class _AcademicsDashboard extends StatelessWidget {
     required this.onResults,
     required this.onPlanner,
     required this.onCalendar,
+    required this.onGroupSchedule,
   });
   final List<Map<String, dynamic>> courses;
   final VoidCallback onResults;
   final VoidCallback onPlanner;
   final VoidCallback onCalendar;
+  final VoidCallback onGroupSchedule;
 
   @override
   Widget build(BuildContext context) {
@@ -964,6 +977,14 @@ class _AcademicsDashboard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
+        _SurfaceAction(
+          key: const Key('open-group-schedule'),
+          icon: Icons.groups_rounded,
+          title: 'My Group Schedule',
+          subtitle: 'Your timetable, rooms, and the students who share it',
+          onTap: onGroupSchedule,
+        ),
+        const SizedBox(height: 10),
         _SurfaceAction(
           key: const Key('open-calendar'),
           icon: Icons.calendar_month_rounded,
@@ -1580,6 +1601,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
     'Grades',
     'Registration',
     'Financial',
+    'Advisor AI',
     'System',
   ];
 
@@ -1779,6 +1801,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       'Grades' => Icons.school_outlined,
       'Registration' => Icons.assignment_turned_in_outlined,
       'Financial' => Icons.account_balance_wallet_outlined,
+      'Advisor AI' => Icons.auto_awesome_outlined,
       _ => Icons.settings_outlined,
     };
   }
@@ -1788,6 +1811,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       'Grades' => colorScheme.primaryContainer,
       'Registration' => colorScheme.secondaryContainer,
       'Financial' => colorScheme.tertiaryContainer,
+      'Advisor AI' => colorScheme.inversePrimary,
       _ => colorScheme.surfaceContainerHighest,
     };
   }
