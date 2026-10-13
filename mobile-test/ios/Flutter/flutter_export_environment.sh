@@ -1,0 +1,15 @@
+#!/bin/sh
+# This is a generated file; do not edit or check into version control.
+export "FLUTTER_ROOT=/Users/hamsaa/Desktop/development/flutter"
+export "FLUTTER_APPLICATION_PATH=/Users/hamsaa/Desktop/aegisos-prototype-main/mobile"
+export "FLUTTER_FRAMEWORK_SWIFT_PACKAGE_PATH=/Users/hamsaa/Desktop/aegisos-prototype-main/mobile/ios/Flutter/ephemeral/Packages/.packages/FlutterFramework"
+export "COCOAPODS_PARALLEL_CODE_SIGN=true"
+export "FLUTTER_TARGET=/Users/hamsaa/Desktop/aegisos-prototype-main/mobile/lib/main.dart"
+export "FLUTTER_BUILD_DIR=build"
+export "FLUTTER_BUILD_NAME=1.1.0"
+export "FLUTTER_BUILD_NUMBER=3"
+export "DART_DEFINES=QVBJX0JBU0VfVVJMPWh0dHBzOi8vd2ViLXByb2R1Y3Rpb24tM2E2YWQudXAucmFpbHdheS5hcHA=,RkxVVFRFUl9CVUlMRF9OQU1FPTEuMS4w,RkxVVFRFUl9CVUlMRF9OVU1CRVI9Mw==,RkxVVFRFUl9WRVJTSU9OPTMuNDcuMg==,RkxVVFRFUl9DSEFOTkVMPXN0YWJsZQ==,RkxVVFRFUl9HSVRfVVJMPWh0dHBzOi8vZ2l0aHViLmNvbS9mbHV0dGVyL2ZsdXR0ZXIuZ2l0,RkxVVFRFUl9GUkFNRVdPUktfUkVWSVNJT049ZDNiMTRjODc2OQ==,RkxVVFRFUl9FTkdJTkVfUkVWSVNJT049YTgwNGIyNjE2NA==,RkxVVFRFUl9EQVJUX1ZFUlNJT049My4xMy4y"
+export "DART_OBFUSCATION=false"
+export "TRACK_WIDGET_CREATION=true"
+export "TREE_SHAKE_ICONS=false"
+export "PACKAGE_CONFIG=/Users/hamsaa/Desktop/aegisos-prototype-main/mobile/.dart_tool/package_config.json"

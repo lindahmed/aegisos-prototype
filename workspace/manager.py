@@ -83,6 +83,13 @@ COURSE_ENVIRONMENTS: tuple[CourseEnvironmentProfile, ...] = (
         packages=("bandit==1.7.10", "pytest==8.3.3"),
     ),
     CourseEnvironmentProfile(
+        "cybersecurity",
+        "Cybersecurity",
+        ("cybersecurity", "cyber security"),
+        packages=("numpy==2.5.3", "pandas==3.0.6"),
+        notes=("Includes the course's data-analysis packages.",),
+    ),
+    CourseEnvironmentProfile(
         "network-security",
         "Network Security",
         ("network security",),

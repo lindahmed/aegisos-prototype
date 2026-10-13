@@ -2,6 +2,12 @@ const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
 const { installMeetings } = require('./meetings/desktop');
 
+// Avoid noisy VA-API initialization failures on Linux systems without a
+// working hardware video decoder, while keeping GPU rendering enabled.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('disable-accelerated-video-decode');
+}
+
 
 function createWindow() {
   const mainWindow = new BrowserWindow({

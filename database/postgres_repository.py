@@ -1308,6 +1308,21 @@ class PostgresStudentRepository(ScheduleGroupStoreMixin):
             "rows": rows,
         }
 
+    def get_student_week_attendance(
+        self, student_id: str, semester: str, week_number: int
+    ) -> list[dict[str, Any]]:
+        """Return a student's recorded attendance for one semester week."""
+        return self._fetch_all(
+            """SELECT record.course_code AS course_id, record.status
+               FROM attendance record
+               JOIN semesters semester ON semester.id = record.semester_id
+               WHERE record.student_id = %s
+                 AND semester.name = %s
+                 AND record.week_number = %s
+               ORDER BY record.course_code""",
+            (student_id, semester, week_number),
+        )
+
     def save_portal_course_attendance(
         self, course_id: str, session_date: date, rows: list[dict[str, Any]]
     ) -> dict[str, Any] | None:
