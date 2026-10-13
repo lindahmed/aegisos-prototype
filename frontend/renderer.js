@@ -51,12 +51,11 @@ const openVsCodeButton = document.querySelector('#open-vscode-button');
 const workstationBadge = document.querySelector('#workstation-badge');
 const workstationSummary = document.querySelector('#workstation-summary');
 const workstationPackages = document.querySelector('#workstation-packages');
-const packageSearchInput = document.querySelector('#workstation-package-search');
-const packageVersionSelect = document.querySelector('#workstation-package-version');
+const customRequirementsField = document.querySelector('#custom-requirements-field');
+const customRequirementsInput = document.querySelector('#custom-requirements');
 const advisorBackButton = document.querySelector('#advisor-back-button');
 const scoreButton = document.querySelector('#score-button');
 const scorePanel = document.querySelector('#score-panel');
-const notesLauncher = document.querySelector('#notes-launcher');
 
 const workspaceTab = document.querySelector('#workspace-tab');
 const advisorTab = document.querySelector('#advisor-tab');
@@ -102,126 +101,6 @@ let progressState = 'loading';
 let scoreRequestId = 0;
 let workstationRequestId = 0;
 let workstationProfile = null;
-let studentNotes = [];
-let selectedNoteId = null;
-
-notesLauncher.addEventListener('click', () => {
-  if (!currentStudent) return;
-  showDashboardSection('workspace');
-  const panel = document.querySelector('#workspace-notes');
-  const opening = panel.hidden;
-  panel.hidden = !opening;
-  notesLauncher.setAttribute('aria-expanded', String(opening));
-  if (opening) {
-    if (!selectedNoteId) document.querySelector('#new-note-button').click();
-    document.querySelector('#note-body').focus({ preventScroll: true });
-  }
-});
-
-document.querySelector('#close-notes-button').addEventListener('click', () => {
-  document.querySelector('#workspace-notes').hidden = true;
-  notesLauncher.setAttribute('aria-expanded', 'false');
-});
-
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !document.querySelector('#workspace-notes').hidden) {
-    document.querySelector('#workspace-notes').hidden = true;
-    notesLauncher.setAttribute('aria-expanded', 'false');
-  }
-});
-
-function notesStorageKey(studentId) {
-  return `aegisos:student-notes:${studentId}`;
-}
-
-function saveStudentNotes() {
-  if (!currentStudent) return;
-  localStorage.setItem(notesStorageKey(currentStudent.student_id), JSON.stringify(studentNotes));
-}
-
-function renderNotes() {
-  const list = document.querySelector('#notes-list');
-  const count = document.querySelector('#notes-count');
-  const empty = document.querySelector('#notes-empty');
-  const fields = document.querySelector('#note-fields');
-  const title = document.querySelector('#note-title');
-  const body = document.querySelector('#note-body');
-  const selected = studentNotes.find((note) => note.id === selectedNoteId) || null;
-  list.replaceChildren();
-  count.textContent = String(studentNotes.length);
-
-  for (const note of studentNotes) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `note-list-item${note.id === selectedNoteId ? ' is-selected' : ''}`;
-    button.setAttribute('aria-pressed', String(note.id === selectedNoteId));
-    const noteTitle = document.createElement('strong');
-    noteTitle.textContent = note.title.trim() || 'New Note';
-    const preview = document.createElement('span');
-    preview.textContent = note.body.trim() || 'No additional text';
-    const date = document.createElement('small');
-    date.textContent = new Date(note.updatedAt).toLocaleDateString();
-    button.append(noteTitle, preview, date);
-    button.addEventListener('click', () => {
-      selectedNoteId = note.id;
-      renderNotes();
-    });
-    list.append(button);
-  }
-
-  empty.hidden = Boolean(selected);
-  fields.hidden = !selected;
-  if (selected) {
-    title.value = selected.title;
-    body.value = selected.body;
-  }
-}
-
-function loadStudentNotes(studentId) {
-  try {
-    const value = JSON.parse(localStorage.getItem(notesStorageKey(studentId)) || '[]');
-    studentNotes = Array.isArray(value) ? value.filter((note) =>
-      note && typeof note.id === 'string' && typeof note.title === 'string' &&
-      typeof note.body === 'string' && typeof note.updatedAt === 'number') : [];
-  } catch {
-    studentNotes = [];
-  }
-  selectedNoteId = studentNotes[0]?.id || null;
-  renderNotes();
-}
-
-document.querySelector('#new-note-button').addEventListener('click', () => {
-  if (!currentStudent) return;
-  const note = { id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`, title: 'New Note', body: '', updatedAt: Date.now() };
-  studentNotes.unshift(note);
-  selectedNoteId = note.id;
-  saveStudentNotes();
-  renderNotes();
-  document.querySelector('#note-title').focus();
-});
-
-for (const [field, input] of [['title', document.querySelector('#note-title')], ['body', document.querySelector('#note-body')]]) {
-  input.addEventListener('input', () => {
-    const note = studentNotes.find((item) => item.id === selectedNoteId);
-    if (!note) return;
-    note[field] = input.value;
-    note.updatedAt = Date.now();
-    saveStudentNotes();
-    const cursor = input.selectionStart;
-    renderNotes();
-    input.focus();
-    input.setSelectionRange(cursor, cursor);
-    document.querySelector('#note-save-status').textContent = 'Saved automatically';
-  });
-}
-
-document.querySelector('#delete-note-button').addEventListener('click', () => {
-  if (!selectedNoteId) return;
-  studentNotes = studentNotes.filter((note) => note.id !== selectedNoteId);
-  selectedNoteId = studentNotes[0]?.id || null;
-  saveStudentNotes();
-  renderNotes();
-});
 
 function closeScorePanel() {
   scorePanel.hidden = true;
@@ -370,114 +249,174 @@ function selectCourse(course) {
 }
 
 
-let packageLookupTimer = null;
-let packageLookupRequest = 0;
+function customRequirements() {
+  return customRequirementsInput.value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
-function renderWorkstationStatus(status) {
-  workstationProfile = status;
-  workstationPackages.replaceChildren();
-  const installed = status.installations || [];
-  workstationBadge.classList.remove('is-checking', 'is-missing');
-  workstationBadge.textContent = installed.length ? `${installed.length} recent installation${installed.length === 1 ? '' : 's'}` : 'Ready';
-  workstationSummary.textContent = installed.length
-    ? 'Your latest package installations are saved to your account.'
-    : 'Enter a Python package name to see available versions and install one.';
-  if (!installed.length) {
-    workstationPackages.textContent = 'No package installations yet.';
-    return;
+
+// The student's own package: which of the course's requirements they want installed.
+let workstationSelection = new Set();
+
+function ensureWorkstationToolbar() {
+  let toolbar = document.querySelector('#workstation-toolbar');
+  if (toolbar) return toolbar;
+  toolbar = document.createElement('div');
+  toolbar.id = 'workstation-toolbar';
+  toolbar.className = 'package-toolbar';
+  const count = document.createElement('span');
+  count.id = 'workstation-selection-count';
+  count.className = 'package-count';
+  const all = document.createElement('button');
+  all.type = 'button';
+  all.className = 'text-button';
+  all.textContent = 'Select all';
+  all.addEventListener('click', () => setWorkstationSelection(workstationProfile?.requirements || []));
+  const none = document.createElement('button');
+  none.type = 'button';
+  none.className = 'text-button';
+  none.textContent = 'Clear';
+  none.addEventListener('click', () => setWorkstationSelection([]));
+  toolbar.append(count, all, none);
+  workstationPackages.before(toolbar);
+  return toolbar;
+}
+
+
+function setWorkstationSelection(requirements) {
+  workstationSelection = new Set(requirements);
+  for (const box of workstationPackages.querySelectorAll('input[type="checkbox"]')) {
+    box.checked = workstationSelection.has(box.value);
+    box.closest('.package-option').classList.toggle('is-skipped', !box.checked);
   }
-  for (const item of installed) {
-    const row = document.createElement('div');
-    row.className = 'package-chip package-installed-row';
-    const label = document.createElement('span');
-    label.textContent = `${item.name} ${item.version}`;
-    const context = document.createElement('small');
-    context.textContent = `${item.course || ''}${item.installed_at ? ` · ${new Date(item.installed_at).toLocaleString()}` : ''}`;
-    row.append(label, context);
-    workstationPackages.append(row);
+  updateWorkstationSummary();
+}
+
+
+function updateWorkstationSummary() {
+  const status = workstationProfile;
+  if (!status) return;
+  const offered = status.requirements || [];
+  const satisfied = new Set(status.satisfied_requirements || []);
+  const chosen = offered.filter((requirement) => workstationSelection.has(requirement));
+  const toInstall = chosen.filter((requirement) => !satisfied.has(requirement));
+  ensureWorkstationToolbar().hidden = offered.length === 0;
+  document.querySelector('#workstation-selection-count').textContent =
+    `${chosen.length} of ${offered.length} selected`;
+
+  workstationBadge.classList.remove('is-checking', 'is-missing');
+  if (offered.length === 0) return;
+  if (chosen.length === 0) {
+    workstationBadge.textContent = 'Nothing selected';
+    workstationBadge.classList.add('is-checking');
+    workstationSummary.textContent = `${status.profile_label}. No packages are selected, so the workspace will be created without installing anything.`;
+  } else if (toInstall.length === 0) {
+    workstationBadge.textContent = 'Ready';
+    workstationSummary.textContent = `${status.profile_label} is ready${status.python_version ? ` with ${status.python_version}` : ''}. Your ${chosen.length} selected package${chosen.length === 1 ? ' is' : 's are'} already installed.`;
+  } else {
+    workstationBadge.textContent = `${toInstall.length} to install`;
+    workstationBadge.classList.add('is-checking');
+    const environment = status.virtual_environment_found ? 'Course environment found.' : 'A private course environment will be created.';
+    workstationSummary.textContent = `${status.profile_label}. ${environment} ${toInstall.length} selected package${toInstall.length === 1 ? '' : 's'} will be installed.`;
   }
 }
 
-async function loadWorkstationInstallations() {
-  if (!currentStudent) return;
+
+function renderWorkstationStatus(status) {
+  workstationProfile = status;
+  customRequirementsField.hidden = status.known_course;
+  workstationPackages.replaceChildren();
+  workstationSelection = new Set(status.selected_requirements || status.requirements || []);
+  const satisfied = new Set(status.satisfied_requirements || []);
+  for (const requirement of status.requirements || []) {
+    const option = document.createElement('label');
+    option.className = `package-chip package-option${satisfied.has(requirement) ? ' is-installed' : ''}${workstationSelection.has(requirement) ? '' : ' is-skipped'}`;
+    option.title = satisfied.has(requirement) ? 'Already installed' : 'Tick to install this package';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = requirement;
+    box.checked = workstationSelection.has(requirement);
+    box.addEventListener('change', () => {
+      if (box.checked) workstationSelection.add(requirement);
+      else workstationSelection.delete(requirement);
+      option.classList.toggle('is-skipped', !box.checked);
+      updateWorkstationSummary();
+    });
+    const name = document.createElement('span');
+    name.textContent = requirement;
+    option.append(box, name);
+    if (satisfied.has(requirement)) {
+      const state = document.createElement('small');
+      state.textContent = 'installed';
+      option.append(state);
+    }
+    workstationPackages.append(option);
+  }
+
+  if (!status.known_course && !status.requirements.length) {
+    ensureWorkstationToolbar().hidden = true;
+    workstationBadge.classList.remove('is-checking', 'is-missing');
+    workstationBadge.textContent = 'Requirements needed';
+    workstationBadge.classList.add('is-missing');
+    workstationSummary.textContent = 'No saved profile exists for this course. Add the requirements supplied by the instructor, then create the workspace.';
+    return;
+  }
+  if (!status.requirements.length) {
+    ensureWorkstationToolbar().hidden = true;
+    workstationBadge.classList.remove('is-checking', 'is-missing');
+    workstationBadge.textContent = 'Ready';
+    workstationSummary.textContent = `${status.profile_label} is ready${status.python_version ? ` with ${status.python_version}` : ''}.`;
+    return;
+  }
+  updateWorkstationSummary();
+}
+
+
+async function inspectWorkstation(course, requirements = [], selected = null) {
+  if (!currentStudent || !course) return;
+  const requestId = ++workstationRequestId;
+  workstationProfile = null;
+  customRequirementsField.hidden = true;
+  workstationPackages.replaceChildren();
+  const toolbar = document.querySelector('#workstation-toolbar');
+  if (toolbar) toolbar.hidden = true;
+  workstationBadge.textContent = 'Checking device';
+  workstationBadge.classList.add('is-checking');
+  workstationBadge.classList.remove('is-missing');
+  workstationSummary.textContent = 'Scanning Python and course dependencies…';
   try {
-    const result = await apiRequest(`/workspace/installations?student_id=${encodeURIComponent(currentStudent.student_id)}`);
-    renderWorkstationStatus({ installations: result.installations || [] });
+    const status = await apiRequest('/workspace/inspect', {
+      method: 'POST',
+      body: JSON.stringify({
+        student_id: currentStudent.student_id,
+        course,
+        requirements,
+        selected_requirements: selected,
+        install: false,
+      }),
+    });
+    if (requestId !== workstationRequestId || selectedCourse !== course) return;
+    renderWorkstationStatus(status);
   } catch (error) {
+    if (requestId !== workstationRequestId || selectedCourse !== course) return;
+    workstationBadge.textContent = 'Check failed';
+    workstationBadge.classList.remove('is-checking');
+    workstationBadge.classList.add('is-missing');
     workstationSummary.textContent = error.message;
   }
 }
 
-async function findWorkstationPackageVersions() {
-  const packageName = packageSearchInput.value.trim();
-  const requestId = ++packageLookupRequest;
-  packageVersionSelect.replaceChildren();
-  const placeholder = document.createElement('option');
-  placeholder.textContent = packageName ? 'Loading versions…' : 'Enter a package name';
-  packageVersionSelect.append(placeholder);
-  packageVersionSelect.disabled = true;
-  document.querySelector('#workstation-package-add').disabled = true;
-  if (!packageName) return;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(packageName)) {
-    placeholder.textContent = 'Enter a valid Python package name';
-    document.querySelector('#package-search-status').textContent = 'Use letters, numbers, dots, underscores, or hyphens.';
-    return;
-  }
-  try {
-    const result = await apiRequest('/workspace/package-versions', {
-      method: 'POST', body: JSON.stringify({ package: packageName }),
-    });
-    if (requestId !== packageLookupRequest) return;
-    packageVersionSelect.replaceChildren();
-    for (const version of result.versions || []) {
-      const option = document.createElement('option');
-      option.value = version;
-      option.textContent = version;
-      packageVersionSelect.append(option);
-    }
-    packageVersionSelect.disabled = !result.versions?.length;
-    document.querySelector('#workstation-package-add').disabled = !result.versions?.length;
-    document.querySelector('#package-search-status').textContent = result.versions?.length
-      ? `${result.versions.length} available versions for ${packageName}.` : 'No versions found.';
-  } catch (error) {
-    if (requestId !== packageLookupRequest) return;
-    placeholder.textContent = 'No versions available';
-    document.querySelector('#package-search-status').textContent = error.message;
-  }
-}
 
-packageSearchInput.addEventListener('input', () => {
-  clearTimeout(packageLookupTimer);
-  packageLookupTimer = setTimeout(findWorkstationPackageVersions, 350);
+customRequirementsInput.addEventListener('change', () => {
+  if (!selectedCourse) return;
+  // Keep what the student already ticked; packages they just typed start out ticked.
+  const typed = customRequirements();
+  const before = new Set(workstationProfile?.requirements || []);
+  const selected = typed.filter((item) => workstationSelection.has(item) || !before.has(item));
+  inspectWorkstation(selectedCourse, typed, selected);
 });
-packageSearchInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') { event.preventDefault(); findWorkstationPackageVersions(); }
-});
-document.querySelector('#workstation-package-add').addEventListener('click', async () => {
-  if (!currentStudent || !selectedCourse || !packageVersionSelect.value) return;
-  const button = document.querySelector('#workstation-package-add');
-  button.disabled = true;
-  button.textContent = 'Installing…';
-  const packageName = packageSearchInput.value.trim();
-  try {
-    const result = await apiRequest('/workspace/installations', {
-      method: 'POST',
-      body: JSON.stringify({ student_id: currentStudent.student_id, course: selectedCourse, package: packageName, version: packageVersionSelect.value }),
-    });
-    renderWorkstationStatus({ installations: result.installations || [] });
-    document.querySelector('#package-search-status').textContent = `${packageName} installed successfully.`;
-  } catch (error) {
-    document.querySelector('#package-search-status').textContent = error.message;
-  } finally {
-    button.disabled = !packageVersionSelect.value;
-    button.textContent = 'Install version';
-  }
-});
-
-async function inspectWorkstation(course) {
-  if (!currentStudent || !course) return;
-  loadWorkstationInstallations();
-}
 
 function renderWorkspaceOverview() {
   if (!currentStudent) return;
@@ -2306,8 +2245,6 @@ function renderStudent(student) {
   currentStaff = null;
   setStaffLayout(false);
   currentStudent = student;
-  loadStudentNotes(student.student_id);
-  loadWorkstationInstallations();
   closeScorePanel();
   document.querySelector('#score-value').textContent = '—';
   currentTwin = null;
@@ -2403,7 +2340,37 @@ async function runWorkspaceAction(path, pendingText) {
 
 
 createWorkspaceButton.addEventListener('click', () => {
-  runWorkspaceAction('/workspace/create', 'Creating the course workspace...');
+  if (!currentStudent || !selectedCourse) return;
+  const requirements = customRequirements();
+  if (workstationProfile && !workstationProfile.known_course && requirements.length === 0) {
+    customRequirementsField.hidden = false;
+    customRequirementsInput.focus();
+    setMessage(actionStatus, 'Add the instructor-provided requirements before creating this workspace.', true);
+    return;
+  }
+  const course = selectedCourse;
+  setBusy(true);
+  setMessage(actionStatus, 'Checking the device and installing missing course dependencies…');
+  apiRequest('/workspace/setup', {
+    method: 'POST',
+    body: JSON.stringify({
+      student_id: currentStudent.student_id,
+      course,
+      requirements,
+      selected_requirements: workstationProfile ? [...workstationSelection] : null,
+      install: true,
+    }),
+  }).then((result) => {
+    if (selectedCourse === course) renderWorkstationStatus(result);
+    const installed = result.installed_requirements.length
+      ? ` Installed ${result.installed_requirements.join(', ')}.`
+      : (result.selected_requirements.length ? ' Everything you selected was already installed.' : ' No packages were selected, so nothing was installed.');
+    setMessage(actionStatus, `Smart workspace ready: ${result.path}.${installed}`);
+  }).catch((error) => {
+    setMessage(actionStatus, error.message, true);
+  }).finally(() => {
+    setBusy(false);
+  });
 });
 
 
@@ -2741,7 +2708,6 @@ function setStaffLayout(isStaff) {
   for (const element of [workspaceTab, advisorTab, progressTab, calendarTab,
     document.querySelector('.student-stats'), document.querySelector('.score-wrap'),
     document.querySelector('.notif-wrap'), inboxButton]) element.hidden = isStaff;
-  notesLauncher.hidden = isStaff;
 }
 
 function renderProfessor(profile) {

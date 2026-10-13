@@ -9,17 +9,8 @@ const { createInvitation, parseInvitation } = require('./invitation');
 const { meetingConfiguration, normalizeRtcConfiguration } = require('./configuration');
 
 function installMeetings(win) {
-  const appUrl = new URL(pathToFileURL(path.join(__dirname, '..', 'index.html')).href);
-  const trusted = (frame) => {
-    if (!frame || frame !== win.webContents.mainFrame) return false;
-    try {
-      const requestUrl = new URL(frame.url);
-      return requestUrl.protocol === appUrl.protocol &&
-        requestUrl.host === appUrl.host && requestUrl.pathname === appUrl.pathname;
-    } catch {
-      return false;
-    }
-  };
+  const appUrl = pathToFileURL(path.join(__dirname, '..', 'index.html')).href;
+  const trusted = (frame) => frame?.url === appUrl && frame === win.webContents.mainFrame;
   let identity = null;
   let server = null;
   let socket = null;
@@ -129,7 +120,7 @@ function installMeetings(win) {
     if (socket) throw new Error('Leave the meeting before changing accounts.');
     identity = null;
     const isStaff = role === 'staff';
-    const base = (isStaff ? process.env.AEGIS_ACADEMIC_API_URL : null) || process.env.AEGIS_API_URL || 'http://127.0.0.1:8000';
+    const base = (isStaff ? process.env.AEGIS_ACADEMIC_API_URL : null) || process.env.AEGIS_API_URL || 'http://127.0.0.1:8001';
     if (!isStaff && role !== 'student') throw new Error('Choose student or professor.');
     const response = await fetch(`${base}${isStaff ? '/portal/staff/login' : `/student/${encodeURIComponent(String(id).trim())}`}`, {
       method: isStaff ? 'POST' : 'GET',

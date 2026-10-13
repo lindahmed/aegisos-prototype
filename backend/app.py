@@ -78,10 +78,6 @@ class WorkstationSetupRequest(WorkspaceRequest):
     # The packages the student ticked. None = keep their last choice (or everything).
     selected_requirements: list[str] | None = Field(default=None, max_length=50)
     install: bool = True
-    python_executable: str | None = Field(default=None, max_length=512)
-    python_version: str | None = Field(default=None, max_length=16)
-    package_versions: dict[str, str] = Field(default_factory=dict, max_length=50)
-    remove_packages: list[str] = Field(default_factory=list, max_length=200)
 
 
 class WorkspaceResponse(BaseModel):
@@ -100,28 +96,16 @@ class WorkstationSetupResponse(BaseModel):
     known_course: bool
     python_found: bool
     python_version: str | None = None
-    python_options: list[dict[str, str]] = Field(default_factory=list)
     virtual_environment_found: bool
     requirements: list[str]
     selected_requirements: list[str] = Field(default_factory=list)
     satisfied_requirements: list[str] = Field(default_factory=list)
-    installed_packages: list[dict[str, str]] = Field(default_factory=list)
-    package_versions: dict[str, list[str]] = Field(default_factory=dict)
     missing_requirements: list[str]
     installed_requirements: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     requirements_file: str | None = None
     install_requested: bool = False
     setup_complete: bool = False
-
-
-class PackageVersionRequest(BaseModel):
-    package: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-
-
-class PackageInstallRequest(WorkspaceRequest):
-    package: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-    version: str = Field(min_length=1, max_length=80)
 
 
 class ScoreAchievementRequest(BaseModel):
@@ -1655,36 +1639,6 @@ def create_app(
             **result,
         )
 
-    @api.post("/workspace/package-versions")
-    def workstation_package_versions(request: PackageVersionRequest) -> dict[str, object]:
-        versions = manager._package_versions([request.package], limit=None).get(request.package.lower(), [])
-        if not versions:
-            raise HTTPException(status_code=404, detail="Package not found or version list unavailable")
-        return {"package": request.package, "versions": versions}
-
-    @api.get("/workspace/installations")
-    def workstation_installations(student_id: str) -> dict[str, object]:
-        student = repository.get_student(student_id)
-        if student is None:
-            raise HTTPException(status_code=404, detail="Student not found")
-        return {"installations": manager.package_installations(student.student_id)}
-
-    @api.post("/workspace/installations")
-    def install_workstation_package(request: PackageInstallRequest) -> dict[str, object]:
-        student = repository.get_student(request.student_id)
-        if student is None:
-            raise HTTPException(status_code=404, detail="Student not found")
-        course = _enrolled_course(student, request.course)
-        try:
-            installations = manager.install_package(student.student_id, course, request.package, request.version)
-        except ValueError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        except ToolUnavailableError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
-        except WorkstationSetupError as error:
-            raise HTTPException(status_code=500, detail=str(error)) from error
-        return {"installations": installations}
-
     @api.post("/workspace/setup", response_model=WorkstationSetupResponse)
     def setup_workstation(request: WorkstationSetupRequest) -> WorkstationSetupResponse:
         student = repository.get_student(request.student_id)
@@ -1698,10 +1652,6 @@ def create_app(
                 request.requirements,
                 install=request.install,
                 selected_requirements=request.selected_requirements,
-                python_executable=request.python_executable,
-                python_version=request.python_version,
-                package_versions=request.package_versions,
-                remove_packages=request.remove_packages,
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

@@ -8,7 +8,7 @@
     >
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UniTrack</title>
-    <link rel="stylesheet" href="styles.css?v=notes-1">
+    <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <main class="app-shell">
@@ -61,12 +61,6 @@
               </div>
             </div>
             <div class="header-actions">
-              <button id="notes-launcher" class="notes-launcher" type="button" aria-label="Open Notes" aria-expanded="false" aria-controls="workspace-notes" title="Notes">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"></path><path d="M14 3v5h5M8 12h8M8 16h8"></path>
-                </svg>
-                <span>Notes</span>
-              </button>
               <div class="score-wrap">
                 <button id="score-button" class="score-button" type="button" aria-label="Open student scores" aria-expanded="false" aria-controls="score-panel" title="Student scores">
                   <span aria-hidden="true">★</span><span id="score-value">—</span><span class="score-unit">pts</span>
@@ -152,23 +146,6 @@
           </nav>
 
           <section id="workspace-panel" class="dashboard-page workspace-panel">
-            <section id="workspace-notes" class="workspace-notes" aria-labelledby="workspace-notes-title" hidden>
-              <div class="notes-heading">
-                <div><p class="workspace-kicker">Quick notes</p><h3 id="workspace-notes-title">Your notes <span id="notes-count" class="count-badge">0</span></h3></div>
-                <div class="notes-heading-actions"><button id="new-note-button" class="secondary-button" type="button" aria-label="Create a new note">＋ New note</button><button id="close-notes-button" class="notes-close-button" type="button" aria-label="Close notes" title="Close notes">×</button></div>
-              </div>
-              <div class="notes-editor">
-                <nav id="notes-list" class="notes-list" aria-label="Saved notes"></nav>
-                <div class="note-writing-area">
-                  <div id="notes-empty" class="notes-empty">Create a note to capture a thought, reminder, or anything else.</div>
-                  <div id="note-fields" class="note-fields" hidden>
-                    <div class="note-title-row"><input id="note-title" type="text" maxlength="120" placeholder="Title" aria-label="Note title"><button id="delete-note-button" class="note-delete-button" type="button" aria-label="Delete note" title="Delete note">Delete</button></div>
-                    <textarea id="note-body" maxlength="20000" placeholder="Write anything you want…" aria-label="Note text"></textarea>
-                    <p id="note-save-status" class="note-save-status" aria-live="polite">Saved automatically</p>
-                  </div>
-                </div>
-              </div>
-            </section>
             <div class="workspace-welcome">
               <div>
                 <p class="workspace-kicker">Student workspace <span id="workspace-week"></span></p>
@@ -198,25 +175,23 @@
               <section class="workstation-setup" aria-labelledby="workstation-title">
                 <div class="workstation-heading">
                   <div>
-                    <p class="workspace-kicker">Python packages</p>
-                    <h4 id="workstation-title">Package manager</h4>
+                    <p class="workspace-kicker">AI environment planner</p>
+                    <h4 id="workstation-title">Smart workstation setup</h4>
                   </div>
                   <span id="workstation-badge" class="setup-badge is-checking">Checking device</span>
                 </div>
                 <p id="workstation-summary" class="workstation-summary">Scanning Python and course dependencies…</p>
-                <div class="package-search-row">
-                  <label for="workstation-package-search">Install a Python package</label>
-                  <input id="workstation-package-search" type="text" maxlength="120" placeholder="Package name, e.g. numpy">
-                  <select id="workstation-package-version" aria-label="Available package versions" disabled><option>Enter a package name</option></select>
-                  <button id="workstation-package-add" type="button" class="text-button" disabled>Install version</button>
-                </div>
-                <p id="package-search-status" class="workstation-summary" aria-live="polite"></p>
-                <div id="workstation-packages" class="package-list" aria-label="Recent package installations"></div>
+                <div id="workstation-packages" class="package-list" aria-label="Course dependencies"></div>
+                <label id="custom-requirements-field" class="custom-requirements" for="custom-requirements" hidden>
+                  <span>Requirements for this course</span>
+                  <small>This course has no saved profile yet. Add one Python package per line, optionally with a version.</small>
+                  <textarea id="custom-requirements" rows="3" maxlength="4000" placeholder="numpy==2.5.3&#10;pandas==3.0.6"></textarea>
+                </label>
               </section>
               <div class="focus-actions">
                 <button id="create-workspace-button" class="secondary-button action-button" type="button">
                   <span class="action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M12 12v4M10 14h4"></path></svg></span>
-                  <span class="action-copy"><strong>Create course workspace</strong><small>Open a private folder for this course</small></span>
+                  <span class="action-copy"><strong>Create smart workspace</strong><small>Folder, Python environment, and dependencies</small></span>
                 </button>
                 <button id="open-vscode-button" class="primary-button action-button" type="button">
                   <span class="action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-5.5 6L8 18M16 6l5.5 6-5.5 6"></path></svg></span>
@@ -560,7 +535,7 @@
       </form>
     </dialog>
     <dialog id="meeting-source-dialog" class="meeting-source-dialog" aria-labelledby="meeting-source-title"><h3 id="meeting-source-title">Choose a screen or window</h3><div id="meeting-sources" class="meeting-sources"></div><button id="meeting-source-cancel" class="secondary-button" type="button">Cancel</button></dialog>
-    <script src="renderer.js?v=notes-1"></script>
-    <script src="meetings/renderer.js?v=notes-1"></script>
+    <script src="renderer.js"></script>
+    <script src="meetings/renderer.js"></script>
   </body>
 </html>

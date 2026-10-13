@@ -7,10 +7,6 @@ import shutil
 import subprocess
 import sys
 import unicodedata
-import urllib.error
-import urllib.request
-import sysconfig
-from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -212,10 +208,9 @@ class WorkspaceManager:
         """
         path = self.create_course_workspace(student_id, course)
         profile = course_environment(course)
-        requirements = validate_requirements((*profile.packages, *custom_requirements)) if profile else validate_requirements(custom_requirements)
+        requirements = profile.packages if profile else validate_requirements(custom_requirements)
         chosen = self._choose_requirements(path, requirements, selected_requirements)
         python = self._find_python()
-        python_options = self._python_options()
         venv_python = self._venv_python(path)
         installed = self._installed_packages(venv_python) if venv_python.exists() else {}
         satisfied = [
@@ -230,49 +225,15 @@ class WorkspaceManager:
             "known_course": profile is not None,
             "python_found": python is not None,
             "python_version": self._python_version(python) if python else None,
-            "python_options": python_options,
             "virtual_environment_found": venv_python.exists(),
             "requirements": list(requirements),
             "selected_requirements": chosen,
             "satisfied_requirements": satisfied,
-            "installed_packages": [
-                {"name": name, "version": version}
-                for name, version in sorted(installed.items())
-            ],
-            "package_versions": self._package_versions(requirements),
             "missing_requirements": missing,
             "notes": list(profile.notes if profile else ()),
         }
 
     _SELECTION_FILE = ".workstation-selection.json"
-
-    def package_installations(self, student_id: str, limit: int = 30) -> list[dict[str, str]]:
-        history = self.student_path(student_id) / ".package-installations.json"
-        try:
-            items = json.loads(history.read_text(encoding="utf-8"))
-            return [item for item in items if isinstance(item, dict)][:limit]
-        except (OSError, ValueError, TypeError):
-            return []
-
-    def install_package(self, student_id: str, course: str, package: str, version: str) -> list[dict[str, str]]:
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", package) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]*", version):
-            raise ValueError("Enter a valid package name and version")
-        path = self.create_course_workspace(student_id, course)
-        python = self._venv_python(path)
-        if not python.exists():
-            base_python = self._find_python()
-            if base_python is None:
-                raise ToolUnavailableError("Python is not installed on this device")
-            self._checked_run([str(base_python), "-m", "venv", str(path / ".venv")], "Could not create the course Python environment")
-        self._checked_run([str(python), "-m", "pip", "install", "--disable-pip-version-check", f"{package}=={version}"], f"Could not install {package} {version}", timeout=900)
-        installed = self._installed_packages(python)
-        normalized = package.lower().replace("_", "-")
-        actual_version = installed.get(normalized, version)
-        history = self.student_path(student_id) / ".package-installations.json"
-        records = self.package_installations(student_id)
-        records.insert(0, {"name": package, "version": actual_version, "course": course, "installed_at": datetime.now().astimezone().isoformat(timespec="seconds")})
-        history.write_text(json.dumps(records[:100], indent=2) + "\n", encoding="utf-8")
-        return records[:30]
 
     def _choose_requirements(
         self, path: Path, requirements: Sequence[str], selected: Sequence[str] | None
@@ -305,22 +266,10 @@ class WorkspaceManager:
         *,
         install: bool = True,
         selected_requirements: Sequence[str] | None = None,
-        python_executable: str | None = None,
-        python_version: str | None = None,
-        package_versions: dict[str, str] | None = None,
-        remove_packages: Sequence[str] = (),
     ) -> dict[str, object]:
-        requirements = list(self._selected_requirements(course, custom_requirements, package_versions or {}))
-        selected_names = {
-            re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)", item).group(1).lower()
-            for item in selected_requirements
-        } if selected_requirements is not None else None
-        chosen = [
-            item for item in requirements
-            if selected_names is None
-            or re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)", item).group(1).lower() in selected_names
-        ]
-        status = self.inspect_course_environment(student_id, course, requirements, chosen)
+        status = self.inspect_course_environment(
+            student_id, course, custom_requirements, selected_requirements
+        )
         path = Path(str(status["path"]))
         # The student's own package: only the requirements they chose are written and installed.
         requirements = tuple(str(item) for item in status["selected_requirements"])
@@ -336,15 +285,11 @@ class WorkspaceManager:
         status["setup_complete"] = not status["missing_requirements"]
         status["install_requested"] = install
 
-        if not install or (not requirements and not python_version and not remove_packages):
+        if not install or not requirements:
             status["setup_complete"] = not requirements or not status["missing_requirements"]
             return status
 
-        python = self._validated_python(python_executable) if python_executable else self._find_python()
-        if python_version:
-            if not re.fullmatch(r"3\.(?:8|9|10|11|12|13|14)(?:\.\d+)?", python_version):
-                raise ValueError("Choose a supported Python version from the list")
-            python = self._install_managed_python(python_version, python)
+        python = self._find_python()
         if python is None:
             raise ToolUnavailableError(
                 "Python is not installed. Install Python 3.12 or newer, then run Smart setup again."
@@ -356,8 +301,6 @@ class WorkspaceManager:
                 [str(python), "-m", "venv", str(path / ".venv")],
                 "Could not create the course virtual environment",
             )
-
-        if venv_python.exists():
             self._checked_run(
                 [
                     str(venv_python),
@@ -373,15 +316,6 @@ class WorkspaceManager:
                 timeout=300,
             )
 
-        if remove_packages and venv_python.exists():
-            installed_now = self._installed_packages(venv_python)
-            removals = sorted({str(name).lower().replace("_", "-") for name in remove_packages} & set(installed_now))
-            if removals:
-                self._checked_run(
-                    [str(venv_python), "-m", "pip", "uninstall", "-y", *removals],
-                    "Could not remove the selected packages",
-                    timeout=300,
-                )
         missing = [str(item) for item in status["missing_requirements"]]
         if missing:
             self._checked_run(
@@ -399,84 +333,6 @@ class WorkspaceManager:
         status["install_requested"] = True
         status["setup_complete"] = not status["missing_requirements"]
         return status
-
-    def _install_managed_python(self, version: str, bootstrap_python: Path | None) -> Path:
-        """Use uv's platform-specific managed runtimes, keeping them separate from system Python."""
-        uv = shutil.which("uv")
-        if not uv:
-            if bootstrap_python is None:
-                raise ToolUnavailableError("Install Python or uv first to download a managed Python version.")
-            self._checked_run(
-                [str(bootstrap_python), "-m", "pip", "install", "--user", "uv"],
-                "Could not prepare the Python version installer", timeout=300,
-            )
-            scripts = Path(sysconfig.get_path("scripts", "nt" if os.name == "nt" else "posix_user"))
-            uv = str(scripts / ("uv.exe" if os.name == "nt" else "uv"))
-            if not Path(uv).is_file():
-                uv = shutil.which("uv")
-            if not uv:
-                raise ToolUnavailableError("The Python installer was prepared but its uv command was not found.")
-        self._checked_run([uv, "python", "install", version], "Could not download the selected Python version", timeout=900)
-        result = self._run([uv, "python", "find", version], capture_output=True, text=True, timeout=30, check=False)
-        if result.returncode != 0 or not result.stdout.strip():
-            raise WorkstationSetupError("Python downloaded, but its interpreter could not be located")
-        return Path(result.stdout.strip().splitlines()[0]).resolve()
-
-    def _python_options(self) -> list[dict[str, str]]:
-        candidates: dict[str, dict[str, str]] = {}
-        for name in ("python", "python3", "python3.13", "python3.12", "python3.11", "python3.10"):
-            executable = shutil.which(name)
-            if not executable:
-                continue
-            version = self._python_version(Path(executable))
-            if version:
-                candidates[executable] = {"path": executable, "version": version}
-        return sorted(
-            candidates.values(),
-            key=lambda item: tuple(
-                int(part) for part in re.findall(r"\d+", item["version"])
-            ),
-            reverse=True,
-        )
-
-    def _validated_python(self, requested: str) -> Path:
-        available = {item["path"] for item in self._python_options()}
-        if requested not in available:
-            raise ValueError("Choose a Python interpreter detected on this device")
-        return Path(requested)
-
-    @staticmethod
-    def _package_versions(requirements: Sequence[str], *, limit: int | None = 12) -> dict[str, list[str]]:
-        result: dict[str, list[str]] = {}
-        for requirement in requirements:
-            match = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)", requirement)
-            if not match:
-                continue
-            package = match.group(1)
-            try:
-                request = urllib.request.Request(f"https://pypi.org/pypi/{package}/json", headers={"User-Agent": "AegisOS-Workstation"})
-                with urllib.request.urlopen(request, timeout=2) as response:
-                    releases = json.loads(response.read().decode("utf-8")).get("releases", {})
-                versions = sorted(
-                    (version for version, files in releases.items() if files),
-                    key=lambda value: tuple(int(part) for part in re.findall(r"\d+", value)),
-                    reverse=True,
-                )
-                result[package.lower()] = versions[:limit] if limit else versions
-            except (OSError, ValueError, urllib.error.URLError, json.JSONDecodeError):
-                result[package.lower()] = []
-        return result
-
-    @staticmethod
-    def _selected_requirements(course: str, custom: Sequence[str], versions: dict[str, str]) -> tuple[str, ...]:
-        profile = course_environment(course)
-        requirements = validate_requirements((*profile.packages, *custom)) if profile else validate_requirements(custom)
-        selected: list[str] = []
-        for requirement in requirements:
-            name = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)", requirement).group(1)
-            version = versions.get(name.lower())
-            selected.append(f"{name}=={version}" if version else requirement)
-        return validate_requirements(selected)
 
     @staticmethod
     def _write_workspace_config(path: Path, requirements: Sequence[str]) -> None:

@@ -23,9 +23,7 @@ function createWindow() {
 
   installMeetings(mainWindow);
   Menu.setApplicationMenu(null);
-  // A new local URL on each launch ensures Electron reloads updated workspace
-  // assets instead of retaining an older file:// page from its disk cache.
-  mainWindow.loadFile(path.join(__dirname, 'index.html'), { query: { launch: String(Date.now()) } });
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
   if (process.env.AEGIS_ELECTRON_SMOKE === '1') {
     mainWindow.webContents.once('did-finish-load', async () => {
