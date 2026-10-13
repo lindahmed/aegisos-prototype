@@ -85,7 +85,6 @@ export default function NotesPanel({ studentId }: { studentId: string }) {
               </button>
             </div>
             <textarea aria-label="Note text" value={selected.body} onChange={(event) => updateSelected('body', event.target.value)} placeholder="Write anything you want…" className="min-h-48 flex-1 resize-y border-0 bg-transparent text-sm leading-6 text-text-primary outline-none placeholder:text-text-muted focus:ring-0" />
-            <p className="mt-2 text-right text-xs text-text-muted">Saved automatically on this device</p>
           </div>
         ) : (
           <div className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
