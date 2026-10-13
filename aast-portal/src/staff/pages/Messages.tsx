@@ -29,6 +29,18 @@ function initials(name: string) {
   return name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
 }
 
+function statusLabel(message: PortalMessage) {
+  const total = message.recipient_count ?? 1
+  if (message.is_broadcast && total > 1) {
+    if ((message.seen_count ?? 0) > 0) return `✓✓ Seen by ${message.seen_count} of ${total}`
+    if ((message.delivered_count ?? 0) > 0) return `✓✓ Delivered to ${message.delivered_count} of ${total}`
+    return '✓ Sent'
+  }
+  if (message.status === 'seen') return '✓✓ Seen'
+  if (message.status === 'delivered') return '✓✓ Delivered'
+  return '✓ Sent'
+}
+
 export default function Messages() {
   const [contacts, setContacts] = useState<MessageContact[]>([])
   const [messages, setMessages] = useState<PortalMessage[]>([])
@@ -205,6 +217,11 @@ export default function Messages() {
                         <time>{messageTime(message.created_at)}</time>
                       </div>
                       <p className="whitespace-pre-wrap text-sm leading-6">{message.body}</p>
+                      {outgoing && message.status && (
+                        <p className={`mt-1.5 text-right text-[11px] font-semibold ${message.status === 'seen' ? 'text-sky-200' : 'text-white/70'}`}>
+                          {statusLabel(message)}
+                        </p>
+                      )}
                     </article>
                   )
                 })}

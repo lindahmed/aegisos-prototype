@@ -404,6 +404,7 @@
                 <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
                 New message
               </button>
+              <button id="new-group-button" class="secondary-button" type="button">New group chat</button>
             </div>
             <div class="messages-layout">
               <aside class="conversation-sidebar">
@@ -518,6 +519,21 @@
       </div>
     </aside>
     <div id="toast-container" class="toast-container" aria-live="polite"></div>
+    <dialog id="group-chat-dialog" class="meeting-source-dialog" aria-labelledby="group-chat-title">
+      <h3 id="group-chat-title">Create a group chat</h3>
+      <form id="group-chat-form" class="calendar-event-form">
+        <label>Group name<input id="group-chat-name" maxlength="80" required placeholder="e.g. Biology study group"></label>
+        <label for="group-chat-search">Find students by name or ID</label>
+        <input id="group-chat-search" type="search" placeholder="Search students" autocomplete="off">
+        <p id="group-chat-selection-count" class="message-search-help">No students selected</p>
+        <div id="group-chat-student-list" class="group-chat-student-list" aria-label="Choose students to add"></div>
+        <p id="group-chat-status" class="message" role="status" aria-live="polite"></p>
+        <div class="calendar-form-actions">
+          <button id="group-chat-cancel" class="secondary-button" type="button">Cancel</button>
+          <button id="group-chat-submit" class="primary-button" type="submit">Create group</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="meeting-source-dialog" class="meeting-source-dialog" aria-labelledby="meeting-source-title"><h3 id="meeting-source-title">Choose a screen or window</h3><div id="meeting-sources" class="meeting-sources"></div><button id="meeting-source-cancel" class="secondary-button" type="button">Cancel</button></dialog>
     <script src="renderer.js"></script>
     <script src="meetings/renderer.js"></script>

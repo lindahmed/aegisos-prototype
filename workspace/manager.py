@@ -198,17 +198,26 @@ class WorkspaceManager:
         student_id: str,
         course: str,
         custom_requirements: Sequence[str] = (),
+        selected_requirements: Sequence[str] | None = None,
     ) -> dict[str, object]:
+        """Report the course's packages and which of them the student chose to install.
+
+        `requirements` is everything the course offers.  The student installs only the
+        `selected_requirements`: what they just ticked, else what they chose last time,
+        else everything.
+        """
         path = self.create_course_workspace(student_id, course)
         profile = course_environment(course)
         requirements = profile.packages if profile else validate_requirements(custom_requirements)
+        chosen = self._choose_requirements(path, requirements, selected_requirements)
         python = self._find_python()
         venv_python = self._venv_python(path)
         installed = self._installed_packages(venv_python) if venv_python.exists() else {}
-        missing = [
+        satisfied = [
             requirement for requirement in requirements
-            if not self._requirement_satisfied(requirement, installed)
+            if self._requirement_satisfied(requirement, installed)
         ]
+        missing = [requirement for requirement in chosen if requirement not in satisfied]
         return {
             "path": str(path),
             "profile": profile.key if profile else "custom",
@@ -218,9 +227,36 @@ class WorkspaceManager:
             "python_version": self._python_version(python) if python else None,
             "virtual_environment_found": venv_python.exists(),
             "requirements": list(requirements),
+            "selected_requirements": chosen,
+            "satisfied_requirements": satisfied,
             "missing_requirements": missing,
             "notes": list(profile.notes if profile else ()),
         }
+
+    _SELECTION_FILE = ".workstation-selection.json"
+
+    def _choose_requirements(
+        self, path: Path, requirements: Sequence[str], selected: Sequence[str] | None
+    ) -> list[str]:
+        """The packages to install: the student's pick, their saved pick, or everything."""
+        if selected is not None:
+            wanted = set(selected)
+            return [item for item in requirements if item in wanted]
+        saved = path / self._SELECTION_FILE
+        try:
+            data = json.loads(saved.read_text(encoding="utf-8"))
+            offered_before = set(data["offered"])
+            wanted = set(data["selected"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return list(requirements)
+        # A package that was not on offer last time is new, so it starts out selected.
+        return [item for item in requirements if item in wanted or item not in offered_before]
+
+    def _save_selection(self, path: Path, requirements: Sequence[str], chosen: Sequence[str]) -> None:
+        (path / self._SELECTION_FILE).write_text(
+            json.dumps({"offered": list(requirements), "selected": list(chosen)}, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     def setup_course_environment(
         self,
@@ -229,10 +265,15 @@ class WorkspaceManager:
         custom_requirements: Sequence[str] = (),
         *,
         install: bool = True,
+        selected_requirements: Sequence[str] | None = None,
     ) -> dict[str, object]:
-        status = self.inspect_course_environment(student_id, course, custom_requirements)
+        status = self.inspect_course_environment(
+            student_id, course, custom_requirements, selected_requirements
+        )
         path = Path(str(status["path"]))
-        requirements = tuple(str(item) for item in status["requirements"])
+        # The student's own package: only the requirements they chose are written and installed.
+        requirements = tuple(str(item) for item in status["selected_requirements"])
+        self._save_selection(path, [str(item) for item in status["requirements"]], requirements)
         requirements_file = path / "requirements.txt"
         requirements_file.write_text(
             "".join(f"{item}\n" for item in requirements),
@@ -282,7 +323,11 @@ class WorkspaceManager:
                 "Could not install the course dependencies",
                 timeout=900,
             )
-        status.update(self.inspect_course_environment(student_id, course, custom_requirements))
+        status.update(
+            self.inspect_course_environment(
+                student_id, course, custom_requirements, list(requirements)
+            )
+        )
         status["requirements_file"] = str(requirements_file)
         status["installed_requirements"] = missing
         status["install_requested"] = True

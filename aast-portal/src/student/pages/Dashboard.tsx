@@ -16,7 +16,6 @@ import PageHeader from '@student/components/layout/PageHeader'
 import Card from '@student/components/ui/Card'
 import StatusBadge from '@student/components/ui/StatusBadge'
 import EmptyState from '@student/components/ui/EmptyState'
-import NotesPanel from '@student/components/ui/NotesPanel'
 import { CardSkeleton, TableSkeleton } from '@student/components/ui/LoadingState'
 import { useLanguage } from '@/context/LanguageContext'
 
@@ -93,8 +92,6 @@ export default function Dashboard() {
           </Link>
         }
       />
-
-      {student?.student_id && <NotesPanel studentId={student.student_id} />}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">

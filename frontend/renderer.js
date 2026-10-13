@@ -257,44 +257,131 @@ function customRequirements() {
 }
 
 
+// The student's own package: which of the course's requirements they want installed.
+let workstationSelection = new Set();
+
+function ensureWorkstationToolbar() {
+  let toolbar = document.querySelector('#workstation-toolbar');
+  if (toolbar) return toolbar;
+  toolbar = document.createElement('div');
+  toolbar.id = 'workstation-toolbar';
+  toolbar.className = 'package-toolbar';
+  const count = document.createElement('span');
+  count.id = 'workstation-selection-count';
+  count.className = 'package-count';
+  const all = document.createElement('button');
+  all.type = 'button';
+  all.className = 'text-button';
+  all.textContent = 'Select all';
+  all.addEventListener('click', () => setWorkstationSelection(workstationProfile?.requirements || []));
+  const none = document.createElement('button');
+  none.type = 'button';
+  none.className = 'text-button';
+  none.textContent = 'Clear';
+  none.addEventListener('click', () => setWorkstationSelection([]));
+  toolbar.append(count, all, none);
+  workstationPackages.before(toolbar);
+  return toolbar;
+}
+
+
+function setWorkstationSelection(requirements) {
+  workstationSelection = new Set(requirements);
+  for (const box of workstationPackages.querySelectorAll('input[type="checkbox"]')) {
+    box.checked = workstationSelection.has(box.value);
+    box.closest('.package-option').classList.toggle('is-skipped', !box.checked);
+  }
+  updateWorkstationSummary();
+}
+
+
+function updateWorkstationSummary() {
+  const status = workstationProfile;
+  if (!status) return;
+  const offered = status.requirements || [];
+  const satisfied = new Set(status.satisfied_requirements || []);
+  const chosen = offered.filter((requirement) => workstationSelection.has(requirement));
+  const toInstall = chosen.filter((requirement) => !satisfied.has(requirement));
+  ensureWorkstationToolbar().hidden = offered.length === 0;
+  document.querySelector('#workstation-selection-count').textContent =
+    `${chosen.length} of ${offered.length} selected`;
+
+  workstationBadge.classList.remove('is-checking', 'is-missing');
+  if (offered.length === 0) return;
+  if (chosen.length === 0) {
+    workstationBadge.textContent = 'Nothing selected';
+    workstationBadge.classList.add('is-checking');
+    workstationSummary.textContent = `${status.profile_label}. No packages are selected, so the workspace will be created without installing anything.`;
+  } else if (toInstall.length === 0) {
+    workstationBadge.textContent = 'Ready';
+    workstationSummary.textContent = `${status.profile_label} is ready${status.python_version ? ` with ${status.python_version}` : ''}. Your ${chosen.length} selected package${chosen.length === 1 ? ' is' : 's are'} already installed.`;
+  } else {
+    workstationBadge.textContent = `${toInstall.length} to install`;
+    workstationBadge.classList.add('is-checking');
+    const environment = status.virtual_environment_found ? 'Course environment found.' : 'A private course environment will be created.';
+    workstationSummary.textContent = `${status.profile_label}. ${environment} ${toInstall.length} selected package${toInstall.length === 1 ? '' : 's'} will be installed.`;
+  }
+}
+
+
 function renderWorkstationStatus(status) {
   workstationProfile = status;
   customRequirementsField.hidden = status.known_course;
   workstationPackages.replaceChildren();
-  const missing = new Set(status.missing_requirements || []);
+  workstationSelection = new Set(status.selected_requirements || status.requirements || []);
+  const satisfied = new Set(status.satisfied_requirements || []);
   for (const requirement of status.requirements || []) {
-    const chip = document.createElement('span');
-    chip.className = `package-chip${missing.has(requirement) ? '' : ' is-installed'}`;
-    chip.textContent = requirement;
-    chip.title = missing.has(requirement) ? 'Will be installed' : 'Already installed';
-    workstationPackages.append(chip);
+    const option = document.createElement('label');
+    option.className = `package-chip package-option${satisfied.has(requirement) ? ' is-installed' : ''}${workstationSelection.has(requirement) ? '' : ' is-skipped'}`;
+    option.title = satisfied.has(requirement) ? 'Already installed' : 'Tick to install this package';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = requirement;
+    box.checked = workstationSelection.has(requirement);
+    box.addEventListener('change', () => {
+      if (box.checked) workstationSelection.add(requirement);
+      else workstationSelection.delete(requirement);
+      option.classList.toggle('is-skipped', !box.checked);
+      updateWorkstationSummary();
+    });
+    const name = document.createElement('span');
+    name.textContent = requirement;
+    option.append(box, name);
+    if (satisfied.has(requirement)) {
+      const state = document.createElement('small');
+      state.textContent = 'installed';
+      option.append(state);
+    }
+    workstationPackages.append(option);
   }
 
-  workstationBadge.classList.remove('is-checking', 'is-missing');
   if (!status.known_course && !status.requirements.length) {
+    ensureWorkstationToolbar().hidden = true;
+    workstationBadge.classList.remove('is-checking', 'is-missing');
     workstationBadge.textContent = 'Requirements needed';
     workstationBadge.classList.add('is-missing');
     workstationSummary.textContent = 'No saved profile exists for this course. Add the requirements supplied by the instructor, then create the workspace.';
     return;
   }
-  if (status.setup_complete) {
+  if (!status.requirements.length) {
+    ensureWorkstationToolbar().hidden = true;
+    workstationBadge.classList.remove('is-checking', 'is-missing');
     workstationBadge.textContent = 'Ready';
     workstationSummary.textContent = `${status.profile_label} is ready${status.python_version ? ` with ${status.python_version}` : ''}.`;
     return;
   }
-  workstationBadge.textContent = `${status.missing_requirements.length} to install`;
-  workstationBadge.classList.add('is-checking');
-  const environment = status.virtual_environment_found ? 'Course environment found.' : 'A private course environment will be created.';
-  workstationSummary.textContent = `${status.profile_label}. ${environment} ${status.missing_requirements.length} missing dependencies will be installed.`;
+  updateWorkstationSummary();
 }
 
 
-async function inspectWorkstation(course, requirements = []) {
+async function inspectWorkstation(course, requirements = [], selected = null) {
   if (!currentStudent || !course) return;
   const requestId = ++workstationRequestId;
   workstationProfile = null;
   customRequirementsField.hidden = true;
   workstationPackages.replaceChildren();
+  const toolbar = document.querySelector('#workstation-toolbar');
+  if (toolbar) toolbar.hidden = true;
   workstationBadge.textContent = 'Checking device';
   workstationBadge.classList.add('is-checking');
   workstationBadge.classList.remove('is-missing');
@@ -306,6 +393,7 @@ async function inspectWorkstation(course, requirements = []) {
         student_id: currentStudent.student_id,
         course,
         requirements,
+        selected_requirements: selected,
         install: false,
       }),
     });
@@ -322,7 +410,12 @@ async function inspectWorkstation(course, requirements = []) {
 
 
 customRequirementsInput.addEventListener('change', () => {
-  if (selectedCourse) inspectWorkstation(selectedCourse, customRequirements());
+  if (!selectedCourse) return;
+  // Keep what the student already ticked; packages they just typed start out ticked.
+  const typed = customRequirements();
+  const before = new Set(workstationProfile?.requirements || []);
+  const selected = typed.filter((item) => workstationSelection.has(item) || !before.has(item));
+  inspectWorkstation(selectedCourse, typed, selected);
 });
 
 function renderWorkspaceOverview() {
@@ -1252,13 +1345,24 @@ function contactKey(contact) {
 }
 
 
+function isSelfChatMessage(message) {
+  const studentId = String(currentStudent?.student_id ?? '');
+  return Boolean(studentId)
+    && message.sender_type === 'student'
+    && message.recipient_type === 'student'
+    && String(message.sender_id) === studentId
+    && String(message.recipient_id) === studentId;
+}
+
+
 function messagesForContact(contact) {
   if (!contact) return [];
+  if (contact.type === 'group') return campusMessages.filter((message) => message.group_id === String(contact.id));
   if (contact.type === 'broadcast') {
     return campusMessages.filter((message) => message.is_broadcast);
   }
   return campusMessages.filter((message) => {
-    if (message.is_broadcast) return false;
+    if (message.is_broadcast || isSelfChatMessage(message)) return false;
     return (
       (message.sender_type === contact.type && String(message.sender_id) === String(contact.id))
       || (message.recipient_type === contact.type && String(message.recipient_id) === String(contact.id))
@@ -1270,6 +1374,8 @@ function messagesForContact(contact) {
 function conversationContacts() {
   const contacts = new Map();
   for (const message of campusMessages) {
+    if (message.group_id) continue;
+    if (isSelfChatMessage(message)) continue;
     if (message.is_broadcast) {
       contacts.set('broadcast:all-students', {
         type: 'broadcast', id: 'all-students', name: 'Professor broadcasts',
@@ -1339,7 +1445,7 @@ function renderConversationList() {
   for (const message of campusMessages) {
     const outgoing = message.sender_type === 'student'
       && String(message.sender_id) === String(currentStudent?.student_id);
-    const key = message.is_broadcast ? 'broadcast:all-students' : contactKey({
+    const key = message.group_id ? `group:${message.group_id}` : message.is_broadcast ? 'broadcast:all-students' : contactKey({
       type: outgoing ? message.recipient_type : message.sender_type,
       id: outgoing ? message.recipient_id : message.sender_id,
     });
@@ -1460,6 +1566,21 @@ function isMessageThreadAtBottom() {
 }
 
 
+// "Sent" = stored on the server, "Delivered" = the recipient's app fetched it, "Seen" = they opened it.
+function messageStatusLabel(message) {
+  const total = message.recipient_count || 1;
+  if (message.is_broadcast && total > 1) {
+    if (message.seen_count > 0) return `✓✓ Seen by ${message.seen_count} of ${total}`;
+    if (message.delivered_count > 0) return `✓✓ Delivered to ${message.delivered_count} of ${total}`;
+    return '✓ Sent';
+  }
+  if (message.group_id && message.seen_by_names) return `✓✓ Seen by ${message.seen_by_names}`;
+  if (message.status === 'seen') return '✓✓ Seen';
+  if (message.status === 'delivered') return '✓✓ Delivered';
+  return '✓ Sent';
+}
+
+
 function renderMessageThread(forceScroll = false) {
   if (!selectedMessageContact) return;
   const thread = messagesForContact(selectedMessageContact).sort((left, right) =>
@@ -1469,7 +1590,7 @@ function renderMessageThread(forceScroll = false) {
   conversationSubtitle.textContent = selectedMessageContact.subtitle;
   messageComposeForm.hidden = selectedMessageContact.type === 'broadcast';
   const key = contactKey(selectedMessageContact);
-  const signature = JSON.stringify(thread.map((item) => [item.message_id, item.body, item.attachment, item.created_at]));
+  const signature = JSON.stringify(thread.map((item) => [item.message_id, item.body, item.attachment, item.created_at, item.status, item.delivered_count, item.seen_count, item.seen_by_names]));
   if (key === renderedMessageThreadKey && signature === renderedMessageThreadSignature) {
     if (forceScroll) {
       messageThread.scrollTop = messageThread.scrollHeight;
@@ -1492,7 +1613,7 @@ function renderMessageThread(forceScroll = false) {
   for (const item of thread) {
     const outgoing = isOutgoingMessage(item);
     const bubble = document.createElement('article');
-    bubble.className = `campus-message ${outgoing ? 'outgoing' : 'incoming'}${item.is_broadcast ? ' broadcast' : ''}`;
+    bubble.className = `campus-message ${outgoing ? 'outgoing' : 'incoming'}${item.is_broadcast ? ' broadcast' : ''}${item.group_id ? ' group' : ''}`;
     const meta = document.createElement('div');
     meta.className = 'campus-message-meta';
     const sender = document.createElement('strong');
@@ -1511,6 +1632,12 @@ function renderMessageThread(forceScroll = false) {
       documentButton.setAttribute('aria-label', `Download ${item.attachment.filename}`);
       documentButton.addEventListener('click', () => downloadMessageDocument(item, documentButton));
       bubble.append(documentButton);
+    }
+    if (outgoing && item.status) {
+      const status = document.createElement('span');
+      status.className = `message-status is-${item.status}`;
+      status.textContent = messageStatusLabel(item);
+      bubble.append(status);
     }
     messageThread.append(bubble);
   }
@@ -1556,6 +1683,8 @@ async function markSelectedConversationRead() {
 
 function selectMessageConversation(contact) {
   if (messageSending) return;
+  if (contact.type === 'student'
+      && String(contact.id) === String(currentStudent?.student_id)) return;
   if (!selectedMessageContact || contactKey(contact) !== contactKey(selectedMessageContact)) {
     clearMessageAttachment();
     messageComposeInput.value = '';
@@ -1644,10 +1773,15 @@ async function refreshMessages(showErrors = false) {
     const params = new URLSearchParams({ actor_type: 'student', actor_id: actorId });
     const loadDirectory = !messageDirectoryUpdatedAt || Date.now() - messageDirectoryUpdatedAt >= MESSAGE_DIRECTORY_POLL_MS;
     const [contactsResult, messagesResult] = await Promise.allSettled([
-      loadDirectory ? academicApiRequest(`/messages/contacts?${params}`, { signal: AbortSignal.timeout(12000) }).then((response) => {
+      loadDirectory ? academicApiRequest(`/messages/contacts?${params}`, { signal: AbortSignal.timeout(12000) }).then(async (response) => {
         if (!isCurrent()) return;
         const merged = new Map(lookedUpMessageContacts);
         for (const contact of response.contacts || []) merged.set(contactKey(contact), contact);
+        const groups = await academicApiRequest(`/messages/groups?${params}`, { signal: AbortSignal.timeout(12000) });
+        for (const group of groups.groups || []) merged.set(`group:${group.group_id}`, {
+          type: 'group', id: String(group.group_id), name: group.name,
+          subtitle: `${group.member_count} students`, creator_id: String(group.creator_id),
+        });
         messageContacts = [...merged.values()];
         messageDirectoryUpdatedAt = Date.now();
         if (selectedMessageContact && selectedMessageContact.type !== 'broadcast') {
@@ -1659,9 +1793,11 @@ async function refreshMessages(showErrors = false) {
       academicApiRequest(`/messages?${params}`, { signal: AbortSignal.timeout(12000) }).then((response) => {
         if (!isCurrent()) return;
         if (!Array.isArray(response.messages)) throw new Error('The message service returned an invalid inbox. Please restart the backend.');
-        const receivedIds = new Set(response.messages.map((message) => message.message_id));
-        const addedDuringSync = campusMessages.filter((message) => !existingIds.has(message.message_id) && !receivedIds.has(message.message_id));
-        campusMessages = [...response.messages, ...addedDuringSync].map((message) => {
+        const inboxMessages = response.messages.filter((message) => !isSelfChatMessage(message));
+        const receivedIds = new Set(inboxMessages.map((message) => message.message_id));
+        const addedDuringSync = campusMessages.filter((message) => !isSelfChatMessage(message)
+          && !existingIds.has(message.message_id) && !receivedIds.has(message.message_id));
+        campusMessages = [...inboxMessages, ...addedDuringSync].map((message) => {
           if (message.read) pendingMessageReads.delete(message.message_id);
           return pendingMessageReads.has(message.message_id) ? { ...message, read: true } : message;
         });
@@ -1857,6 +1993,129 @@ document.querySelector('#new-message-button').addEventListener('click', () => {
   renderConversationList();
   showMessageSidebar('contacts', true);
 });
+const groupChatDialog = document.querySelector('#group-chat-dialog');
+const groupChatForm = document.querySelector('#group-chat-form');
+const groupChatName = document.querySelector('#group-chat-name');
+const groupChatSearch = document.querySelector('#group-chat-search');
+const groupChatStudentList = document.querySelector('#group-chat-student-list');
+const groupChatSelectionCount = document.querySelector('#group-chat-selection-count');
+const groupChatStatus = document.querySelector('#group-chat-status');
+const groupChatSubmit = document.querySelector('#group-chat-submit');
+let groupChatSelectedStudents = new Set();
+
+function renderGroupChatStudentChoices() {
+  const query = groupChatSearch.value.trim().toLocaleLowerCase();
+  const students = messageContacts
+    .filter((contact) => contact.type === 'student'
+      && String(contact.id) !== String(currentStudent?.student_id))
+    .filter((contact) => `${contact.name} ${contact.id} ${contact.subtitle}`.toLocaleLowerCase().includes(query))
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+  groupChatStudentList.replaceChildren();
+  if (!students.length) {
+    const empty = document.createElement('p');
+    empty.className = 'message-search-help';
+    empty.textContent = query ? 'No students match that search.' : 'No students are available.';
+    groupChatStudentList.append(empty);
+  }
+  for (const student of students) {
+    const label = document.createElement('label');
+    label.className = 'group-chat-student-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = student.id;
+    checkbox.checked = groupChatSelectedStudents.has(String(student.id));
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) groupChatSelectedStudents.add(String(student.id));
+      else groupChatSelectedStudents.delete(String(student.id));
+      updateGroupChatSelectionCount();
+    });
+    const copy = document.createElement('span');
+    const name = document.createElement('strong');
+    name.textContent = student.name;
+    const detail = document.createElement('small');
+    detail.textContent = `ID ${student.id}${student.subtitle ? ` · ${student.subtitle}` : ''}`;
+    copy.append(name, detail);
+    label.append(checkbox, copy);
+    groupChatStudentList.append(label);
+  }
+  updateGroupChatSelectionCount();
+}
+
+function updateGroupChatSelectionCount() {
+  const count = groupChatSelectedStudents.size;
+  groupChatSelectionCount.textContent = `${count} student${count === 1 ? '' : 's'} selected`;
+}
+
+document.querySelector('#new-group-button').addEventListener('click', async () => {
+  if (!currentStudent) {
+    setMessage(messageStatus, 'Sign in as a student before creating a group chat.', true);
+    return;
+  }
+  if (messageSending) return;
+  groupChatForm.reset();
+  groupChatSelectedStudents = new Set();
+  groupChatStudentList.replaceChildren();
+  setMessage(groupChatStatus, '');
+  groupChatDialog.showModal();
+  groupChatName.focus();
+  try {
+    const params = new URLSearchParams({ actor_type: 'student', actor_id: currentStudent.student_id });
+    const response = await academicApiRequest(`/messages/contacts?${params}`);
+    if (currentStudent && response.contacts) {
+      for (const contact of response.contacts) {
+        if (!messageContacts.some((existing) => contactKey(existing) === contactKey(contact))) messageContacts.push(contact);
+      }
+      renderGroupChatStudentChoices();
+    }
+  } catch (error) {
+    setMessage(groupChatStatus, `Could not load students: ${error.message}`, true);
+  }
+});
+groupChatSearch.addEventListener('input', renderGroupChatStudentChoices);
+document.querySelector('#group-chat-cancel').addEventListener('click', () => groupChatDialog.close());
+groupChatForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!currentStudent || messageSending) return;
+  const name = groupChatName.value.trim();
+  const studentIds = [...groupChatSelectedStudents];
+  if (!name) {
+    setMessage(groupChatStatus, 'Enter a group name.', true);
+    groupChatName.focus();
+    return;
+  }
+  if (studentIds.length === 0) {
+    setMessage(groupChatStatus, 'Select at least one other student.', true);
+    groupChatSearch.focus();
+    return;
+  }
+  groupChatSubmit.disabled = true;
+  setMessage(groupChatStatus, 'Creating group chat…');
+  try {
+    const result = await academicApiRequest('/messages/groups', {
+      method: 'POST',
+      body: JSON.stringify({ creator_id: currentStudent.student_id, name, student_ids: studentIds }),
+    });
+    const group = result.group;
+    const contact = {
+      type: 'group', id: String(group.group_id), name: group.name,
+      subtitle: `${group.member_count} students`, creator_id: String(group.creator_id),
+    };
+    messageContacts.push(contact);
+    selectedMessageContact = contact;
+    messageDirectoryUpdatedAt = 0;
+    renderConversationList();
+    renderMessageThread(true);
+    messageComposeForm.hidden = false;
+    showMessageSidebar('recent');
+    setMessage(messageStatus, 'Group chat created.');
+    groupChatDialog.close();
+    refreshMessages();
+  } catch (error) {
+    setMessage(groupChatStatus, error.message, true);
+  } finally {
+    groupChatSubmit.disabled = false;
+  }
+});
 messageSearch.addEventListener('input', () => {
   cancelMessageStudentLookup();
   renderConversationList();
@@ -1888,8 +2147,11 @@ messageComposeForm.addEventListener('submit', async (event) => {
       const formData = new FormData();
       formData.append('sender_type', 'student');
       formData.append('sender_id', senderId);
-      formData.append('recipient_type', recipient.type);
-      formData.append('recipient_id', recipient.id);
+      if (recipient.type === 'group') formData.append('group_id', recipient.id);
+      else {
+        formData.append('recipient_type', recipient.type);
+        formData.append('recipient_id', recipient.id);
+      }
       formData.append('body', body);
       formData.append('file', file);
       sent = await academicApiRequest('/messages/attachments', { method: 'POST', body: formData });
@@ -1899,8 +2161,10 @@ messageComposeForm.addEventListener('submit', async (event) => {
         body: JSON.stringify({
           sender_type: 'student',
           sender_id: senderId,
-          recipient_type: recipient.type,
-          recipient_id: recipient.id,
+          ...(recipient.type === 'group' ? { group_id: recipient.id } : {
+            recipient_type: recipient.type,
+            recipient_id: recipient.id,
+          }),
           body,
         }),
       });
@@ -1962,79 +2226,6 @@ function addAdvisorMessage(role, content, audioUrl = null) {
 }
 
 
-const suggestionAlert = document.querySelector('#suggestion-alert');
-const suggestionTitle = document.querySelector('#suggestion-alert-title');
-const suggestionText = document.querySelector('#suggestion-alert-text');
-const suggestionStartButton = document.querySelector('#suggestion-start-button');
-let currentSuggestion = null;
-let suggestionRequestId = 0;
-
-
-function hideSuggestionAlert() {
-  suggestionAlert.hidden = true;
-  suggestionAlert.classList.remove('leaving');
-}
-
-
-function dismissSuggestionAlert() {
-  if (suggestionAlert.hidden) return;
-  suggestionAlert.classList.add('leaving');
-  setTimeout(hideSuggestionAlert, 200);
-}
-
-
-function showSuggestionAlert(suggestion) {
-  currentSuggestion = suggestion;
-  suggestionTitle.textContent = suggestion.title;
-  suggestionText.textContent = suggestion.reason + ' You have studied ' +
-    suggestion.completed_lectures + ' of ' + suggestion.available_lectures +
-    ' available lectures.';
-  suggestionAlert.classList.remove('leaving');
-  suggestionAlert.hidden = false;
-  suggestionStartButton.focus({ preventScroll: true });
-}
-
-
-async function loadStudySuggestion(studentId) {
-  const requestId = ++suggestionRequestId;
-  try {
-    const result = await apiRequest(
-      '/progress/' + encodeURIComponent(studentId) + '/suggestion',
-    );
-    if (requestId !== suggestionRequestId || currentStudent?.student_id !== studentId) return;
-    if (result.suggestion) showSuggestionAlert(result.suggestion);
-  } catch (_error) {
-    // The suggestion is optional; login and the workspace still work without it.
-  }
-}
-
-
-function startSuggestedStudy() {
-  const suggestion = currentSuggestion;
-  hideSuggestionAlert();
-  if (!suggestion || !currentStudent) return;
-  if (currentStudent.courses.includes(suggestion.course_name)) {
-    selectCourse(suggestion.course_name);
-  }
-  showDashboardSection('advisor');
-  if (advisorSendButton.disabled) return;
-  addAdvisorMessage(
-    'assistant',
-    suggestion.title + '. ' + suggestion.reason + ' Let me walk you through it.',
-  );
-  sendAdvisorMessage(suggestion.chat_prompt);
-}
-
-
-suggestionStartButton.addEventListener('click', startSuggestedStudy);
-document.querySelector('#suggestion-later-button').addEventListener('click', dismissSuggestionAlert);
-document.querySelector('#suggestion-dismiss-button').addEventListener('click', dismissSuggestionAlert);
-suggestionAlert.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') dismissSuggestionAlert();
-});
-
-
-
 function resetAdvisor() {
   advisorHistory = [];
   advisorMessages.replaceChildren();
@@ -2090,8 +2281,6 @@ function renderStudent(student) {
   loadScores(student.student_id);
   startNotificationSync();
   startMessageSync();
-  hideSuggestionAlert();
-  loadStudySuggestion(student.student_id);
 
   if (student.courses.length > 0) {
     selectCourse(student.courses[0]);
@@ -2168,13 +2357,14 @@ createWorkspaceButton.addEventListener('click', () => {
       student_id: currentStudent.student_id,
       course,
       requirements,
+      selected_requirements: workstationProfile ? [...workstationSelection] : null,
       install: true,
     }),
   }).then((result) => {
     if (selectedCourse === course) renderWorkstationStatus(result);
     const installed = result.installed_requirements.length
       ? ` Installed ${result.installed_requirements.join(', ')}.`
-      : ' Everything required was already installed.';
+      : (result.selected_requirements.length ? ' Everything you selected was already installed.' : ' No packages were selected, so nothing was installed.');
     setMessage(actionStatus, `Smart workspace ready: ${result.path}.${installed}`);
   }).catch((error) => {
     setMessage(actionStatus, error.message, true);
@@ -2279,12 +2469,18 @@ calendarEventForm.addEventListener('submit', (event) => {
 });
 
 
-async function sendAdvisorMessage(message) {
-  if (!currentStudent || !message) return;
+advisorForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!currentStudent) return;
+
+  const message = advisorInput.value.trim();
+  if (!message) return;
 
   const priorHistory = advisorHistory.slice(-10);
   advisorHistory.push({ role: 'user', content: message });
   addAdvisorMessage('user', message);
+  advisorInput.value = '';
+  resizeAdvisorInput();
   setAdvisorBusy(true);
   advisorIntent.textContent = 'Thinking';
   setMessage(advisorStatus, 'Advisor AI is processing your request...');
@@ -2314,16 +2510,6 @@ async function sendAdvisorMessage(message) {
     setAdvisorBusy(false);
     advisorInput.focus();
   }
-}
-
-
-advisorForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const message = advisorInput.value.trim();
-  if (!message) return;
-  advisorInput.value = '';
-  resizeAdvisorInput();
-  await sendAdvisorMessage(message);
 });
 
 advisorInput.addEventListener('input', resizeAdvisorInput);
@@ -2497,9 +2683,6 @@ document.querySelector('#sign-out-button').addEventListener('click', async () =>
   campusMessages = [];
   selectedMessageContact = null;
   toastContainer.replaceChildren();
-  suggestionRequestId += 1;
-  currentSuggestion = null;
-  hideSuggestionAlert();
   notifPanel.hidden = true;
   notifButton.setAttribute('aria-expanded', 'false');
   currentStudent = null;

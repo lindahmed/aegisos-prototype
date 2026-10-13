@@ -1,14 +1,30 @@
+enum AdvisorActionType { addStudySession, openCourse, fixMyWeek }
+
+class AdvisorAction {
+  const AdvisorAction({required this.type, required this.label});
+
+  final AdvisorActionType type;
+  final String label;
+}
+
 class AdvisorMessage {
-  const AdvisorMessage({required this.role, required this.content});
+  const AdvisorMessage({
+    required this.role,
+    required this.content,
+    this.actions = const [],
+  });
 
   const AdvisorMessage.user(String content)
     : this(role: 'user', content: content);
 
-  const AdvisorMessage.assistant(String content)
-    : this(role: 'assistant', content: content);
+  const AdvisorMessage.assistant(
+    String content, {
+    List<AdvisorAction> actions = const [],
+  }) : this(role: 'assistant', content: content, actions: actions);
 
   final String role;
   final String content;
+  final List<AdvisorAction> actions;
 
   Map<String, String> toJson() => {'role': role, 'content': content};
 }

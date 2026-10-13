@@ -143,6 +143,11 @@ export interface PortalMessage {
   body: string
   created_at: string
   read: boolean
+  /** Only on messages you sent: sent -> delivered (their app fetched it) -> seen (they opened it). */
+  status?: 'sent' | 'delivered' | 'seen' | null
+  delivered_count?: number
+  seen_count?: number
+  recipient_count?: number
 }
 
 export function getMessageContacts(actorType: MessageParticipantType, actorId: string) {

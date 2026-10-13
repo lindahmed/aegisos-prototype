@@ -9,14 +9,35 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
-  testWidgets('keeps Results and displays STU001 coursework as 3/10', (
-    tester,
-  ) async {
+  testWidgets('keeps each academic feature in one clear place', (tester) async {
     final service = ApiService(
       baseUrl: 'https://api.example.test',
       client: MockClient((request) async {
         if (request.url.path.endsWith('/notifications')) {
           return http.Response(jsonEncode({'notifications': []}), 200);
+        }
+        if (request.url.path.endsWith('/weekly-plan')) {
+          return http.Response(
+            jsonEncode({
+              'student_id': 'STU001',
+              'semester': 'Fall 2026',
+              'current_week': 1,
+              'items': [
+                {
+                  'task_id': 'risk:13:lecture_backlog:1',
+                  'course_id': '13',
+                  'course_name': 'Digital Logic Design',
+                  'title': 'Catch up on lectures',
+                  'detail': 'Review the next incomplete lecture.',
+                  'task_type': 'risk',
+                  'status': 'pending',
+                  'position': 1,
+                  'completed_at': null,
+                },
+              ],
+            }),
+            200,
+          );
         }
         if (request.url.path.endsWith('/semester-plan')) {
           return http.Response(
@@ -65,12 +86,47 @@ void main() {
             200,
           );
         }
+        if (request.url.path == '/portal/students/STU001/courses') {
+          return http.Response(
+            jsonEncode({
+              'course_count': 1,
+              'schedule_published': true,
+              'courses': [
+                {
+                  'course_code': 'CIS2101',
+                  'course_name': 'Digital Logic Design',
+                  'status': 'current',
+                  'semester': 'Fall 2026',
+                  'schedule': [
+                    {
+                      'day_of_week': 'Monday',
+                      'start_minute': 600,
+                      'end_minute': 660,
+                      'location': 'Room 4',
+                    },
+                  ],
+                },
+              ],
+            }),
+            200,
+          );
+        }
         expect(request.url.path, '/progress/STU001');
         return http.Response(
           jsonEncode({
             'semester': 'Fall 2026',
             'current_week': 1,
             'overall_academic_health': 30,
+            'active_risks': [
+              {
+                'code': 'low_assessment',
+                'severity': 'medium',
+                'message': 'Assignment average is below the threshold.',
+              },
+            ],
+            'current_recommendation': 'Focus on Digital Logic Design and review the next incomplete lecture.',
+            'weekly_history': [],
+            'recent_interventions': [],
             'courses': [
               {
                 'course_id': '13',
@@ -121,15 +177,85 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.byKey(const Key('app-language-toggle')), findsOneWidget);
+    expect(find.text('Academic alerts'), findsNothing);
+    expect(find.text('Alerts'), findsNothing);
+    expect(find.text('Courses'), findsOneWidget);
+    expect(find.text('Current semester'), findsOneWidget);
+    expect(find.text('3'), findsOneWidget);
+    expect(find.text('Completed'), findsNothing);
+    await tester.tap(find.byKey(const Key('home-enrolled-courses')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('enrolled-courses-page')), findsOneWidget);
+    expect(find.text('Digital Logic Design'), findsOneWidget);
+    expect(find.text('Weekly timetable'), findsNothing);
+    expect(find.text('Monday'), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('open-messages')),
+      300,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Campus communication'), findsOneWidget);
+    expect(
+      find.byKey(const Key('open-messages'), skipOffstage: false),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('open-meetings'), skipOffstage: false),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Progress').last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('database-academic-update')), findsOneWidget);
+    expect(find.text('Academic health'), findsOneWidget);
+    expect(find.text('30%'), findsWidgets);
+    expect(
+      find.text(
+        'Focus on Digital Logic Design and review the next incomplete lecture.',
+      ),
+      findsOneWidget,
+    );
+    await tester.scrollUntilVisible(find.text('Digital Logic Design'), 300);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Digital Logic Design'));
+    await tester.pumpAndSettle();
+    expect(find.text('Digital Logic Design risks'), findsOneWidget);
+    expect(find.text('Fix This Risk'), findsOneWidget);
+    expect(find.text('Add Study Session'), findsOneWidget);
+    expect(
+      find.text('This course already has a priority in Week Planner.'),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(find.text('Add Study Session'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add Study Session'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add study session'), findsOneWidget);
+    expect(find.text('Date'), findsOneWidget);
+    expect(find.text('Start time'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
     await tester.tap(find.text('Academics').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Coursework'), findsOneWidget);
-    expect(find.text('3/10'), findsOneWidget);
-    expect(find.text('Results'), findsOneWidget);
-    expect(find.text('Smart Semester Planner'), findsOneWidget);
+    expect(find.text('Class Timetable'), findsOneWidget);
+    expect(find.text('Grades'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('open-calendar')),
+      300,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Calendar'), findsOneWidget);
+    expect(find.text('Coursework'), findsNothing);
 
     await tester.ensureVisible(find.byKey(const Key('open-semester-planner')));
+    await tester.pumpAndSettle();
+    expect(find.text('Academic Roadmap'), findsOneWidget);
     await tester.tap(find.byKey(const Key('open-semester-planner')));
     await tester.pumpAndSettle();
 
@@ -138,13 +264,16 @@ void main() {
     await tester.scrollUntilVisible(find.text('Schedule check'), 400);
     await tester.pumpAndSettle();
     expect(find.text('Timetable data unavailable'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('Best Graduation Path'), 400);
+    await tester.scrollUntilVisible(
+      find.text('Accelerated Graduation Path'),
+      400,
+    );
     await tester.pumpAndSettle();
-    expect(find.text('Best Graduation Path'), findsOneWidget);
+    expect(find.text('Accelerated Graduation Path'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Fix My Week opens the weekly plan instead of Advisor AI', (
+  testWidgets('Week Planner opens the weekly priorities screen', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1080, 2400));
@@ -246,8 +375,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('weekly-plan-page')), findsOneWidget);
-    expect(find.text('Fix My Week'), findsOneWidget);
-    expect(find.text('Advisor AI'), findsNothing);
+    expect(find.text('Week Planner'), findsOneWidget);
+    expect(find.text('Aegis AI Advisor'), findsNothing);
     expect(find.textContaining('Digital Logic Design'), findsOneWidget);
 
     await tester.tap(
@@ -260,6 +389,7 @@ void main() {
 
     await tester.pageBack();
     await tester.pumpAndSettle();
+    expect(find.text('1 / 1 priorities completed'), findsOneWidget);
     await tester.tap(find.byKey(const Key('fix-my-week')));
     await tester.pumpAndSettle();
 
@@ -274,9 +404,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Courses dashboard card opens courses and university schedule', (
-    tester,
-  ) async {
+  testWidgets('Academics opens the single Class Timetable', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1080, 2400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final service = ApiService(
@@ -284,6 +412,48 @@ void main() {
       client: MockClient((request) async {
         if (request.url.path.endsWith('/notifications')) {
           return http.Response(jsonEncode({'notifications': []}), 200);
+        }
+        if (request.url.path.endsWith('/schedule')) {
+          return http.Response(
+            jsonEncode({
+              'student_id': 'STU001',
+              'semester': 'Fall 2026',
+              'group': {
+                'id': 'group-2',
+                'label': 'Computer Science · Semester 5 · Group 2',
+                'major': 'Computer Science',
+                'level_label': 'Semester 5',
+                'number': 2,
+                'size': 25,
+                'capacity': 25,
+                'automatic': true,
+              },
+              'schedule': {
+                'schedule_id': 'group-2',
+                'name': 'Computer Science · Semester 5 · Group 2',
+                'semester': 'Fall 2026',
+                'times_source': 'database',
+                'slots': [
+                  {
+                    'course_id': 'CIS2101',
+                    'course_name': 'Database Systems',
+                    'day_of_week': 'Monday',
+                    'start_minute': 720,
+                    'end_minute': 810,
+                    'location': 'Room B21',
+                    'session_type': 'Lecture',
+                    'provisional': false,
+                  },
+                ],
+                'unscheduled_courses': [],
+              },
+              'classmates': [
+                {'name': 'Aya Salem'},
+              ],
+              'group_size': 25,
+            }),
+            200,
+          );
         }
         if (request.url.path.endsWith('/courses')) {
           return http.Response(
@@ -347,14 +517,88 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('open-courses')));
+    await tester.tap(find.text('Academics').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('open-courses-from-hub')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('courses-schedule-page')), findsOneWidget);
-    expect(find.text('My Courses & Schedule'), findsOneWidget);
+    expect(find.text('Class Timetable'), findsOneWidget);
     expect(find.textContaining('Database Systems'), findsWidgets);
-    expect(find.textContaining('10:00 AM'), findsWidgets);
-    expect(find.textContaining('Room A12'), findsOneWidget);
+    expect(find.textContaining('12:00 PM'), findsOneWidget);
+    expect(find.text('Lecture'), findsOneWidget);
+    expect(find.text('Room B21'), findsOneWidget);
+    expect(find.text('Group 2'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Start a conversation opens an empty Advisor chat', (
+    tester,
+  ) async {
+    var advisorRequests = 0;
+    final service = ApiService(
+      baseUrl: 'https://api.example.test',
+      client: MockClient((request) async {
+        if (request.url.path == '/advisor') {
+          advisorRequests += 1;
+          return http.Response(jsonEncode({'reply': 'Unexpected reply'}), 200);
+        }
+        if (request.url.path.endsWith('/notifications')) {
+          return http.Response(jsonEncode({'notifications': []}), 200);
+        }
+        if (request.url.path.endsWith('/schedule')) {
+          return http.Response(
+            jsonEncode({
+              'student_id': 'STU001',
+              'semester': 'Fall 2026',
+              'group': null,
+              'schedule': null,
+              'classmates': [],
+              'group_size': null,
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'semester': 'Fall 2026',
+            'current_week': 5,
+            'overall_academic_health': 80,
+            'courses': [],
+          }),
+          200,
+        );
+      }),
+    );
+    addTearDown(service.close);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StudentHomeScreen(
+          student: const Student(
+            studentId: 'STU001',
+            name: 'Mohamed Ahmed',
+            major: 'Computer Science',
+            year: 2,
+            gpa: 3.55,
+            courses: [],
+          ),
+          apiService: service,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('AI Advisor'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.byKey(const Key('open-advisor')), 300);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('open-advisor')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('advisor-input')), findsOneWidget);
+    expect(find.text('Help me plan my next semester'), findsOneWidget);
+    expect(find.byKey(const Key('advisor-loading')), findsNothing);
+    expect(advisorRequests, 0);
   });
 }

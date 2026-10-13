@@ -51,7 +51,6 @@ from backend.progress.narrative import generate_weekly_narrative
 from backend.progress.scheduler import run_analysis_cycle
 from backend.progress.scoring import leaderboard
 from backend.progress.service import build_student_twin
-from backend.progress.suggestions import build_study_suggestion
 from backend.planner.service import build_semester_plan
 from backend.progress_agent.graph import (
     StudentNotFoundError,
@@ -76,6 +75,8 @@ class WorkspaceRequest(BaseModel):
 
 class WorkstationSetupRequest(WorkspaceRequest):
     requirements: list[str] = Field(default_factory=list, max_length=50)
+    # The packages the student ticked. None = keep their last choice (or everything).
+    selected_requirements: list[str] | None = Field(default=None, max_length=50)
     install: bool = True
 
 
@@ -97,6 +98,8 @@ class WorkstationSetupResponse(BaseModel):
     python_version: str | None = None
     virtual_environment_found: bool
     requirements: list[str]
+    selected_requirements: list[str] = Field(default_factory=list)
+    satisfied_requirements: list[str] = Field(default_factory=list)
     missing_requirements: list[str]
     installed_requirements: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
@@ -144,6 +147,13 @@ class PortalMessageCreateRequest(BaseModel):
     recipient_id: str | None = Field(default=None, max_length=64)
     is_broadcast: bool = False
     body: str = Field(default="", max_length=4000)
+    group_id: str | None = Field(default=None, max_length=64)
+
+
+class PortalGroupCreateRequest(BaseModel):
+    creator_id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=80)
+    student_ids: list[str] = Field(min_length=1, max_length=100)
 
 
 class PortalMessageReadRequest(BaseModel):
@@ -946,7 +956,9 @@ def create_app(
                 str(result["sender_type"]), str(result["sender_id"])
             )
             result["sender_name"] = sender["name"]
-        if result.get("recipient_id") and result.get("recipient_type"):
+        if result.get("group_id"):
+            result["recipient_name"] = result.get("group_name") or "Group chat"
+        elif result.get("recipient_id") and result.get("recipient_type"):
             if not result.get("recipient_name"):
                 recipient = messaging_participant(
                     str(result["recipient_type"]), str(result["recipient_id"])
@@ -993,9 +1005,34 @@ def create_app(
             ] + students
         return {"actor": actor, "contacts": contacts}
 
+    @api.get("/messages/groups")
+    def get_message_groups(actor_type: Literal["student", "staff"], actor_id: str) -> dict[str, object]:
+        actor = messaging_participant(actor_type, actor_id)
+        return {"groups": repository.list_portal_groups(actor["id"])}
+
+    @api.post("/messages/groups", status_code=201)
+    def create_message_group(request: PortalGroupCreateRequest) -> dict[str, object]:
+        creator = messaging_participant("student", request.creator_id)
+        student_ids = list(dict.fromkeys([creator["id"], *(value.strip() for value in request.student_ids)]))
+        if len(student_ids) < 2:
+            raise HTTPException(status_code=400, detail="Choose at least one other student")
+        for student_id in student_ids:
+            messaging_participant("student", student_id)
+        name = request.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Enter a group name")
+        group = {"group_id": str(uuid4()), "name": name, "creator_id": creator["id"],
+                 "member_count": len(student_ids), "created_at": datetime.now(UTC).isoformat()}
+        repository.create_portal_group(group, student_ids)
+        return {"group": group}
+
     @api.get("/messages")
     def get_messages(actor_type: Literal["student", "staff"], actor_id: str) -> dict[str, object]:
         actor = messaging_participant(actor_type, actor_id)
+        try:  # fetching the inbox is what "delivered" means; never fail the request over it
+            repository.mark_portal_messages_delivered(actor_type, actor["id"])
+        except Exception:
+            pass
         messages = [
             enrich_message(message)
             for message in repository.list_portal_messages(actor_type, actor["id"])
@@ -1021,13 +1058,19 @@ def create_app(
             recipient_type = None
             recipient_id = None
         else:
-            if request.recipient_type is None or not request.recipient_id:
+            if not request.group_id and (request.recipient_type is None or not request.recipient_id):
                 raise HTTPException(status_code=400, detail="Choose a message recipient")
-            recipient = messaging_participant(request.recipient_type, request.recipient_id)
-            if request.sender_type == "staff" and recipient["type"] != "student":
-                raise HTTPException(status_code=400, detail="Staff messages must be sent to students")
-            recipient_type = recipient["type"]
-            recipient_id = recipient["id"]
+            if request.group_id:
+                group = next((item for item in repository.list_portal_groups(sender["id"])
+                              if item["group_id"] == request.group_id), None)
+                if request.sender_type != "student" or not group:
+                    raise HTTPException(status_code=403, detail="You are not a member of this group")
+                recipient_type, recipient_id = "student", request.group_id
+            else:
+                recipient = messaging_participant(request.recipient_type, request.recipient_id)
+                if request.sender_type == "staff" and recipient["type"] != "student":
+                    raise HTTPException(status_code=400, detail="Staff messages must be sent to students")
+                recipient_type, recipient_id = recipient["type"], recipient["id"]
         message = repository.create_portal_message(
             {
                 "message_id": str(uuid4()),
@@ -1035,6 +1078,7 @@ def create_app(
                 "sender_id": sender["id"],
                 "recipient_type": recipient_type,
                 "recipient_id": recipient_id,
+                "group_id": request.group_id,
                 "is_broadcast": request.is_broadcast,
                 "body": body,
                 "attachment": attachment,
@@ -1043,6 +1087,10 @@ def create_app(
             },
             attachment_content=attachment_content,
         )
+        message.update(
+            status="sent", delivered_count=0, seen_count=0,
+            recipient_count=0 if request.is_broadcast else 1,
+        )
         return {"message": enrich_message(message)}
 
     @api.post("/messages/attachments")
@@ -1050,12 +1098,16 @@ def create_app(
         file: UploadFile = File(...),
         sender_type: Literal["student", "staff"] = Form(...),
         sender_id: str = Form(..., min_length=1, max_length=64),
-        recipient_type: Literal["student", "staff"] = Form(...),
-        recipient_id: str = Form(..., min_length=1, max_length=64),
+        recipient_type: Literal["student", "staff"] | None = Form(None),
+        recipient_id: str | None = Form(None, max_length=64),
+        group_id: str | None = Form(None, max_length=64),
         body: str = Form("", max_length=4000),
     ) -> dict[str, object]:
         messaging_participant(sender_type, sender_id)
-        messaging_participant(recipient_type, recipient_id)
+        if not group_id:
+            if not recipient_type or not recipient_id:
+                raise HTTPException(status_code=400, detail="Choose a message recipient")
+            messaging_participant(recipient_type, recipient_id)
         filename = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
         if not filename or len(filename) > 255 or any(ord(char) < 32 for char in filename):
             raise HTTPException(status_code=400, detail="Choose a document with a valid filename")
@@ -1071,6 +1123,7 @@ def create_app(
             PortalMessageCreateRequest(
                 sender_type=sender_type, sender_id=sender_id,
                 recipient_type=recipient_type, recipient_id=recipient_id,
+                group_id=group_id,
                 body=body,
             ),
             attachment={"filename": filename, "size_bytes": len(content)},
@@ -1573,6 +1626,7 @@ def create_app(
                 student.student_id,
                 course,
                 request.requirements,
+                request.selected_requirements,
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -1597,6 +1651,7 @@ def create_app(
                 course,
                 request.requirements,
                 install=request.install,
+                selected_requirements=request.selected_requirements,
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -1768,27 +1823,6 @@ def create_app(
         if twin is None:
             raise HTTPException(status_code=404, detail="Student not found")
         return twin
-
-    @api.get("/progress/{student_id}/suggestion")
-    def get_study_suggestion(
-        student_id: str, skip: str = ""
-    ) -> dict[str, object]:
-        """Return the next available lecture the student should study.
-
-        skip accepts a comma-separated list of lecture IDs already dismissed
-        by the student, allowing the client to request the next suitable
-        lecture without changing stored academic progress.
-        """
-        twin = build_student_twin(repository, student_id)
-        if twin is None:
-            raise HTTPException(status_code=404, detail="Student not found")
-        skipped = {item.strip() for item in skip.split(",") if item.strip()}
-        return {
-            "student_id": student_id,
-            "semester": twin.semester,
-            "current_week": twin.current_week,
-            "suggestion": build_study_suggestion(twin, skipped),
-        }
 
     @api.post("/progress/analyze/{student_id}")
     def analyze_progress(student_id: str) -> dict[str, object]:

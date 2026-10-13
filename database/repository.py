@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .academic_calendar import FALL_2026_START_DATE, academic_week
+from .message_status import STATUS_COLUMNS_SQL, apply_message_status
 from .schedule_groups import (
     ACTIVITY_INDEX,
     ACTIVITY_TABLE_SQLITE,
@@ -234,18 +235,6 @@ class StudentRepository(ScheduleGroupStoreMixin):
                     FOREIGN KEY (student_id) REFERENCES students(student_id),
                     FOREIGN KEY (course_id) REFERENCES course_offerings(course_id)
                 );
-
-CREATE TABLE IF NOT EXISTS weekly_reports (
-    report_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id TEXT NOT NULL,
-    semester TEXT NOT NULL,
-    week_number INTEGER NOT NULL,
-    report_json TEXT NOT NULL,
-    summary TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    UNIQUE(student_id, semester, week_number),
-    FOREIGN KEY (student_id) REFERENCES students(student_id)
-);
                 CREATE TABLE IF NOT EXISTS progress_interventions (
                     intervention_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     student_id TEXT NOT NULL,
@@ -380,6 +369,26 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
                     FOREIGN KEY (message_id) REFERENCES portal_messages(message_id)
                         ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS portal_groups (
+                    group_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    creator_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS portal_group_members (
+                    group_id TEXT NOT NULL REFERENCES portal_groups(group_id) ON DELETE CASCADE,
+                    student_id TEXT NOT NULL,
+                    PRIMARY KEY (group_id, student_id)
+                );
+                CREATE TABLE IF NOT EXISTS portal_message_deliveries (
+                    message_id TEXT NOT NULL,
+                    reader_type TEXT NOT NULL CHECK(reader_type IN ('student', 'staff')),
+                    reader_id TEXT NOT NULL,
+                    delivered_at TEXT NOT NULL,
+                    PRIMARY KEY (message_id, reader_type, reader_id),
+                    FOREIGN KEY (message_id) REFERENCES portal_messages(message_id)
+                        ON DELETE CASCADE
+                );
                 CREATE INDEX IF NOT EXISTS idx_portal_messages_sender
                     ON portal_messages(sender_type, sender_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_portal_messages_recipient
@@ -420,6 +429,8 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
                 connection.execute("ALTER TABLE portal_messages ADD COLUMN attachment TEXT")
             if "attachment_content" not in message_columns:
                 connection.execute("ALTER TABLE portal_messages ADD COLUMN attachment_content BLOB")
+            if "group_id" not in message_columns:
+                connection.execute("ALTER TABLE portal_messages ADD COLUMN group_id TEXT")
             if "status" not in course_columns:
                 connection.execute(
                     "ALTER TABLE courses ADD COLUMN status TEXT NOT NULL DEFAULT 'Current'"
@@ -763,6 +774,21 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
             for row in rows
         ]
 
+    def create_portal_group(self, group: dict[str, Any], student_ids: list[str]) -> None:
+        with self._connect() as connection:
+            connection.execute("INSERT INTO portal_groups (group_id, name, creator_id, created_at) VALUES (?, ?, ?, ?)",
+                               (group["group_id"], group["name"], group["creator_id"], group["created_at"]))
+            connection.executemany("INSERT INTO portal_group_members (group_id, student_id) VALUES (?, ?)",
+                                   ((group["group_id"], student_id) for student_id in dict.fromkeys(student_ids)))
+
+    def list_portal_groups(self, student_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("""SELECT g.group_id, g.name, g.creator_id,
+                (SELECT COUNT(*) FROM portal_group_members m WHERE m.group_id=g.group_id) AS member_count
+                FROM portal_groups g JOIN portal_group_members mine ON mine.group_id=g.group_id
+                WHERE mine.student_id=? ORDER BY g.name""", (student_id,)).fetchall()
+        return [dict(row) for row in rows]
+
     def create_portal_message(
         self, message: dict[str, Any], *, attachment_content: bytes | None = None
     ) -> dict[str, Any]:
@@ -770,8 +796,8 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
             connection.execute(
                 """INSERT INTO portal_messages (
                        message_id, sender_type, sender_id, recipient_type,
-                       recipient_id, is_broadcast, body, created_at, attachment, attachment_content
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       recipient_id, is_broadcast, body, created_at, attachment, attachment_content, group_id
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     message["message_id"],
                     message["sender_type"],
@@ -783,6 +809,7 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
                     message["created_at"],
                     json.dumps(message["attachment"]) if message.get("attachment") else None,
                     attachment_content,
+                    message.get("group_id"),
                 ),
             )
         return dict(message)
@@ -795,17 +822,25 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
                 """SELECT m.message_id, m.sender_type, m.sender_id, m.recipient_type,
                           m.recipient_id, m.is_broadcast, m.body, m.created_at, m.attachment,
                           sender.name AS sender_name, recipient.name AS recipient_name,
-                          CASE WHEN r.message_id IS NULL THEN 0 ELSE 1 END AS was_read
+                          m.group_id, g.name AS group_name,
+                          (SELECT group_concat(s.name, ', ') FROM portal_message_reads rr
+                           JOIN students s ON s.student_id=rr.reader_id
+                           WHERE rr.message_id=m.message_id AND rr.reader_type='student'
+                             AND rr.reader_id<>m.sender_id) AS seen_by_names,
+                          CASE WHEN r.message_id IS NULL THEN 0 ELSE 1 END AS was_read,
+                          """ + STATUS_COLUMNS_SQL + """
                    FROM portal_messages AS m
                    LEFT JOIN students AS sender
                      ON m.sender_type = 'student' AND sender.student_id = m.sender_id
                    LEFT JOIN students AS recipient
                      ON m.recipient_type = 'student' AND recipient.student_id = m.recipient_id
+                   LEFT JOIN portal_groups g ON g.group_id=m.group_id
                    LEFT JOIN portal_message_reads AS r
                      ON r.message_id = m.message_id
                     AND r.reader_type = ? AND r.reader_id = ?
                    WHERE (m.sender_type = ? AND m.sender_id = ?)
                       OR (m.recipient_type = ? AND m.recipient_id = ?)
+                      OR (m.group_id IN (SELECT group_id FROM portal_group_members WHERE student_id=?))
                       OR (? = 'student' AND m.is_broadcast = 1)
                    ORDER BY m.created_at, m.message_id""",
                 (
@@ -814,6 +849,7 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
                     actor_type,
                     actor_id,
                     actor_type,
+                    actor_id,
                     actor_id,
                     actor_type,
                 ),
@@ -826,7 +862,27 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
                 message["sender_type"] == actor_type
                 and message["sender_id"] == actor_id
             ) or bool(message.pop("was_read"))
-        return messages
+        return apply_message_status(messages, actor_type, actor_id)
+
+    def mark_portal_messages_delivered(self, actor_type: str, actor_id: str) -> None:
+        """Record that this person's app/website has fetched every message addressed to them."""
+        delivered_at = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO portal_message_deliveries
+                       (message_id, reader_type, reader_id, delivered_at)
+                   SELECT m.message_id, ?, ?, ? FROM portal_messages AS m
+                   WHERE ((m.recipient_type = ? AND m.recipient_id = ?)
+                          OR (m.group_id IN (SELECT group_id FROM portal_group_members WHERE student_id=?))
+                          OR (? = 'student' AND m.is_broadcast = 1))
+                     AND NOT (m.sender_type = ? AND m.sender_id = ?)
+                     AND NOT EXISTS (
+                         SELECT 1 FROM portal_message_deliveries d
+                         WHERE d.message_id = m.message_id
+                           AND d.reader_type = ? AND d.reader_id = ?)""",
+                (actor_type, actor_id, delivered_at, actor_type, actor_id, actor_id, actor_type,
+                 actor_type, actor_id, actor_type, actor_id),
+            )
 
     def get_portal_message_attachment(self, message_id: str) -> bytes | None:
         with self._connect() as connection:
@@ -1434,25 +1490,6 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
             "rows": [dict(row) for row in rows],
         }
 
-    def get_student_week_attendance(
-        self, student_id: str, semester: str, week_number: int
-    ) -> list[dict[str, Any]]:
-        """Return recorded attendance for one student in a semester week."""
-        with self._connect() as connection:
-            rows = connection.execute(
-                """SELECT attendance.course_code AS course_id, attendance.status
-                   FROM attendance
-                   JOIN course_offerings offering
-                     ON offering.course_id = attendance.course_code
-                    AND offering.semester = attendance.semester_id
-                   WHERE attendance.student_id = ?
-                     AND offering.semester = ?
-                     AND attendance.week_number = ?
-                   ORDER BY attendance.course_code""",
-                (student_id, semester, week_number),
-            ).fetchall()
-        return [dict(row) for row in rows]
-
     def save_portal_course_attendance(
         self, course_id: str, session_date: date, rows: list[dict[str, Any]]
     ) -> dict[str, Any] | None:
@@ -1804,80 +1841,6 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
                      risk_level=excluded.risk_level, trend=excluded.trend, created_at=excluded.created_at""",
                 values,
             )
-
-    def save_weekly_report(
-        self,
-        student_id: str,
-        semester: str,
-        week_number: int,
-        report: dict[str, Any],
-        summary: str,
-    ) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                """INSERT INTO weekly_reports
-                   (student_id, semester, week_number, report_json, summary, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(student_id, semester, week_number) DO UPDATE SET
-                     report_json = excluded.report_json,
-                     summary = excluded.summary,
-                     created_at = excluded.created_at""",
-                (
-                    student_id,
-                    semester,
-                    week_number,
-                    json.dumps(report),
-                    summary,
-                    datetime.now(UTC).isoformat(),
-                ),
-            )
-
-
-    def list_weekly_reports(self, student_id: str) -> list[dict[str, Any]]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                """SELECT report_id, student_id, semester, week_number,
-                          report_json, summary, created_at
-                   FROM weekly_reports
-                   WHERE student_id = ?
-                   ORDER BY semester, week_number""",
-                (student_id,),
-            ).fetchall()
-
-        return [
-            {
-                **dict(row),
-                "report": json.loads(row["report_json"]),
-            }
-            for row in rows
-        ]
-
-
-    def get_weekly_report(
-        self,
-        student_id: str,
-        semester: str,
-        week_number: int,
-    ) -> dict[str, Any] | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                """SELECT report_id, student_id, semester, week_number,
-                          report_json, summary, created_at
-                   FROM weekly_reports
-                   WHERE student_id = ?
-                     AND semester = ?
-                     AND week_number = ?
-                   LIMIT 1""",
-                (student_id, semester, week_number),
-            ).fetchone()
-
-        if row is None:
-            return None
-
-        return {
-            **dict(row),
-            "report": json.loads(row["report_json"]),
-        }
 
     def has_active_intervention(self, student_id: str, course_id: str, fingerprint: str) -> bool:
         with self._connect() as connection:
