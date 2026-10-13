@@ -1,0 +1,23 @@
+node_modules/
+venv/
+.venv/
+.tools/
+__pycache__/
+.env
+.pytest_cache/
+*.py[cod]
+database/aegisos.db
+workspace/students/
+workspace/materials/
+*.log
+.tmp/
+.DS_Store
+Advisor_db.zip
+
+# Compiled mobile releases belong in GitHub Releases, not source control.
+*.apk
+
+.Rhistory
+test_flutter_app/
+
+student_passwords.csv

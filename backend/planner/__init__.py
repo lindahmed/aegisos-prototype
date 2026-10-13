@@ -1,0 +1,1 @@
+"""Smart semester planning services."""

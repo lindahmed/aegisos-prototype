@@ -1,0 +1,2 @@
+desktop/*.sh text eol=lf
+desktop/templates/*.desktop.in text eol=lf

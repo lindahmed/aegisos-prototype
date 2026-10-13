@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+FRONTEND_DIR="$PROJECT_ROOT/frontend"
+API_URL="http://127.0.0.1:8000"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/aegisos"
+BACKEND_LOG="$STATE_DIR/backend.log"
+TUNNEL_LOG="$STATE_DIR/meeting-tunnel.log"
+BACKEND_PID=""
+TUNNEL_PID=""
+
+if [[ -z "${DATABASE_URL:-}" ]] && ! grep -qE '^DATABASE_URL=[^[:space:]]+' "$PROJECT_ROOT/.env" 2>/dev/null; then
+    echo "UniTrack requires DATABASE_URL for the Supabase-backed backend." >&2
+    exit 1
+fi
+
+mkdir -p "$STATE_DIR"
+
+if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
+    # XFCE launchers do not load the interactive shell profile, so load nvm here.
+    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+    # shellcheck disable=SC1091
+    source "$NVM_DIR/nvm.sh"
+    nvm use --silent 22 >/dev/null
+fi
+
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    echo "UniTrack requires Node.js 22 and npm. Run vm/setup.sh first." >&2
+    exit 1
+fi
+
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+if [[ "$NODE_MAJOR" != "22" ]]; then
+    echo "UniTrack requires Node.js 22; found $(node --version). Run vm/setup.sh first." >&2
+    exit 1
+fi
+
+if [[ ! -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
+    echo "UniTrack Python environment is missing. Run vm/setup.sh first." >&2
+    exit 1
+fi
+
+# Load only desktop meeting settings from .env without evaluating it as shell
+# code. Values already supplied by the launching environment take precedence.
+MEETING_ENV_KEYS=(
+    AEGIS_MEETING_PORT AEGIS_MEETING_BIND AEGIS_MEETING_PUBLIC_URL
+    AEGIS_MEETING_QUICK_TUNNEL AEGIS_MEETING_ICE_SERVERS AEGIS_MEETING_RELAY_ONLY
+    AEGIS_MEETING_TURN_URLS AEGIS_MEETING_TURN_SECRET
+    AEGIS_MEETING_TURN_TTL_SECONDS
+)
+while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    if [[ ! -v "$key" ]]; then
+        printf -v "$key" '%s' "$value"
+        export "$key"
+    fi
+done < <("$PROJECT_ROOT/.venv/bin/python" - "$PROJECT_ROOT/.env" "${MEETING_ENV_KEYS[@]}" <<'PY'
+import sys
+from dotenv import dotenv_values
+
+values = dotenv_values(sys.argv[1])
+for key in sys.argv[2:]:
+    value = values.get(key)
+    if value is not None:
+        sys.stdout.buffer.write(key.encode() + b"\0" + value.encode() + b"\0")
+PY
+)
+
+if [[ ! -d "$FRONTEND_DIR/node_modules/electron" ]]; then
+    echo "Electron dependencies are missing. Run vm/setup.sh first." >&2
+    exit 1
+fi
+
+SANDBOX="$FRONTEND_DIR/node_modules/electron/dist/chrome-sandbox"
+if [[ ! -f "$SANDBOX" ]] || [[ "$(stat -c '%U:%G:%a' "$SANDBOX")" != "root:root:4755" ]]; then
+    echo "Electron's chrome-sandbox permissions are not configured." >&2
+    echo "Run these commands from $FRONTEND_DIR:" >&2
+    echo "  sudo chown root:root node_modules/electron/dist/chrome-sandbox" >&2
+    echo "  sudo chmod 4755 node_modules/electron/dist/chrome-sandbox" >&2
+    exit 1
+fi
+
+cleanup() {
+    if [[ -n "$TUNNEL_PID" ]] && kill -0 "$TUNNEL_PID" 2>/dev/null; then
+        kill "$TUNNEL_PID"
+        wait "$TUNNEL_PID" 2>/dev/null || true
+    fi
+    if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" 2>/dev/null; then
+        kill "$BACKEND_PID"
+        wait "$BACKEND_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+if [[ "${AEGIS_MEETING_QUICK_TUNNEL:-0}" == "1" ]]; then
+    CLOUDFLARED_BIN=""
+    if command -v cloudflared >/dev/null 2>&1; then
+        CLOUDFLARED_BIN="$(command -v cloudflared)"
+    elif [[ -x "$PROJECT_ROOT/.tools/cloudflared" ]]; then
+        CLOUDFLARED_BIN="$PROJECT_ROOT/.tools/cloudflared"
+    else
+        echo "Automatic public meetings require cloudflared." >&2
+        echo "Install it system-wide or place it at $PROJECT_ROOT/.tools/cloudflared." >&2
+        exit 1
+    fi
+
+    MEETING_PORT="${AEGIS_MEETING_PORT:-8765}"
+    if [[ ! "$MEETING_PORT" =~ ^[0-9]+$ ]] || (( MEETING_PORT < 1 || MEETING_PORT > 65535 )); then
+        echo "AEGIS_MEETING_PORT must be a number from 1 to 65535." >&2
+        exit 1
+    fi
+
+    : >"$TUNNEL_LOG"
+    "$CLOUDFLARED_BIN" tunnel --no-autoupdate --url "http://127.0.0.1:$MEETING_PORT" >"$TUNNEL_LOG" 2>&1 &
+    TUNNEL_PID=$!
+    TUNNEL_HTTP_URL=""
+    for _ in {1..60}; do
+        if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+            echo "Cloudflare Quick Tunnel failed to start. See $TUNNEL_LOG" >&2
+            tail -n 20 "$TUNNEL_LOG" >&2 || true
+            exit 1
+        fi
+        TUNNEL_HTTP_URL="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' "$TUNNEL_LOG" | head -n 1 || true)"
+        [[ -n "$TUNNEL_HTTP_URL" ]] && break
+        sleep 0.5
+    done
+    if [[ -z "$TUNNEL_HTTP_URL" ]]; then
+        echo "Cloudflare Quick Tunnel did not provide a public URL. See $TUNNEL_LOG" >&2
+        exit 1
+    fi
+
+    export AEGIS_MEETING_BIND=127.0.0.1
+    export AEGIS_MEETING_PUBLIC_URL="wss://${TUNNEL_HTTP_URL#https://}"
+    echo "Public meeting tunnel: $AEGIS_MEETING_PUBLIC_URL"
+fi
+
+if ! curl --silent --fail "$API_URL/health" >/dev/null 2>&1; then
+    (
+        cd "$PROJECT_ROOT"
+        exec .venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000
+    ) >>"$BACKEND_LOG" 2>&1 &
+    BACKEND_PID=$!
+
+    for _ in {1..30}; do
+        if curl --silent --fail "$API_URL/health" >/dev/null 2>&1; then
+            break
+        fi
+        if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+            echo "UniTrack backend failed to start. See $BACKEND_LOG" >&2
+            exit 1
+        fi
+        sleep 0.5
+    done
+fi
+
+if ! curl --silent --fail "$API_URL/health" >/dev/null 2>&1; then
+    echo "UniTrack backend did not become ready. See $BACKEND_LOG" >&2
+    exit 1
+fi
+
+echo "Starting UniTrack..."
+cd "$FRONTEND_DIR"
+AEGIS_API_URL="$API_URL" AEGIS_ACADEMIC_API_URL="$API_URL" npm start

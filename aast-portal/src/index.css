@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    background: #F1F5F9;
+  }
+  body {
+    @apply bg-surface-sunk text-text-primary font-body text-base;
+    background-image:
+      radial-gradient(circle at 8% 4%, rgba(67, 134, 190, 0.08), transparent 28rem),
+      linear-gradient(180deg, #F8FAFD 0, #F1F5F9 22rem);
+    background-attachment: fixed;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display text-text-primary;
+  }
+  ::selection {
+    @apply bg-teal-100 text-ink-900;
+  }
+  *:focus-visible {
+    outline: 2px solid #2C6DA7;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  html[dir='rtl'] body {
+    font-family: "Noto Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+  }
+}
+
+@layer components {
+  .language-toggle {
+    @apply inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border-strong bg-white px-3 text-sm font-semibold text-ink-800 shadow-card transition-all hover:-translate-y-0.5 hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700;
+  }
+  .language-toggle-compact {
+    @apply w-10 px-0;
+  }
+  .nav-icon-link {
+    @apply relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-transparent text-text-secondary transition-all duration-150;
+  }
+  .nav-icon-link:hover {
+    @apply -translate-y-0.5 border-border-strong bg-teal-50 text-teal-700 shadow-card;
+  }
+  .nav-icon-link-active {
+    @apply border-teal-600 bg-teal-600 text-white shadow-card;
+  }
+  .nav-icon-link-active:hover {
+    @apply border-teal-700 bg-teal-700 text-white;
+  }
+  .shadow-card,
+  .shadow-raised,
+  .shadow-pop {
+    border-top-color: #12375E !important;
+    border-top-width: 2px !important;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: #B9CBDD;
+    border-radius: 999px;
+  }
+  .transcript-edge {
+    background-image: radial-gradient(circle, #E7EEF5 3px, transparent 3px);
+    background-size: 14px 14px;
+    background-position: left center;
+  }
+  html[dir='rtl'] .rtl-flip {
+    transform: scaleX(-1);
+  }
+  html[dir='rtl'] .text-left {
+    text-align: right;
+  }
+}
